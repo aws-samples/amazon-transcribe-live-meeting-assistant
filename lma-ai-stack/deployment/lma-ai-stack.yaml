@@ -7125,6 +7125,19 @@ Resources:
       RequestMappingTemplateS3Location: ../source/appsync/meetingPreparation.request.vtl
       ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
 
+  # The meeting's participant list, on the narrower owner-or-Admin rule the
+  # meeting preparation resolver applies to it.
+  UpdateCallParticipantsAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt LambdaResolversStack.Outputs.MeetingPreparationLambdaDataSourceName
+      TypeName: Mutation
+      FieldName: updateCallParticipants
+      RequestMappingTemplateS3Location: ../source/appsync/meetingPreparation.request.vtl
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
   # A digest of the meeting so far, made by the live guidance analyzer.
   RequestMeetingDigestAppSyncResolver:
     Type: AWS::AppSync::Resolver
@@ -9397,9 +9410,10 @@ Resources:
                     "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
 
   # The check of a Virtual Participant's meeting preparation inputs (labels,
-  # audience, meetingContext, checklist), by the meeting preparation resolver
-  # Lambda, before createVirtualParticipant or updateScheduledVirtualParticipant
-  # stores them. A request without them does not invoke the Lambda.
+  # audience, meetingContext, checklist, summaryProfile, participants), by the
+  # meeting preparation resolver Lambda, before createVirtualParticipant or
+  # updateScheduledVirtualParticipant stores them. A request without them does
+  # not invoke the Lambda.
   ValidateMeetingPreparationAppSyncFunction:
     Type: AWS::AppSync::FunctionConfiguration
     DependsOn: AppSyncSchema
@@ -9564,8 +9578,9 @@ Resources:
         #end
 
         ## Optional meeting preparation (labels, audience, meetingContext,
-        ## checklist, summaryProfile), checked and normalized by the pipeline's
-        ## first function, which put them in the stash. Read by the VP container
+        ## checklist, summaryProfile) and participant list (participants),
+        ## checked and normalized by the pipeline's first function, which put
+        ## them in the stash. Read by the VP container
         ## when it starts, like the agenda; an empty one (or the default summary
         ## profile) is not stored.
         #set($preparation = $util.defaultIfNull($ctx.stash.preparation, {}))
@@ -11274,7 +11289,7 @@ Resources:
       Handler: index.handler
       Runtime: python3.12
       CodeUri: ../source/lambda_functions/user_management
-      Description: Admin-only user management resolver (list, create, change the role of and delete Cognito users)
+      Description: User management resolver (Admin user CRUD; Participant accounts for a meeting)
       MemorySize: 256
       Timeout: 30
       Role: !GetAtt UserManagementFunctionExecutionRole.Arn
@@ -11285,6 +11300,7 @@ Resources:
           PARTICIPANT_GROUP: "Participant"
           ALLOWED_SIGNUP_EMAIL_DOMAINS: !Ref AllowedSignUpEmailDomain
           EVENT_SOURCING_TABLE: !Ref EventSourcingTable
+          VIRTUAL_PARTICIPANT_TABLE: !Ref VirtualParticipantTable
           USER_SIGN_IN_TABLE: !Ref UserSignInTableName
       LoggingConfig:
         LogGroup: !Sub "/${AWS::StackName}/lambda/UserManagement"
@@ -11312,7 +11328,7 @@ Resources:
   UserManagementFunctionExecutionRole:
     Type: AWS::IAM::Role
     Properties:
-      Description: UserManagement Lambda execution role - admin-only Cognito operations
+      Description: UserManagement Lambda execution role - user management and participant accounts for a meeting
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -11341,16 +11357,37 @@ Resources:
                   - cognito-idp:AdminRemoveUserFromGroup
                   - cognito-idp:AdminListGroupsForUser
                 Resource: !Sub "arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}"
-              # A deleted user's meeting notification preferences: DeleteItem
-              # only, and only under the usr# partitions.
+              # A deleted user's meeting notification preferences, and the
+              # daily counts of the participant accounts a user has created
+              # and looked up for their meetings (written and read): only
+              # under the usr# partitions.
               - Effect: Allow
                 Action:
                   - "dynamodb:DeleteItem"
+                  - "dynamodb:UpdateItem"
+                  - "dynamodb:GetItem"
                 Resource: !GetAtt EventSourcingTable.Arn
                 Condition:
                   ForAllValues:StringLike:
                     "dynamodb:LeadingKeys":
                       - "usr#*"
+              # A meeting's owner and participant list, read to decide who may
+              # see its attendees' account status or create their accounts:
+              # GetItem only, and only meeting rows.
+              - Effect: Allow
+                Action:
+                  - "dynamodb:GetItem"
+                Resource: !GetAtt EventSourcingTable.Arn
+                Condition:
+                  ForAllValues:StringLike:
+                    "dynamodb:LeadingKeys":
+                      - "c#*"
+              # The same for a Virtual Participant that has not created its
+              # meeting yet.
+              - Effect: Allow
+                Action:
+                  - "dynamodb:GetItem"
+                Resource: !GetAtt VirtualParticipantTable.Arn
               # Each listed user's last sign-in time, and a deleted user's
               # entry, in the Cognito stack's sign-in table.
               - !If
@@ -11495,6 +11532,61 @@ Resources:
             "identity": $utils.toJson($context.identity),
             "info": {
               "fieldName": "deleteUser"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  # A meeting's participant list against the user pool, for the meeting's owner
+  # and Admins: each person's account status, and Participant accounts for the
+  # people on it who have none. The Lambda checks ownership and list membership.
+  GetMeetingParticipantAccountsResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Query
+      FieldName: getMeetingParticipantAccounts
+      DataSourceName: !GetAtt UserManagementDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "getMeetingParticipantAccounts"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  CreateParticipantAccountsResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: createParticipantAccounts
+      DataSourceName: !GetAtt UserManagementDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "createParticipantAccounts"
             }
           }
         }

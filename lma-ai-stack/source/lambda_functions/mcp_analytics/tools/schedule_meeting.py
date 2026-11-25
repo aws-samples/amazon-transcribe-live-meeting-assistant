@@ -145,7 +145,7 @@ def execute(
             updated instead).
         preparation: The meeting preparation inputs, already checked
             (vp_preparation.vp_inputs): labels, audience, meetingContext,
-            checklist and meetingSharedWith.
+            checklist, meetingSharedWith and participants.
 
     Returns:
         Dict with scheduled virtual participant details; ``action`` is

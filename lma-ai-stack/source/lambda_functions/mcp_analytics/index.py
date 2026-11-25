@@ -546,6 +546,29 @@ MCP_TOOLS = [
                     "items": {"type": "string"},
                     "description": "Optional email addresses of LMA users to share the meeting with once the Virtual Participant creates it (at most 50); the Virtual Participant itself is not shared",
                 },
+                "participants": {
+                    "type": "array",
+                    "items": {
+                        "anyOf": [
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "description": "The person's name, at most 200 characters (optional)",
+                                    },
+                                    "email": {
+                                        "type": "string",
+                                        "description": "The person's email address",
+                                    },
+                                },
+                                "required": ["email"],
+                            },
+                            {"type": "string", "description": "An email address on its own"},
+                        ]
+                    },
+                    "description": "Optional participant list: the people expected at the meeting, for example a calendar invite's attendees, each {name, email} or an email address on its own (at most 100; an address is listed once). Put on the meeting record when the Virtual Participant creates it; the meeting's owner can see whether each has an LMA account. Listing someone does not share the meeting with them",
+                },
                 "summaryProfile": {
                     "type": "string",
                     "description": "Optional summary profile the meeting is summarised with when it ends, for example discovery-session; list_summary_profiles lists them. Omitted, the default",
@@ -674,6 +697,29 @@ MCP_TOOLS = [
                     "items": {"type": "string"},
                     "description": "Optional email addresses of LMA users to share the meeting with once the Virtual Participant creates it (at most 50); the Virtual Participant itself is not shared",
                 },
+                "participants": {
+                    "type": "array",
+                    "items": {
+                        "anyOf": [
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "description": "The person's name, at most 200 characters (optional)",
+                                    },
+                                    "email": {
+                                        "type": "string",
+                                        "description": "The person's email address",
+                                    },
+                                },
+                                "required": ["email"],
+                            },
+                            {"type": "string", "description": "An email address on its own"},
+                        ]
+                    },
+                    "description": "Optional participant list: the people expected at the meeting, for example a calendar invite's attendees, each {name, email} or an email address on its own (at most 100; an address is listed once). Put on the meeting record when the Virtual Participant creates it; the meeting's owner can see whether each has an LMA account. Listing someone does not share the meeting with them",
+                },
                 "summaryProfile": {
                     "type": "string",
                     "description": "Optional summary profile the meeting is summarised with when it ends, for example discovery-session; list_summary_profiles lists them. Omitted, the default",
@@ -793,6 +839,7 @@ PREPARATION_ARGUMENTS = (
     "shareWith",
     "summaryProfile",
     "guidance",
+    "participants",
 )
 
 
@@ -819,6 +866,7 @@ def _vp_preparation(caller: CallerInfo, tool_name: str, a: Dict[str, Any]) -> Di
         a.get("shareWith"),
         a.get("summaryProfile"),
         guidance=a.get("guidance"),
+        participants=a.get("participants"),
     )
 
 
@@ -975,6 +1023,7 @@ TOOL_HANDLERS: Dict[str, Callable[[Any, Dict[str, Any]], Any]] = {
         share_with=a.get("shareWith"),
         summary_profile=a.get("summaryProfile"),
         guidance=a.get("guidance"),
+        participants=a.get("participants"),
     ),
     "end_meeting": lambda caller, a: meeting_actions.end_meeting(
         _meeting(caller), a.get("meetingId"), reason=a.get("reason")

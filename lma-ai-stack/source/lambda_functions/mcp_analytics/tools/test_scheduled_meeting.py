@@ -118,6 +118,42 @@ def test_empty_values_remove_each_input(vp_table, appsync):
     }
 
 
+def test_the_participant_list_is_replaced_and_returned(vp_table, appsync):
+    vp_table.put(vp_row())
+    appsync.answers["updateScheduledVirtualParticipant"] = {
+        "updateScheduledVirtualParticipant": {
+            "id": "vp1",
+            "status": "SCHEDULED",
+            "participants": [{"name": "Ana Lima", "email": "ana@example.com"}],
+        }
+    }
+    answer = update(participants=[{"name": " Ana  Lima ", "email": "ana@example.com"}])
+    assert appsync.calls[0][1]["input"] == {
+        "id": "vp1",
+        "participants": [{"name": "Ana Lima", "email": "ana@example.com"}],
+    }
+    assert answer["participants"] == [{"name": "Ana Lima", "email": "ana@example.com"}]
+    update(participants=[])
+    assert appsync.calls[1][1]["input"] == {"id": "vp1", "participants": []}
+
+
+def test_participants_take_objects_or_bare_addresses_and_are_checked():
+    fields = vp_preparation.vp_inputs(
+        participants=["bo@example.com", {"name": "Cy", "email": "cy@example.com"}, "BO@example.com"]
+    )
+    assert fields == {
+        "participants": [
+            {"name": "", "email": "bo@example.com"},
+            {"name": "Cy", "email": "cy@example.com"},
+        ]
+    }
+    assert vp_preparation.vp_inputs(participants=[]) == {}
+    with pytest.raises(ValueError, match="not an email address"):
+        vp_preparation.vp_inputs(participants=["not-an-address"])
+    with pytest.raises(ValueError, match="participants must be a list"):
+        vp_preparation.vp_inputs(participants="bo@example.com")
+
+
 def test_a_shared_user_or_another_user_may_not_change_it(vp_table, appsync):
     vp_table.put(vp_row())
     with pytest.raises(PermissionError, match="owner or an Admin"):
@@ -252,6 +288,7 @@ def created(monkeypatch):
 PREPARATION = {
     "labels": [{"Key": "project", "Value": "relaunch"}],
     "meetingSharedWith": ["bo@example.com"],
+    "participants": [{"name": "Ana", "email": "ana@example.com"}],
 }
 
 
@@ -267,6 +304,7 @@ def test_schedule_meeting_stores_the_preparation_on_the_new_vp(vp_table, created
     )
     assert created[0]["labels"] == PREPARATION["labels"]
     assert created[0]["meetingSharedWith"] == ["bo@example.com"]
+    assert created[0]["participants"] == [{"name": "Ana", "email": "ana@example.com"}]
     assert answer["meetingId"] is None and answer["platformMeetingId"] == "81234567890"
     assert answer["callId"] is None
 
@@ -281,6 +319,7 @@ def test_start_meeting_now_stores_the_preparation_on_the_new_vp(created):
     )
     assert created[0]["labels"] == PREPARATION["labels"]
     assert created[0]["meetingSharedWith"] == ["bo@example.com"]
+    assert created[0]["participants"] == [{"name": "Ana", "email": "ana@example.com"}]
     assert answer["virtualParticipantId"] == "vp-new"
     assert answer["meetingId"] is None and answer["platformMeetingId"] == "81234567890"
 

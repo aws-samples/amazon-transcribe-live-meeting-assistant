@@ -488,6 +488,57 @@ def test_an_unknown_field_is_refused(table):
         call("deleteCall", user(OWNER))
 
 
+# ── the participant list ────────────────────────────────────────────────────
+
+PEOPLE = [
+    {"name": " Ana  Lima ", "email": "ana@example.com"},
+    {"name": "", "email": "ANA@example.com"},
+    {"email": "bo@example.org"},
+]
+
+
+@pytest.mark.parametrize(
+    "identity",
+    [user(OWNER), user("admin@example.com", admin=True), BACKEND],
+    ids=["owner", "admin", "backend"],
+)
+def test_the_owner_an_admin_and_the_backend_may_set_the_participants(table, identity):
+    row = call("updateCallParticipants", identity, Participants=PEOPLE)
+    assert row["Participants"] == [
+        {"name": "Ana Lima", "email": "ana@example.com"},
+        {"name": "", "email": "bo@example.org"},
+    ]
+    assert row["ParticipantsUpdatedAt"].endswith("Z")
+
+
+def test_a_shared_user_may_not_change_the_participants(table):
+    with pytest.raises(index.ForbiddenError, match="owner or an Admin"):
+        call("updateCallParticipants", user(SHARED), Participants=PEOPLE)
+    with pytest.raises(index.ForbiddenError):
+        call("updateCallParticipants", user(OTHER), Participants=PEOPLE)
+    assert "Participants" not in table.row
+
+
+def test_a_meeting_re_owned_between_the_read_and_the_write_keeps_its_participants(table):
+    table.before_write = lambda: table.row.update(Owner=OTHER)
+    with pytest.raises(index.ForbiddenError):
+        call("updateCallParticipants", user(OWNER), Participants=PEOPLE)
+    assert "Participants" not in table.row
+
+
+def test_the_participants_are_cleared_to_an_empty_list_and_attributed(table):
+    call("updateCallParticipants", user(OWNER), Participants=PEOPLE)
+    row = call("updateCallParticipants", user(OWNER), Participants=[])
+    assert row["Participants"] == []
+    assert row["ParticipantsUpdatedBy"] == OWNER
+
+
+def test_an_invalid_participant_is_refused_and_nothing_is_written(table):
+    with pytest.raises(index.BadRequestError, match="not an email address"):
+        call("updateCallParticipants", user(OWNER), Participants=[{"email": "nobody"}])
+    assert "Participants" not in table.row
+
+
 # ── the Virtual Participant pipelines ───────────────────────────────────────
 
 
@@ -544,6 +595,23 @@ def test_the_vp_check_leaves_out_what_was_not_sent():
 def test_the_vp_check_refuses_an_invalid_input():
     with pytest.raises(index.BadRequestError, match="Kind must be one of"):
         validate(["checklist"], checklist=[{"ItemId": "a", "Text": "x", "Kind": "idea"}])
+
+
+def test_the_vp_check_takes_the_participant_list():
+    out = validate(["participants"], participants=PEOPLE)
+    assert out == {
+        "present": ["participants"],
+        "participants": [
+            {"name": "Ana Lima", "email": "ana@example.com"},
+            {"name": "", "email": "bo@example.org"},
+        ],
+    }
+    assert validate(["participants"], participants=[]) == {
+        "present": ["participants"],
+        "participants": None,
+    }
+    with pytest.raises(index.BadRequestError, match="Participant 1"):
+        validate(["participants"], participants=[{"name": "x", "email": "x"}])
 
 
 # ── the summary profile ─────────────────────────────────────────────────────

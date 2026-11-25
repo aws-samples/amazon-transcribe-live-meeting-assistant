@@ -151,6 +151,16 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	# Webex, Google Meet), written when it creates the meeting. Absent for
 	# other capture sources and for meetings created before it was recorded.
 	MeetingPlatform: String
+	# The people expected at the meeting, each a name and an email address
+	# (at most 100, an address listed once, compared ignoring case). Set when a
+	# Virtual Participant creates the meeting (from the list it was started or
+	# scheduled with) and through updateCallParticipants, which only the
+	# meeting's owner or an Admin may call; [] once cleared. Whether each
+	# person has an LMA account is answered by getMeetingParticipantAccounts.
+	# See docs/virtual-participant.md#participant-list.
+	Participants: [MeetingParticipant]
+	ParticipantsUpdatedBy: String
+	ParticipantsUpdatedAt: AWSDateTime
 	# The meeting's consent record: the mode and rule it runs in, its status,
 	# whether it may be recorded and transcribed now, and the notices, replies,
 	# attestation and evidence behind that. Absent on a meeting whose consent was
@@ -324,6 +334,10 @@ input CreateCallInput {
 	# The same, for the whiteboards' assistant.
 	WhiteboardsEnabled: Boolean
 	MeetingPlatform: String
+	# The participant list a Virtual Participant was started or scheduled with.
+	Participants: [MeetingParticipantInput]
+	ParticipantsUpdatedBy: String
+	ParticipantsUpdatedAt: AWSDateTime
 	# How the meeting is captured and transcribed; see these fields on Call.
 	CaptureSource: String
 	TranscriptionEngine: String
@@ -466,6 +480,10 @@ type Mutation @aws_iam {
 	# Turns live guidance on or off for the meeting, on the updateCallAgenda
 	# access rule. See docs/live-guidance.md.
 	updateCallGuidance(input: UpdateCallGuidanceInput!): Call @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	# Replaces the meeting's participant list. For the meeting's owner and
+	# Admins only (not the users it is shared with), and backend roles with IAM.
+	# Not published to onUpdateCall. See docs/virtual-participant.md#participant-list.
+	updateCallParticipants(input: UpdateCallParticipantsInput!): Call @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	# A short digest of the meeting so far, published to its notifications as a
 	# guidance item of type meeting_digest and returned. On the updateCallAgenda
 	# access rule; one model call, billed to the meeting.
@@ -617,6 +635,12 @@ type Mutation @aws_iam {
 	# the last Admin. Takes effect at the user's next sign-in or token refresh.
 	setUserRole(input: SetUserRoleInput!): User @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	deleteUser(input: DeleteUserInput!): DeleteUserOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	# Creates Participant accounts, and only Participant accounts, for people on
+	# a meeting's (or a Virtual Participant's) participant list who have no
+	# account. For the meeting's owner and Admins; each address must be on the
+	# list. Cognito sends each new account its invitation. See
+	# docs/user-management.md#participant-accounts-for-a-meeting.
+	createParticipantAccounts(input: CreateParticipantAccountsInput!): CreateParticipantAccountsOutput @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	setMyZoomCredentials(input: SetZoomCredentialsInput!): ZoomCredentialsStatus @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	deleteMyZoomCredentials: Boolean @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	deleteMyChromeProfile(platform: String): Boolean @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
@@ -743,6 +767,11 @@ type Query @aws_iam {
 	exportSkillLibrary: AWSJSON @aws_cognito_user_pools(cognito_groups: ["Admin"]) @aws_iam
 	listMCPApiKeys: [MCPApiKey] @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	listUsers: UserList @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	# Whether each person on a meeting's participant list (CallId), or on a
+	# Virtual Participant's before it has created its meeting
+	# (VirtualParticipantId), has an LMA account, and its role. For the
+	# meeting's owner and Admins; nothing else about the accounts is returned.
+	getMeetingParticipantAccounts(CallId: ID, VirtualParticipantId: ID): [MeetingParticipantAccount] @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	getMyZoomCredentialsStatus: ZoomCredentialsStatus @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	getMyChromeProfileStatus(platform: String): ChromeProfileStatus @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 }
@@ -827,6 +856,10 @@ type VirtualParticipant @aws_cognito_user_pools @aws_iam {
 	# Read by the VP container when it starts, which puts it on the meeting
 	# record it creates as the meeting's SharedWith.
 	meetingSharedWith: String
+	# The participant list given when the VP was started or scheduled, checked
+	# by the meeting preparation resolver. Read by the VP container when it
+	# starts, which puts it on the meeting record it creates as Participants.
+	participants: [MeetingParticipant]
 	# The meeting consent mode and opt-in rule chosen for this meeting when the
 	# VP was started or scheduled; absent means the deployment's (see
 	# docs/meeting-consent.md). Read by the VP container when it starts, like
@@ -948,6 +981,10 @@ input CreateVirtualParticipantInput {
 	# it (at most 50). Stored on the row as meetingSharedWith; the Virtual
 	# Participant itself is not shared.
 	meetingSharedWith: [String!]
+	# Optional: the people expected at the meeting, as Call.Participants holds
+	# them (at most 100). Stored on the row and put on the meeting when the VP
+	# creates it. Listing someone does not share the meeting with them.
+	participants: [MeetingParticipantInput!]
 	# Optional meeting consent choice for this meeting: "off", "notify" or
 	# "opt_in", and for opt_in "each_participant" or "owner_attests". Omitted,
 	# the deployment's. The deployment's rule on a per-meeting choice is
@@ -1026,6 +1063,8 @@ input UpdateScheduledVirtualParticipantInput {
 	# Replaces who the meeting is shared with when the VP creates it; sent
 	# empty, removes it.
 	meetingSharedWith: [String!]
+	# Replaces the participant list; sent empty, removes it.
+	participants: [MeetingParticipantInput!]
 	# Sent empty, removes the meeting consent choice, so the deployment's applies.
 	consentMode: String
 	consentRule: String
@@ -1071,6 +1110,8 @@ input JoinAgainVirtualParticipantInput {
 	consentMode: String
 	consentRule: String
 	useStoredZoomAccount: Boolean
+	# The participant list, as on CreateVirtualParticipantInput.
+	participants: [MeetingParticipantInput!]
 }
 
 input ReopenMeetingInput {
@@ -1888,6 +1929,27 @@ type ChecklistItemDefinition @aws_cognito_user_pools
 input CallLabelInput {
 	Key: String!
 	Value: String!
+}
+
+# One person on a meeting's participant list. The name may be empty.
+type MeetingParticipant @aws_cognito_user_pools
+@aws_iam {
+	name: String
+	email: String!
+}
+
+input MeetingParticipantInput {
+	name: String
+	email: String!
+}
+
+input UpdateCallParticipantsInput {
+	CallId: ID!
+	# The whole list; [] clears it.
+	Participants: [MeetingParticipantInput!]!
+	# For a backend role: who the change is recorded as made by. A signed-in
+	# user's change is always recorded as theirs.
+	UpdatedBy: String
 }
 
 input ChecklistEvidenceInput {
@@ -3233,6 +3295,43 @@ input SetUserRoleInput {
 type DeleteUserOutput @aws_cognito_user_pools {
 	username: String!
 	success: Boolean!
+}
+
+# A person on a meeting's participant list, as that list names them, and
+# whether they have an LMA account: "none", or the account's role ("Admin",
+# "User" or "Participant").
+type MeetingParticipantAccount @aws_cognito_user_pools {
+	name: String
+	email: String!
+	account: String!
+}
+
+# The meeting is named by CallId, or by VirtualParticipantId for a Virtual
+# Participant that has not created its meeting yet (exactly one of the two).
+# emails omitted: everyone on the list without an account.
+input CreateParticipantAccountsInput {
+	CallId: ID
+	VirtualParticipantId: ID
+	emails: [String!]
+}
+
+# What happened for one address: "created" (a Participant account, invited by
+# email), "exists" (an account was already there; nothing changed),
+# "domain_not_allowed" (outside AllowedSignUpEmailDomain), "limit_reached"
+# (the daily limit on accounts created this way; nothing was tried) or
+# "failed" (message says why).
+type ParticipantAccountResult @aws_cognito_user_pools {
+	email: String!
+	outcome: String!
+	message: String
+}
+
+type CreateParticipantAccountsOutput @aws_cognito_user_pools {
+	results: [ParticipantAccountResult]
+	created: Int
+	# How many more accounts the caller may create this way today (UTC); null
+	# for an Admin, who has no such limit.
+	remainingToday: Int
 }
 
 # ── Meeting whiteboards ─────────────────────────────────────────────────────

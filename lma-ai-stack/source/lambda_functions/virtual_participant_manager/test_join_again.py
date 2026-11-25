@@ -436,10 +436,26 @@ def test_a_new_meeting_carries_the_meeting_preparation_the_form_gives(world):
 def test_a_form_without_meeting_preparation_stores_none(world):
     w = world()
     join_again.join_again_virtual_participant(
-        w.manager, form(labels=[], audience="", meetingContext=""), OWNER
+        w.manager, form(labels=[], audience="", meetingContext="", participants=[]), OWNER
     )
     row = _new_row(w)
-    assert not {"labels", "audience", "meetingContext", "checklist"} & row.keys()
+    assert not {"labels", "audience", "meetingContext", "checklist", "participants"} & row.keys()
+
+
+def test_a_new_meeting_carries_the_participant_list_the_form_gives(world):
+    w = world()
+    people = [{"name": " Ana ", "email": "ana@example.com"}, {"email": "ANA@example.com"}]
+    join_again.join_again_virtual_participant(w.manager, form(participants=people), OWNER)
+    assert _new_row(w)["participants"] == [{"name": "Ana", "email": "ana@example.com"}]
+
+
+def test_an_invalid_participant_is_refused_before_anything_is_written(world):
+    w = world()
+    with pytest.raises(join_again.JoinAgainRefused, match="not an email address"):
+        join_again.join_again_virtual_participant(
+            w.manager, form(participants=[{"email": "nobody"}]), OWNER
+        )
+    assert not w.table.puts
 
 
 def test_a_new_meeting_carries_the_summary_profile_the_form_gives(world):

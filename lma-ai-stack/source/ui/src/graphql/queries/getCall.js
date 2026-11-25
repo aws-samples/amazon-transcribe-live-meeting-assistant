@@ -56,6 +56,12 @@ export default /* GraphQL */ `
         SegmentId
       }
       MeetingPlatform
+      Participants {
+        name
+        email
+      }
+      ParticipantsUpdatedBy
+      ParticipantsUpdatedAt
       WhiteboardsEnabled
       TranscriptDeletionScheduledFor
       TranscriptDeletedAt

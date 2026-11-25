@@ -171,3 +171,20 @@ describe('adoptMeetingCopy', () => {
     expect(adoptMeetingCopy(null, live)).toBe(live);
   });
 });
+
+describe('the participant list', () => {
+  it('is mapped from getCall and kept from the copy on screen when a newer copy lacks it', () => {
+    const [mapped] = mapCallsAttributes([
+      {
+        CallId: 'c1',
+        CreatedAt: '2026-11-25T10:00:00Z',
+        Participants: [{ name: 'Ana', email: 'ana@example.com' }],
+        ParticipantsUpdatedAt: '2026-11-25T10:00:00Z',
+      },
+    ]);
+    expect(mapped.participants).toEqual([{ name: 'Ana', email: 'ana@example.com' }]);
+    const adopted = adoptMeetingCopy(mapped, { ...mapped, participants: undefined, participantsUpdatedAt: null });
+    expect(adopted.participants).toEqual(mapped.participants);
+    expect(adoptMeetingCopy(mapped, { ...mapped, participants: [] }).participants).toEqual([]);
+  });
+});

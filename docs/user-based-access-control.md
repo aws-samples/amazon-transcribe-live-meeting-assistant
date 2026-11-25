@@ -57,6 +57,8 @@ below are tested against it, so the table and the deployed behaviour agree.
 | Enrolling your own voice | Yes | Yes | No |  |
 | Configuration: settings, profiles and their history, prompt templates, chat buttons, voice assistant, transcription engine and cost prices | Yes | No | No |  |
 | Installing and changing MCP servers and skills, and importing or exporting their libraries | Yes | No | No |  |
+| A meeting's participant list: changing it and reading whether each person on it has an LMA account | Yes | Yes | No | Admin: every meeting. User: their own meetings only, not those shared with them, and at most 1,000 different addresses looked up a day. The list itself is part of the meeting record, read with it; the account answer is none or the account's role, nothing else about it. |
+| Creating Participant accounts for the people on a meeting's participant list | Yes | Yes | No | Admin: any meeting. User: their own meetings only, at most 25 accounts a day. Only addresses on the meeting's list without an account, and only ever the Participant role; other roles and role changes stay with User Management. |
 | User Management: adding and deleting users and choosing their roles | Yes | No | No |  |
 | Troubleshooting agent | Yes | No | No |  |
 <!-- role-table:end -->
