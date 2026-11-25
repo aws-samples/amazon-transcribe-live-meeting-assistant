@@ -69,6 +69,7 @@ the full table.
 | Knowledge | Meeting Assistant › Web search | Off | Nothing from a meeting is sent to a web search provider, from the meeting page's chat either. |
 | | Meeting Assistant › MCP servers | Off | None of the MCP servers installed on the MCP Servers page is connected to or offered. LMA's own MCP server is not affected. |
 | | Meeting Assistant › Live guidance › On for new meetings | On | The people running a meeting are offered [live guidance](live-guidance.md) in its Notifications drawer, never in the meeting chat and never to its guests. Each run is a model call billed to the meeting; a meeting can still turn it off. |
+| Sharing | Meeting Sharing › Share meetings with their listed participants | On | A meeting is shared, read-only, with each person on its participant list; see [Guests and the participant list](#guests-and-the-participant-list). |
 | Summaries | Meeting Processing › Default summary profile for new meetings | `discovery-session` | New meetings are summarized with decisions, action items, open questions, risks and requirements heard; see [Summary profiles](transcript-summarization.md#summary-profiles). |
 | Other | Amazon Transcribe › Redact personal information; Amazon Bedrock Models › Model inference geography | Off; Global | The shipped defaults. Change them in a copy of the profile if your policy needs them. |
 
@@ -116,6 +117,26 @@ since an Admin's search reaches every meeting, as an Admin's meeting list does.
 To keep transcripts out of the knowledge base entirely, deploy with
 `TranscriptKnowledgeBase` set to `DISABLED`.
 
+### Guests and the participant list
+
+A guest needs no LMA account to take part in a meeting. A meeting can carry a
+[participant list](virtual-participant.md#participant-list) of the people
+expected at it, and with **Meeting Sharing › Share meetings with their listed
+participants** on, as in this preset, the meeting is shared with each address on
+the list. The meeting's owner can also create a
+[Participant](user-based-access-control.md#participant) account for each listed
+person who has none (see
+[Participant accounts for a meeting](user-management.md#participant-accounts-for-a-meeting)).
+A guest who signs in with such an account reads only the meetings shared with
+them, read-only: the transcript, summary, meeting chat, recordings and consent
+record of each, and the names (not the addresses) of the others on its list.
+They see none of the team's other meetings, nor the meeting context, checklist,
+labels or the assistant's answers, and under this preset's **Participant use:
+who may ask** **Off** the assistant panel on their page answers nothing. They can
+also consent in advance and withdraw it on **My consents** (see
+[Consent given in advance](meeting-consent.md#consent-given-in-advance)). To share
+nothing this way, turn Meeting Sharing off in a copy of the profile.
+
 ### Meeting events
 
 The stack's [meeting lifecycle events](meeting-events.md) carry identifiers and
@@ -130,18 +151,19 @@ is one to **decide with the customer**.
 
 | Setting | Value | Decide with the customer |
 |---|---|---|
-| Meeting Consent › Consent mode, rule | Opt-in, each participant consents | Whether their policy needs consent first, notice with the right to object (Notify), or neither. |
+| Meeting Consent › Consent mode; Meeting Consent › Consent rule (opt-in) | Opt-in; Each participant consents | Whether their policy needs consent first, notice with the right to object (Notify), or neither. |
 | Meeting Consent › Allow a different choice per meeting | On | Whether the owner of a meeting may choose another mode or rule for it, such as owner attestation for an internal meeting. |
 | Meeting Consent › Streaming clients without a consent step | Refuse the meeting | Whether the Stream Audio embed and older clients may capture without asking. |
 | Meeting Consent › Longest consent given in advance, in days; Keep sign-in device details with consents given in advance | 365; Off | How long a participant's consent given before a meeting may run, and whether the IP address and browser of the person giving it are kept with it. |
 | Meeting Recording › Record meeting audio | Off | Whether recordings are wanted. Whether video can be recorded at all is the `EnableVideoRecording` stack parameter. |
 | Meeting Recording › Record screen video from streaming clients | On | Whether users may record the screen, window or tab they share from the Stream Audio/Video page, the browser extension and the Desktop Capture App, where `EnableVideoRecording` is `true`. Each client's own switch is off until its user turns it on. |
 | Meeting Recording › Record Virtual Participant meeting video | On | Whether a Virtual Participant may record the meeting's video, where `EnableVideoRecording` is `true`. Each Virtual Participant's own Record meeting video toggle is on unless its user turns it off. |
-| Retention | Transcript kept for the retention period | The periods their policy requires: the retention stack parameters, and **Retention › Delete the transcript after the summary**. |
+| Retention | Transcript and any recording kept for the retention period | The periods their policy requires: the retention stack parameters, **Retention › Delete the transcript after the summary** and **Retention › Delete the recordings after the summary**. |
 | Knowledge base | Allowed | The document knowledge base holds the customer's own documents; it is chosen with the `MeetingAssistService` stack parameter and its data sources. |
 | Meeting Assistant › Web search | Off | Whether meeting content may be sent to a web search provider. |
 | Meeting Assistant › MCP servers | On | Which of their systems the assistant may reach; each server is installed by an Admin. |
 | Meeting Assistant › Participant use: who may ask | Anyone | Whether participants may ask the assistant in the meeting, answered from the current meeting only. |
+| Meeting Sharing › Share meetings with their listed participants | On | Whether the people on a meeting's participant list read it, read-only, once they sign in. |
 | Meeting Processing › Default summary profile for new meetings | `default` | The `discovery-session` profile is available for each meeting; make it the default if most meetings are discovery sessions. |
 
 Stream Audio/Video and the Desktop Capture App have no participant list, so they
@@ -170,9 +192,12 @@ stack is deployed or updated, or in the account. For a team-hosted deployment:
    [Retention controls](privacy-and-data-handling.md#retention-controls).
    `AudioRecordingExpirationInDays` covers any recording made anyway.
 3. **No self sign-up.** Leave `AllowedSignUpEmailDomain` empty, so the web UI
-   offers no sign-up and an Admin creates every user from
-   [User Management](user-management.md). Guests from other organizations never
-   need an LMA account.
+   offers no sign-up: an Admin creates users from
+   [User Management](user-management.md), and a meeting's owner can create
+   Participant accounts only for the people on that meeting's participant list
+   (see [Guests and the participant list](#guests-and-the-participant-list)).
+   Guests from other organizations need an LMA account only to read a meeting
+   shared with them or to consent in advance.
 4. **Multi-factor authentication.** The stack does not configure MFA on its
    Amazon Cognito user pool. We recommend turning it on for the user pool in the
    Amazon Cognito console. Whether a later stack update keeps a setting made in
@@ -276,6 +301,9 @@ account:
    record, notifications and archives are removed with it. A meeting still in
    progress is skipped. See
    [`lma meetings delete`](lma-cli.md#lma-meetings-delete--delete-meetings-by-label).
+   Then delete that organization's Participant accounts on the
+   [User Management](user-management.md) page; deleting an account also
+   withdraws the consents it gave in advance.
 3. Deleting does not reach the copies listed in
    [Copies that follow their own lifetime](privacy-and-data-handling.md#copies-that-follow-their-own-lifetime):
    in particular, the DynamoDB tables' point-in-time recovery can restore a

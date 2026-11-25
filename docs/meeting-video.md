@@ -397,8 +397,8 @@ Bedrock:
 
 | Source | Key frames |
 |---|---|
-| **Virtual Participant** | Yes, when the Virtual Participant records the meeting's video: the deployment records video (`EnableVideoRecording`), **Meeting Recording › Record Virtual Participant meeting video** is on (on by default; off in the Team-hosted, Regulated and Regulated notify presets), and **Record meeting video** is on for the Virtual Participant (the toggle in the Create Virtual Participant modal, which is disabled while the setting is off). See [Meeting Video Recording](virtual-participant.md#meeting-video-recording). The VP samples its own meeting display, the same picture its screen recording captures. |
-| **Desktop Capture App** | Yes, when **Also record screen video** is on in the app, the deployment records video (`EnableVideoRecording`) and **Meeting Recording › Record screen video from streaming clients** is on (on by default; off in the Team-hosted, Regulated and Regulated notify presets). The WebSocket transcriber samples the video the app streams, as it arrives; see [Desktop video](#desktop-video). |
+| **Virtual Participant** | Yes, when the Virtual Participant records the meeting's video: the deployment records video (`EnableVideoRecording`), **Meeting Recording › Record Virtual Participant meeting video** is on (on by default; off in the Team-hosted, Regulated, Regulated notify and Minimised content presets), and **Record meeting video** is on for the Virtual Participant (the toggle in the Create Virtual Participant modal, which is disabled while the setting is off). See [Meeting Video Recording](virtual-participant.md#meeting-video-recording). The VP samples its own meeting display, the same picture its screen recording captures. |
+| **Desktop Capture App** | Yes, when **Also record screen video** is on in the app, the deployment records video (`EnableVideoRecording`) and **Meeting Recording › Record screen video from streaming clients** is on (on by default; off in the Team-hosted, Regulated, Regulated notify and Minimised content presets). The WebSocket transcriber samples the video the app streams, as it arrives; see [Desktop video](#desktop-video). |
 | **Stream Audio/Video** | Yes, when **Also record screen video** is on for the meeting (back to off once a meeting has streamed, and kept after a cancelled share picker or a failed start), which the page offers only when the deployment records video (`EnableVideoRecording`) and **Meeting Recording › Record screen video from streaming clients** is on. The page records the shared tab, window or screen and sends it the way the desktop app sends its video ([Screen video](websocket-streaming-api.md#616-screen-video)); it is sampled the same way, and its key frames' `Source` is `STREAM_AUDIO`. See [Screen Video](stream-audio.md#screen-video). |
 | **Browser Extension** | Yes, when **Also record screen video** is on for the meeting (off at the start of every meeting), which the extension offers under the same two settings (one setting controls screen video from every streaming client). It records only the meeting tab, which it checks with a capture handle, and sends it the same way; its key frames' `Source` is `BROWSER_EXTENSION`. See [Screen video](browser-extension.md#screen-video). |
 | **Upload Audio** | No. An upload carries no video. |
@@ -681,8 +681,11 @@ finds the images. The item has:
   the parameter's number of days.
 - **Access.** Key frames are meeting data with the transcript's access rule:
   `getVideoKeyframes` and `onAddVideoKeyframe` return them to the meeting's
-  owner, to the people it is shared with, and to administrators. Sharing or
-  unsharing a meeting shares or unshares its key frames with it. The images
+  owner, to the Users and Admins it is shared with, and to administrators. A
+  [Participant](user-based-access-control.md#participant) it is shared with is
+  not given them; the meeting assistant panel on their page can describe a key
+  frame in words. Sharing or unsharing a meeting shares or unshares its key
+  frames with it. The images
   are private objects in the recordings bucket, which the web UI's identity
   cannot read: `getVideoKeyframes` checks the caller's access to the meeting
   and then signs an hour-long link to each image, and only for an image stored

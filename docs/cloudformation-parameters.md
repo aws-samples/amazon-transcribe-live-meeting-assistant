@@ -674,7 +674,7 @@ Console label: *Configuration Preset*
 - **Allowed values:** `standard`, `internal-meetings-notify`, `regulated-consent-required`, `regulated-notify`, `team-hosted-external`, `customer-account`, `minimised-content`, `none`
 - **Kind:** Resource. Decides what the configuration seeder writes as the deployment's default configuration, which is re-written when it changes.
 
-The configuration preset the deployment's default configuration is built from, which sets consent, retention and privacy together: standard (the shipped defaults), internal-meetings-notify (participants are notified and may object; audio and the meeting chat are captured), regulated-consent-required (participants must consent first, the transcript is deleted 15 minutes after the summary, no audio is recorded, personal information is redacted, and Amazon Bedrock runs within this Region's geography; LogLevel and the retention-day parameters are set here, not by the preset), regulated-notify (as regulated-consent-required, except that participants are notified, capture runs from the start and stops when one objects), team-hosted-external (for a deployment in a team's own account that records meetings with external organizations: each participant must consent first, no audio is recorded, requests made in the meeting are off, and web search and the installed MCP servers are not used), customer-account (a starting point for a deployment in the account of the organization whose meetings it records; see docs/hosting-models.md) or minimised-content (the summary is kept, the transcript is not: consent as in regulated-consent-required, the transcript and any recording are deleted as soon as the summary is written, no audio or video is recorded, and the summary and the meeting assistant are told to leave out health information and other sensitive personal information; EnableVideoRecording false is the deployment-wide limit on video; see docs/privacy-and-data-handling.md). Each preset is also offered on the Configuration page as a read-only Managed profile. none is accepted as standard, for stacks deployed with it. CustomConfigPath is applied over this when provided.
+The configuration preset the deployment's default configuration is built from, which sets consent, retention and privacy together: standard (the shipped defaults), internal-meetings-notify (participants are notified and may object; audio and the meeting chat are captured), regulated-consent-required (participants must consent first, the transcript is deleted 15 minutes after the summary and any recording at once, no audio or video is recorded, personal information is redacted, and Amazon Bedrock runs within this Region's geography; LogLevel and the retention-day parameters are set here, not by the preset), regulated-notify (as regulated-consent-required, except that participants are notified, capture runs from the start and stops when one objects), team-hosted-external (for a deployment in a team's own account that records meetings with external organizations: each participant must consent first, no audio or video is recorded, requests made in the meeting are off, and web search and the installed MCP servers are not used), customer-account (a starting point for a deployment in the account of the organization whose meetings it records; see docs/hosting-models.md) or minimised-content (the summary is kept, the transcript is not: consent as in regulated-consent-required, the transcript and any recording are deleted as soon as the summary is written, no audio or video is recorded, and the summary and the meeting assistant are told to leave out health information and other sensitive personal information; EnableVideoRecording false is the deployment-wide limit on video; see docs/privacy-and-data-handling.md). Each preset is also offered on the Configuration page as a read-only Managed profile. none is accepted as standard, for stacks deployed with it. CustomConfigPath is applied over this when provided.
 
 ### `CustomConfigPath`
 
@@ -707,7 +707,7 @@ Console label: *Record Meeting Video*
 - **Allowed values:** `true`, `false`
 - **Kind:** Resource. Sizes the transcriber's task for video, and limits the transcriber to one task through a template rule.
 
-Enables meeting video (screen recording) in addition to audio, for BOTH video sources: the Virtual Participant and the Desktop Capture App. For the Virtual Participant it is a hard on/off too: with "false" no Virtual Participant records video; with "true" the Configuration page's Meeting Recording &gt; Record Virtual Participant meeting video setting and the per-meeting "Record meeting video" toggle in the LMA UI decide; for the Desktop Capture App it is a hard on/off (users opt in per machine in the app's Settings, and the server discards video when this is false). Video recordings consume additional CPU, ephemeral storage, and S3 storage. Leaving this at "true" also pins the WebSocket transcriber service to a single task and forbids transcriber auto scaling, because Desktop Capture App video arrives on a separate connection that must reach the task holding that meeting's audio session; TranscriberDesiredTaskCount above 1 and TranscriberAutoScalingEnabled are rejected while this is "true". Only the Desktop Capture App imposes that constraint — Virtual Participant video does not — so scaling the transcriber means giving up desktop video recording, not video recording in principle.
+Enables meeting video (screen recording) in addition to audio, from every client that records it: the Virtual Participant, the Desktop Capture App, the Stream Audio/Video page and the browser extension. It is the deployment-wide limit: with "false" no client records video and no key frames are kept, whatever the settings or a launch say; with "true" the Configuration page decides, with Meeting Recording &gt; Record Virtual Participant meeting video (and each Virtual Participant's "Record meeting video" toggle) for the Virtual Participant, and Meeting Recording &gt; Record screen video from streaming clients (and each client's own switch) for the other three. Video recordings consume additional CPU, ephemeral storage, and S3 storage. Leaving this at "true" also pins the WebSocket transcriber service to a single task and forbids transcriber auto scaling, because a streaming client's video arrives on a separate connection that must reach the task holding that meeting's audio session; TranscriberDesiredTaskCount above 1 and TranscriberAutoScalingEnabled are rejected while this is "true". Virtual Participant video does not impose that constraint, so scaling the transcriber means giving up screen video from the streaming clients, not video recording in principle.
 
 ### `MeetingRecordExpirationInDays`
 
@@ -747,7 +747,7 @@ Console label: *Audio Recording Expiration In Days*
 - **Allowed values:** Any number
 - **Kind:** Resource. Sets the lifecycle rules for audio and video recordings on the recordings bucket.
 
-Whole number of days after which audio recordings will be deleted from the Recordings bucket.
+Whole number of days after which audio and video recordings will be deleted from the Recordings bucket, unless the Configuration page's Retention &gt; Delete the recordings after the summary deletes them sooner.
 
 ### `CloudWatchLogsExpirationInDays`
 
@@ -985,15 +985,16 @@ Participant.
 
 Running more than one task requires `EnableVideoRecording` to be `false`, and the
 stack rejects the combination at deploy time rather than failing per meeting.
-With video recording enabled, the desktop capture app sends meeting video over a
-second WebSocket connection, and only the task already hosting that meeting's
-audio session can attach it. The load balancer in front of the service does not
+With video recording enabled, the Desktop Capture App, the Stream Audio/Video
+page and the browser extension send screen video over a second WebSocket
+connection, and only the task already hosting that meeting's audio session can
+attach it. The load balancer in front of the service does not
 pin a client to a task, and cookie-based stickiness is not available because the
 CloudFront distribution in front of it forwards no cookies, so with several tasks
 the video connection is refused whenever it lands on a different task from the
 audio. `EnableVideoRecording` also governs Virtual Participant video, which has no
-such constraint, so scaling the transcriber means giving up *desktop app* video
-recording specifically. Audio is unaffected either way: a meeting's audio uses one
+such constraint, so scaling the transcriber means giving up screen video from
+the streaming clients specifically. Audio is unaffected either way: a meeting's audio uses one
 connection for its whole lifetime.
 
 Auto scaling adds capacity but never removes it. Taking a task away would end the

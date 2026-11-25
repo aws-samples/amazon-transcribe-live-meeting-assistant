@@ -225,7 +225,7 @@ Cognito sends each new account the same invitation email as **Create user**, wit
 A Participant account created this way reads the meetings shared with it. With
 **Meeting Sharing › Share meetings with their listed participants** on (the
 default), a meeting is shared with the people on its participant list as soon
-as it starts and whenever the list changes, so a listed person who signs in
+as the meeting record exists and whenever the list changes, so a listed person who signs in
 finds it under **Shared meetings**; see
 [Sharing with the participant list](user-based-access-control.md#sharing-with-the-participant-list).
 

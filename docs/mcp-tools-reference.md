@@ -122,9 +122,12 @@ at the meeting, such as a calendar invite's attendees, each `{"name", "email"}`
 or an email address on its own; at most 100, an address listed once). The
 Virtual Participant stores them and puts them on the meeting when it creates
 it; the meeting is then shared with the `shareWith` addresses. The
-`participants` are listed on the meeting, not shared with: the meeting's owner
-sees on the meeting page whether each has an LMA account, and can create
-Participant accounts for those who have none. The Virtual Participant itself is
+`participants` are listed on the meeting and, with **Meeting Sharing › Share
+meetings with their listed participants** on (the default), the meeting is shared
+with them too, read-only
+([Sharing with the participant list](user-based-access-control.md#sharing-with-the-participant-list));
+the meeting's owner sees on the meeting page whether each has an LMA account,
+and can create Participant accounts for those who have none. The Virtual Participant itself is
 not shared. Calling it again for a meeting
 already scheduled updates that Virtual Participant
 ([Scheduling a Meeting Again](mcp-api-key-auth.md#scheduling-a-meeting-again)).

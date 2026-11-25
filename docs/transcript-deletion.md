@@ -76,16 +76,16 @@ The configuration presets set both:
 | **Team-hosted (external meetings)**, **Customer account** | Off | Off |
 | **Minimised content – summary only** | Immediately | Immediately |
 
-The two Regulated presets also turn **Record meeting audio**, **Record screen
-video from streaming clients** and **Record Virtual Participant meeting video**
-off, so under them most meetings have no recording at all. A recording can
-still be stored: an uploaded meeting keeps the file that was uploaded as its
-recording, and an Admin may turn a recording setting back on while keeping
-the preset's retention. Those presets
-delete any such recording as soon as the summary is stored, rather than after
-the transcript's 15 minutes, because the presets are meant to keep no
-recording, and nothing that comes after the summary needs one. The transcript
-keeps its 15 minutes, in which it can be read or downloaded.
+The two Regulated presets and the Minimised content preset also turn **Record
+meeting audio**, **Record screen video from streaming clients** and **Record
+Virtual Participant meeting video** off, so under them most meetings have no
+recording at all. A recording can still be stored: an uploaded meeting keeps
+the file that was uploaded as its recording, and an Admin may turn a recording
+setting back on while keeping the preset's retention. All three presets delete
+any such recording as soon as the summary is stored, because they are meant to
+keep no recording, and nothing that comes after the summary needs one. Under
+the two Regulated presets the transcript keeps its 15 minutes, in which it can
+be read or downloaded; under Minimised content it is deleted at once too.
 
 See [Configuration presets](configuration-guide.md#configuration-presets),
 which also lists the retention stack parameters a preset cannot set, and

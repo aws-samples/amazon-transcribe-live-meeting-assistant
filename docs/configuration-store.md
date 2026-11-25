@@ -245,6 +245,8 @@ Today's sections and their tiers:
 | `meeting_processing` | `standard` | Read by the call event processor for each segment it hands to a transcript Lambda hook, and by the inactive-meeting reaper as each run starts |
 | `virtual_participant` | `immediate` | Read once by each Virtual Participant as it starts, with the `transcription` and `recording` sections, as for the Nova Sonic settings it reads at the same moment; the page says a change applies to the next one to start |
 | `language_models` | `standard` | Read once per summary, answer, agenda pass, naming pass, knowledge-base query or key frame; nobody is waiting on a model change, and the summariser's **Regenerate** drops the cache before reading, as for the prompts |
+| `retention` | `standard` | Read by every writer of meeting records and transcript segments, many times a meeting, and by the transcript and recording deletion each time a meeting ends or is summarized; nobody is waiting on a change, and the page says a saved period applies within about five minutes |
+| `meeting_agenda` | `standard` | Read by the call event processor, per batch of segments, for a meeting with no agenda |
 | `meeting_consent` | `immediate` | Read by the meeting consent resolver when a meeting's consent starts and whenever a meeting's consent is read, and by the WebSocket transcriber when a streamed meeting starts and when a client asks for the consent step's settings. Consent-bearing: an administrator who turns opt-in on is promised that the next meeting asks first. If it cannot be read, starting a meeting's consent, and reading a meeting with no consent record, fail rather than fall back to off; a restart, and a read of a meeting with a record, do not need it. See [Meeting Consent](meeting-consent.md#the-meeting-consent-settings) |
 | `meeting_sharing` | `immediate` | Read by the meeting controls function, once per batch of the meetings table's stream, when a meeting record's participant list and its shares disagree. Privacy-bearing: an administrator who turns it off is promised that no meeting is shared this way after the save. See [Sharing with the participant list](user-based-access-control.md#sharing-with-the-participant-list) |
 
@@ -604,27 +606,28 @@ revision that can be compared and restored like any other.
   `Order`, which places it in the list the editor shows. The presets are the
   `ConfigurationPreset` stack parameter's choices and are written as Managed
   profiles. The layer's tests hold every preset to that shape, its values to the
-  section schemas and to the values the
-  [Configuration Guide](configuration-guide.md#configuration-presets) lists, and
-  Standard to the shipped defaults.
+  section schemas, and Standard to the shipped defaults; the AI stack's tests
+  hold the values the
+  [Configuration Guide](configuration-guide.md#configuration-presets) lists to
+  the presets.
 
 | Preset | What it changes |
 |---|---|
 | Standard | The consent, retention, privacy, meeting assistant and summary settings the presets set, at their shipped defaults |
 | Internal meetings – notify participants | Meeting Consent mode Notify; audio recorded and the meeting chat captured; the rest at their defaults |
-| Regulated – consent required, transcript not retained | Meeting Consent mode Opt-in, stricter-only per meeting, clients without a consent step refused, the Virtual Participant leaving after an objection; the transcript deleted 15 minutes after the summary; no audio recording or chat capture; redaction on; Amazon Bedrock within the deployment's geography |
+| Regulated – consent required, transcript not retained | Meeting Consent mode Opt-in, stricter-only per meeting, clients without a consent step refused, the Virtual Participant leaving after an objection, consent given in advance for at most 180 days; the transcript deleted 15 minutes after the summary and any recording immediately; no audio or video recording and no chat capture; redaction on; Amazon Bedrock within the deployment's geography |
 | Regulated – notify with opt-out, transcript not retained | As Regulated, except Meeting Consent mode Notify: capture from the start, stopped by an objection |
-| Team-hosted (external meetings) | Meeting Consent as Regulated (Opt-in, each participant, stricter-only, clients without a consent step refused, leave after an objection); no audio recording; the transcript and chat kept; requests made in the meeting off; web search and the installed MCP servers off; new meetings summarized with `discovery-session`. See [Hosting Models](hosting-models.md) |
+| Team-hosted (external meetings) | Meeting Consent as Regulated (Opt-in, each participant, stricter-only, clients without a consent step refused, leave after an objection, consent given in advance for at most 180 days); no audio or video recording; the transcript and chat kept; requests made in the meeting off; web search and the installed MCP servers off; new meetings summarized with `discovery-session`. See [Hosting Models](hosting-models.md) |
 | Customer account | Meeting Consent mode Opt-in, each participant, a different choice per meeting allowed, clients without a consent step refused; no audio recording; web search off; the rest at their defaults. See [Hosting Models](hosting-models.md) |
+| Minimised content – summary only | Meeting Consent as Regulated, except consent given in advance for at most 365 days; the transcript and any recording deleted as soon as the summary is written; no audio or video recording and no chat capture; redaction on; Amazon Bedrock within the deployment's geography; new meetings summarized with `minimised-content`, and **Leave out sensitive personal information** on. See [Minimised content](privacy-and-data-handling.md#minimised-content) |
 
-**Why import does not create a profile.** The plan for this store has an import
-route into a *new* profile rather than apply in place, so that importing cannot
-overwrite the configuration in force. LMA has one profile, `custom`, which every
-reader resolves, and nothing yet selects another. A second profile would be a
-record that nothing reads. The same protection comes from the import never saving:
-the administrator sees every change it makes, marked against the defaults, before
-anything is stored, and the save that stores it is one revision a restore takes
-back. Named profiles, with a way to choose the active one, remain to come.
+**Two ways to import.** The editor's **Import from a file** lays the file over
+the profile open and never saves: the administrator sees every change it makes,
+marked against the defaults, before anything is stored, and the save that
+stores it is one revision a restore takes back. **Import** in the Configuration
+Profiles list instead creates a new Custom profile of the file's changes over
+the deployment defaults, leaving every existing profile, the active one
+included, as it is (see [Named profiles](#named-profiles)).
 
 ## Revisions and audit
 

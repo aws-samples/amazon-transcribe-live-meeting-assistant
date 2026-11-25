@@ -494,8 +494,9 @@ parameters set the retention periods; each is described in the
 |-----------|---------|--------------|
 | `MeetingRecordExpirationInDays` | 90 | The DynamoDB time to live of meeting records (with their summaries and consent records), usage records and Virtual Participant records. An Admin can shorten it, and not lengthen it, for meeting and usage records on the Configuration page ([Retention](configuration-guide.md#retention-settings-the-stack-limits)) |
 | `TranscriptionExpirationInDays` | 90 | The DynamoDB time to live of transcript segments and key-frame items, shortened the same way, and the S3 lifecycle rules on transcript and summary files, key-frame images and consent evidence images |
-| `AudioRecordingExpirationInDays` | 90 | The S3 lifecycle rules on audio and video recordings |
+| `AudioRecordingExpirationInDays` | 90 | The S3 lifecycle rules on audio and video recordings. **Retention › Delete the recordings after the summary** deletes a meeting's recordings sooner ([Transcript and Recording Deletion After the Summary](transcript-deletion.md)) |
 | `CloudWatchLogsExpirationInDays` | 90 | The retention of the stack's CloudWatch log groups |
+| `MeetingDataPointInTimeRecoveryDays` | 35 | The point-in-time recovery window of the DynamoDB tables that hold meeting content; 0 turns it off. See [Point-in-time recovery of the DynamoDB tables](privacy-and-data-handling.md#point-in-time-recovery-of-the-dynamodb-tables) |
 | `VPSchedulerStateMachineLogsExpirationInDays` | 7 | The retention of the scheduled Virtual Participant state machine's log group |
 | `EnableDataRetentionOnDelete` | `true` | Whether the DynamoDB tables, S3 buckets and KMS key are kept when the stack is deleted; see [Cleanup](cleanup.md#retained-resources) |
 

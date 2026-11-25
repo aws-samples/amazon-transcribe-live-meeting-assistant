@@ -309,7 +309,7 @@ The Authorized Account Email Domain setting controls who can self-register for a
 - Configured during deployment as a CloudFormation parameter
 - Accepts a **comma-separated list** of email domains (e.g., `example.com,acme.org`)
 - Users with an email address matching one of the listed domains can self-register through the web UI
-- Leave blank to **prevent self-registration** entirely (only the admin account will exist)
+- Leave blank to **prevent self-registration** entirely: accounts are then created only by an Admin on the [User Management](user-management.md) page, and as Participant accounts by a meeting's owner for the people on its participant list (see [Participant accounts for a meeting](user-management.md#participant-accounts-for-a-meeting))
 
 ## Meeting Sharing
 
