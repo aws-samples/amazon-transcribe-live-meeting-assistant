@@ -17,12 +17,8 @@ spec.loader.exec_module(srt_setup)
 RUNNER = {"GITLAB_CI": "true", "CI": "true"}
 
 
-def no_imds() -> bool:
-    return False
-
-
 def test_srt_placeholder_credentials_are_written_only_on_a_ci_runner(tmp_path: Path) -> None:
-    written = srt_setup.write_placeholder_credentials(RUNNER, tmp_path, no_imds)
+    written = srt_setup.write_placeholder_credentials(RUNNER, tmp_path)
     assert written == tmp_path / ".aws" / "credentials"
     assert written.read_text() == srt_setup.PLACEHOLDER_CREDENTIALS
 
@@ -30,7 +26,7 @@ def test_srt_placeholder_credentials_are_written_only_on_a_ci_runner(tmp_path: P
 @pytest.mark.parametrize("env", [{}, {"CI": "true"}, {"CI": "1"}])
 def test_a_bare_ci_variable_does_not_make_a_ci_runner(tmp_path: Path, env: dict) -> None:
     assert not srt_setup.on_ci_runner(env)
-    assert srt_setup.write_placeholder_credentials(env, tmp_path, no_imds) is None
+    assert srt_setup.write_placeholder_credentials(env, tmp_path) is None
     assert not (tmp_path / ".aws" / "credentials").exists()
 
 
@@ -39,32 +35,40 @@ def test_no_placeholder_when_the_environment_names_a_credential_source(
     tmp_path: Path, name: str
 ) -> None:
     env = RUNNER | {name: "x"}
-    assert srt_setup.write_placeholder_credentials(env, tmp_path, no_imds) is None
+    assert srt_setup.write_placeholder_credentials(env, tmp_path) is None
     assert not (tmp_path / ".aws" / "credentials").exists()
 
 
-def test_no_placeholder_when_the_instance_metadata_service_answers(tmp_path: Path) -> None:
-    assert srt_setup.write_placeholder_credentials(RUNNER, tmp_path, lambda: True) is None
-    assert not (tmp_path / ".aws" / "credentials").exists()
+@pytest.mark.parametrize("runner", [{"GITLAB_CI": "true"}, {"GITHUB_ACTIONS": "true"}])
+def test_srt_placeholder_is_written_on_a_ci_runner_without_asking_instance_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runner: dict
+) -> None:
+    def no_network(*args, **kwargs):
+        raise AssertionError("setup must not call out to decide on the placeholder")
+
+    monkeypatch.setattr(srt_setup.urllib.request, "urlopen", no_network)
+    written = srt_setup.write_placeholder_credentials(runner, tmp_path)
+    assert written == tmp_path / ".aws" / "credentials"
+    assert written.read_text() == srt_setup.PLACEHOLDER_CREDENTIALS
 
 
 def test_no_placeholder_when_the_aws_config_has_its_own_credential_source(tmp_path: Path) -> None:
     (tmp_path / ".aws").mkdir()
     (tmp_path / ".aws" / "config").write_text("[default]\ncredential_process = /bin/true\n")
-    assert srt_setup.write_placeholder_credentials(RUNNER, tmp_path, no_imds) is None
+    assert srt_setup.write_placeholder_credentials(RUNNER, tmp_path) is None
 
 
 def test_existing_credentials_are_never_replaced(tmp_path: Path) -> None:
     (tmp_path / ".aws").mkdir()
     creds = tmp_path / ".aws" / "credentials"
     creds.write_text("[default]\nreal = yes\n")
-    assert srt_setup.write_placeholder_credentials(RUNNER, tmp_path, no_imds) is None
+    assert srt_setup.write_placeholder_credentials(RUNNER, tmp_path) is None
     srt_setup.remove_placeholder_credentials(creds)
     assert creds.read_text() == "[default]\nreal = yes\n"
 
 
 def test_the_placeholder_is_removed_after_setup_and_nothing_else(tmp_path: Path) -> None:
-    written = srt_setup.write_placeholder_credentials(RUNNER, tmp_path, no_imds)
+    written = srt_setup.write_placeholder_credentials(RUNNER, tmp_path)
     srt_setup.remove_placeholder_credentials(written)
     assert not written.exists()
     srt_setup.remove_placeholder_credentials(None)
