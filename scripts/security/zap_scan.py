@@ -495,7 +495,12 @@ class ScanCredentials:
         self._deployment = deployment
         self._users = rbac.create_role_users(deployment, stamp, (("zap", "Admin"),))
         self._key_prefix = ""
-        rbac.sign_in(deployment, self._users[0])
+        try:
+            rbac.sign_in(deployment, self._users[0])
+        except Exception:
+            # The caller holds no object to close yet, so the user is deleted here.
+            rbac.delete_role_users(deployment, self._users)
+            raise
 
     @property
     def id_token(self) -> str:

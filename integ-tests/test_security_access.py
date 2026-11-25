@@ -126,7 +126,11 @@ def short_lived(deployment: rbac.Deployment, accounts):
         "restored" if restored else "not restored",
         error,
     )
-    assert restored, f"the web UI app client's settings could not be restored: {error}"
+    if not restored:
+        # In CI a fixed sentence (counts-only rule); the settings are in the record file.
+        detail = "" if os.environ.get("CI") else f": {error}"
+        where = probe.settings_record_path()
+        pytest.fail(f"the web UI app client's settings could not be restored; see {where}{detail}", pytrace=False)
     yield tokens, jwt.split(tokens["id"])[1]["exp"]
 
 

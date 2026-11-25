@@ -345,3 +345,25 @@ def test_the_ci_job_uploads_the_counts_only_summaries_and_nothing_else() -> None
         "zap-reports/*/summary.md",
     ]
     assert "--counts-only" in " ".join(job["script"])
+
+
+def test_a_failed_sign_in_deletes_the_scan_user() -> None:
+    deleted = []
+
+    class Rbac:
+        @staticmethod
+        def create_role_users(deployment, stamp, accounts):
+            return ["zap-user"]
+
+        @staticmethod
+        def sign_in(deployment, user):
+            raise RuntimeError("sign-in refused")
+
+        @staticmethod
+        def delete_role_users(deployment, users):
+            deleted.extend(users)
+            return []
+
+    with pytest.raises(RuntimeError):
+        zap_scan.ScanCredentials(Rbac, object(), "stamp")
+    assert deleted == ["zap-user"]

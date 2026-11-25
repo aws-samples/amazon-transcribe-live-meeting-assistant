@@ -344,3 +344,10 @@ def test_the_client_settings_are_kept_beside_the_report_while_changed(monkeypatc
     assert probe.settings_record_path() == tmp_path / "web-client-settings-before-change.json"
     monkeypatch.delenv("LMA_SECURITY_REPORT_DIR")
     assert probe.settings_record_path().parent == security_report.DEFAULT_DIR
+
+
+def test_the_restore_failure_message_carries_no_settings_in_ci() -> None:
+    source = (HERE / "test_security_access.py").read_text()
+    fixture = source[source.index("def short_lived") : source.index("def meeting")]
+    assert 'os.environ.get("CI")' in fixture and "pytrace=False" in fixture
+    assert "assert restored" not in fixture
