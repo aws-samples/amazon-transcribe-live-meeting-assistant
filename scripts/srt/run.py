@@ -11,6 +11,19 @@ import sys
 from pathlib import Path
 
 
+def scan_env(srt_dir, env=None):
+    """The environment for ``srt assess``, with SRT's own scanner venv first on PATH.
+
+    The venv's ``semgrep`` starts ``pysemgrep`` from PATH, so another Semgrep
+    installed for the user would otherwise answer, and if that one cannot start
+    SRT skips Semgrep for the whole assessment.
+    """
+    env = dict(os.environ if env is None else env)
+    venv_bin = str(Path(srt_dir) / ".venv" / "bin")
+    env["PATH"] = os.pathsep.join([venv_bin, env.get("PATH", "")]) if env.get("PATH") else venv_bin
+    return env
+
+
 def main():
     project_root = Path(__file__).parent.parent.parent
     srt_dir = project_root / ".srt"
@@ -27,7 +40,13 @@ def main():
     )
     # nosemgrep: python.lang.security.audit.subprocess-shell-true.subprocess-shell-true
     result = subprocess.run(  # nosec B602 - hardcoded commands
-        cmd, shell=True, cwd=srt_dir, capture_output=True, text=True, check=False
+        cmd,
+        shell=True,
+        cwd=srt_dir,
+        env=scan_env(srt_dir),
+        capture_output=True,
+        text=True,
+        check=False,
     )
 
     if result.returncode != 0:
