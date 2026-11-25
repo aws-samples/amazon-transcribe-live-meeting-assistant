@@ -23,6 +23,10 @@ the same four inputs before they store them on the Virtual Participant's row:
 ``updateCallParticipants``       Replaces the participant list (names and email
                                  addresses). Only the meeting's owner, an Admin
                                  or a backend role may: see owner_access_condition.
+                                 Named by ``CallId``, or by
+                                 ``VirtualParticipantId`` for the list of a
+                                 Virtual Participant's meeting: see
+                                 update_vp_participants.
 ``listSummaryProfiles``          The query: the profiles a meeting may name.
 ``validateMeetingPreparation``   Not in the schema: the first function of the
                                  createVirtualParticipant and
@@ -83,6 +87,9 @@ LOGGER.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 CLIENT_CONFIG = BotoCoreConfig(retries={"mode": "adaptive", "max_attempts": 3})
 EVENT_SOURCING_TABLE = os.environ.get("EVENT_SOURCING_TABLE", "")
+#: The Virtual Participant table: read for a Virtual Participant's owner and
+#: meeting, and written with its participant list until that meeting exists.
+VIRTUAL_PARTICIPANT_TABLE = os.environ.get("VIRTUAL_PARTICIPANT_TABLE", "")
 ADMIN_GROUP = os.environ.get("ADMIN_GROUP", "Admin")
 DYNAMODB = boto3.client("dynamodb", config=CLIENT_CONFIG)
 SERIALIZER = TypeSerializer()
@@ -91,6 +98,8 @@ DESERIALIZER = TypeDeserializer()
 #: What a backend role's change is attributed to when it names nobody.
 BACKEND_ATTRIBUTION = "LMA"
 MAX_ATTRIBUTION_CHARS = 128
+#: The longest Virtual Participant id accepted.
+MAX_ID_CHARS = 256
 WRITE_ATTEMPTS = 4
 
 
@@ -523,22 +532,153 @@ def update_audience(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict:
     )
 
 
-def update_participants(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict:
+def _participant_fields(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict[str, Any]:
+    return {
+        "Participants": _checked(rules.normalize_participants, data.get("Participants")),
+        "ParticipantsUpdatedBy": attribution(caller, data),
+        "ParticipantsUpdatedAt": now_iso(),
+    }
+
+
+def update_participants(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Optional[Dict]:
     """Replace the participant list, on the owner rule; ``[]`` once cleared.
 
-    Records who changed it and when, as the meeting context does.
+    Records who changed it and when, as the meeting context does. The meeting
+    is named by exactly one of ``CallId`` and ``VirtualParticipantId``.
     """
-    participants = _checked(rules.normalize_participants, data.get("Participants"))
-    return write_once(
-        caller,
-        _call_id(data),
-        {
-            "Participants": participants,
-            "ParticipantsUpdatedBy": attribution(caller, data),
-            "ParticipantsUpdatedAt": now_iso(),
-        },
-        rule=owner_access_condition,
+    call_id = data.get("CallId")
+    vp_id = data.get("VirtualParticipantId")
+    if bool(call_id) == bool(vp_id):
+        raise BadRequestError(
+            "Name the meeting with exactly one of CallId and VirtualParticipantId"
+        )
+    fields = _participant_fields(caller, data)
+    if vp_id:
+        if not isinstance(vp_id, str) or len(vp_id) > MAX_ID_CHARS:
+            raise BadRequestError(f"VirtualParticipantId must be at most {MAX_ID_CHARS} characters")
+        return update_vp_participants(caller, vp_id, fields)
+    return write_once(caller, _call_id(data), fields, rule=owner_access_condition)
+
+
+# ── a Virtual Participant's participant list ────────────────────────────────
+
+
+def read_vp(vp_id: str) -> Optional[Dict[str, Any]]:
+    """The Virtual Participant's owner and the meeting it created, read consistently."""
+    if not VIRTUAL_PARTICIPANT_TABLE:
+        raise BadRequestError("Virtual Participant records are not available")
+    item = DYNAMODB.get_item(
+        TableName=VIRTUAL_PARTICIPANT_TABLE,
+        Key={"id": {"S": vp_id}},
+        ConsistentRead=True,
+        ProjectionExpression="id, #o, CallId",
+        ExpressionAttributeNames={"#o": "Owner"},
+    ).get("Item")
+    if not item:
+        return None
+    return {key: _plain(DESERIALIZER.deserialize(value)) for key, value in item.items()}
+
+
+def vp_meeting(vp: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+    """The meeting the Virtual Participant created, once its record exists.
+
+    Followed only when the meeting has the Virtual Participant's owner, as the
+    consent page follows it (advance_consent_resolver.meeting_of).
+    """
+    call_id = vp.get("CallId")
+    if not isinstance(call_id, str) or not call_id:
+        return None
+    meeting = read_meeting(call_id)
+    if meeting and (meeting.get("Owner") or "") == (vp.get("Owner") or ""):
+        return meeting
+    return None
+
+
+def vp_owner_condition(caller: Mapping[str, Any], vp: Mapping[str, Any]) -> Tuple[str, Dict, Dict]:
+    """The owner rule for the Virtual Participant's row, as a DynamoDB condition."""
+    if caller["is_backend"] or caller["is_admin"]:
+        return "", {}, {}
+    username = caller["username"]
+    if username and vp.get("Owner") == username:
+        return (
+            "#accessOwner = :accessCaller",
+            {"#accessOwner": "Owner"},
+            {":accessCaller": {"S": username}},
+        )
+    raise ForbiddenError("Unauthorized: only the meeting's owner or an Admin may change this")
+
+
+def _write_meeting_participants(
+    caller: Mapping[str, Any], meeting: Mapping[str, Any], fields: Mapping[str, Any]
+) -> Dict[str, Any]:
+    call_id = str(meeting["CallId"])
+    try:
+        return write(call_id, owner_access_condition(caller, meeting), fields)
+    except ClientError as error:
+        if _conflict(error):
+            raise ForbiddenError("Unauthorized: you may not change this meeting") from error
+        raise
+
+
+def update_vp_participants(
+    caller: Mapping[str, Any], vp_id: str, fields: Mapping[str, Any]
+) -> Optional[Dict[str, Any]]:
+    """The participant list of a Virtual Participant's meeting, from its page.
+
+    One list at a time: once the meeting record exists, the meeting's list is
+    the one changed (and the meeting is returned), and the Virtual
+    Participant's row keeps the last list saved to it before then. Until then the row's
+    list is changed and nothing is returned; the Virtual Participant reads that
+    list again just before it creates the meeting (sendStartMeeting in
+    lma-virtual-participant-stack/backend/src/kinesis-stream.ts), so a change
+    made while it is joining reaches the meeting. A meeting created while this
+    write was being made is written too.
+    """
+    vp = read_vp(vp_id)
+    if vp is None:
+        if caller["is_backend"]:
+            raise BadRequestError(f"There is no Virtual Participant {vp_id}")
+        raise ForbiddenError("Unauthorized: you may not change this meeting")
+    access = vp_owner_condition(caller, vp)
+    meeting = vp_meeting(vp)
+    if meeting:
+        return _write_meeting_participants(caller, meeting, fields)
+    names = {"#p": "participants", "#id": "id"}
+    values = {":p": _value(fields["Participants"])}
+    conditions = ["attribute_exists(#id)"]
+    condition, condition_names, condition_values = access
+    if condition:
+        conditions.append(condition)
+        names.update(condition_names)
+        values.update(condition_values)
+    try:
+        result = DYNAMODB.update_item(
+            TableName=VIRTUAL_PARTICIPANT_TABLE,
+            Key={"id": {"S": vp_id}},
+            UpdateExpression="SET #p = :p",
+            ConditionExpression=" AND ".join(conditions),
+            ExpressionAttributeNames=names,
+            ExpressionAttributeValues=values,
+            ReturnValues="ALL_NEW",
+        )
+    except ClientError as error:
+        if _conflict(error):
+            raise ForbiddenError("Unauthorized: you may not change this meeting") from error
+        raise
+    row = {
+        key: _plain(DESERIALIZER.deserialize(value))
+        for key, value in (result.get("Attributes") or {}).items()
+    }
+    meeting = vp_meeting(row)
+    if meeting:
+        LOGGER.info("the meeting of Virtual Participant %s was created meanwhile", vp_id)
+        return _write_meeting_participants(caller, meeting, fields)
+    LOGGER.info(
+        "participant list of Virtual Participant %s: %d people",
+        vp_id,
+        len(fields["Participants"]),
     )
+    return None
 
 
 def update_guidance(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict:

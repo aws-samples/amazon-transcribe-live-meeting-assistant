@@ -7,7 +7,7 @@ import React from 'react';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 vi.mock('../components/call-analytics-top-navigation', () => ({ default: () => null }));
@@ -30,8 +30,11 @@ vi.mock('../components/voice-enrollment/VoiceEnrollmentPage', () => ({
   default: () => <div>participant: voice enrollment</div>,
 }));
 vi.mock('../components/my-consents/MyConsentsPage', () => ({
-  default: () => <div>participant: my consents</div>,
+  default: ({ offerPrompt }) => <div>{`participant: my consents${offerPrompt ? ' (with the prompt)' : ''}`}</div>,
 }));
+// Where signing in with no link lands is decided by reading the person's
+// consents (SignInLanding.test.jsx); here it only has to be reached.
+vi.mock('../components/my-consents/SignInLanding', () => ({ default: () => <div>sign-in landing</div> }));
 
 /* eslint-disable import/first */
 import ParticipantRoutes, { afterSignIn } from './ParticipantRoutes';
@@ -58,12 +61,12 @@ describe('a Participant', () => {
     expect(screen.getByText(HOME_TEXT)).toBeTruthy();
   });
 
-  it('is taken to their home page from the root and from sign-in', () => {
-    ['/', '/login'].forEach((start) => {
-      renderAt(start);
-      expect(screen.getByText(HOME_TEXT)).toBeTruthy();
-      cleanup();
-    });
+  it('is taken to their home page from the root, and to the sign-in landing from sign-in', () => {
+    renderAt('/');
+    expect(screen.getByText(HOME_TEXT)).toBeTruthy();
+    cleanup();
+    renderAt('/login');
+    expect(screen.getByText('sign-in landing')).toBeTruthy();
   });
 
   it.each(routesFor(false).flatMap((route) => [route, `${route}/some-id`]))('is denied %s', (route) => {
@@ -85,10 +88,29 @@ describe('a Participant', () => {
 
   it("opens My consents, and a meeting's consent link after signing in", () => {
     renderAt('/consents');
-    expect(screen.getByText('participant: my consents')).toBeTruthy();
+    expect(screen.getByText('participant: my consents (with the prompt)')).toBeTruthy();
     cleanup();
     renderAt('/login', <ParticipantRoutes redirectParam="/consents?meeting=Weekly%20sync" />);
-    expect(screen.getByText('participant: my consents')).toBeTruthy();
+    expect(screen.getByText('participant: my consents (with the prompt)')).toBeTruthy();
+    expect(screen.queryByText('sign-in landing')).toBeNull();
+  });
+
+  it('shows My consents in the standard layout: navigation, breadcrumbs and the help panel', async () => {
+    const app = await import('../contexts/app');
+    const spy = vi.spyOn(app, 'default').mockReturnValue({ navigationOpen: true, setNavigationOpen: () => {} });
+    const { container } = renderAt('/consents');
+    const nav = screen.getByRole('navigation', { name: 'Side navigation' });
+    const link = within(nav).getByRole('link', { name: 'My consents' });
+    expect(link.getAttribute('target')).toBeNull();
+    expect(within(nav).getByRole('link', { name: 'Shared meetings' })).toBeTruthy();
+    const crumbs = screen.getByRole('navigation', { name: 'Breadcrumbs' });
+    expect(within(crumbs).getAllByText('My consents').length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: 'Open help panel' })).toBeTruthy();
+    // The in-app links of the Participant's navigation open in the same tab.
+    const inApp = [...container.querySelectorAll('a[href^="#/"]')];
+    expect(inApp.length).toBeGreaterThan(0);
+    expect(inApp.filter((a) => a.getAttribute('target') === '_blank')).toEqual([]);
+    spy.mockRestore();
   });
 
   it('follows a sign-in redirect only to a page of its own', () => {

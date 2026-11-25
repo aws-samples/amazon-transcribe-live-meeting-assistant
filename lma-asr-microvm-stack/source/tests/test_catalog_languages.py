@@ -121,6 +121,7 @@ def test_the_parakeet_v3_bundles_with_the_nemotron_preview_cover_its_european_la
         "fastconformer-titanet-small",
         "nemotron-titanet-small",
         "parakeet-tdt-v2-titanet-small",
+        "parakeet-tdt-v2-sortformer",
         # Parakeet v3 with an English-only live preview.
         "parakeet-tdt-v3-live-titanet-small",
         "parakeet-tdt-v3-live-sortformer",

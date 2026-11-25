@@ -364,7 +364,9 @@ Common parameters for the most-used tools.
   time (`2026-11-01T09:00:00Z`); they bound the search by when each meeting was
   created. A date alone covers the whole day in UTC, and a time without an
   offset is read as UTC. A value that is not a date is refused, naming the
-  argument.
+  argument, and so is a `startDate` later than the `endDate`, naming both. A
+  start and end on the same day are accepted, since an end given as a date alone
+  covers that whole day.
 
   The dates are matched against the creation time that the summary step writes
   into each meeting's knowledge base metadata (`CreatedAtEpochSeconds`). Meetings

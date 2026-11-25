@@ -60,9 +60,9 @@ below are tested against it, so the table and the deployed behaviour agree.
 | Configuration: settings, profiles and their history, prompt templates, chat buttons, voice assistant, transcription engine and cost prices | Yes | No | No |  |
 | Installing and changing MCP servers and skills, and importing or exporting their libraries | Yes | No | No |  |
 | Consent given in advance: your own consents, a meeting's consent page, and asking to be added to its participant list | Yes | Yes | Yes | Each person their own consents only, kept under the email address the user pool holds for them. Giving consent needs that address on the meeting's participant list, whose people see the meeting's name, organizer and labels on its consent page; someone not on it is told only that, and may ask to be added, which is shown in LMA to the people who see the meeting's participant list. |
-| A meeting's participant list: changing it and reading whether each person on it has an LMA account | Yes | Yes | No | Admin: every meeting. User: their own meetings only, not those shared with them, and at most 1,000 different addresses looked up a day. The list itself is part of the meeting record, read with it; the account answer is none or the account's role, nothing else about it. |
+| A meeting's participant list: changing it and reading whether each person on it has an LMA account | Yes | Yes | No | Admin: every meeting. User: their own meetings only, not those shared with them, and at most 1,000 different addresses looked up a day. The list can be changed at any time, before, during and after the meeting; named by a Virtual Participant's id, the change is to its meeting's list once the meeting exists, and to the Virtual Participant's own list until then, on the Virtual Participant's owner. The list itself is part of the meeting record, read with it; the account answer is none or the account's role, nothing else about it. |
 | Creating Participant accounts for the people on a meeting's participant list | Yes | Yes | No | Admin: any meeting. User: their own meetings only, at most 25 accounts a day. Only addresses on the meeting's list without an account, and only ever the Participant role; other roles and role changes stay with User Management. |
-| User Management: adding and deleting users and choosing their roles | Yes | No | No |  |
+| User Management: adding and deleting users and choosing their roles | Yes | No | No | A new user may be invited to any meeting: the invitation then links to its consent page, and the address is added to its participant list. |
 | Troubleshooting agent | Yes | No | No |  |
 <!-- role-table:end -->
 
@@ -157,9 +157,14 @@ A Participant signs in to a home page with four pages beside it:
   progress), summary, meeting chat, recordings and consent record, and a
   meeting assistant panel for questions about that meeting.
 - **My consents**: the consents they gave before meetings, a meeting's
-  consent page opened from its consent link, and withdrawal, as every role
-  has; see [Consent given in advance](meeting-consent.md#consent-given-in-advance).
-  Signing in from a consent link opens that page.
+  consent page opened from its consent link, a standing consent given without
+  a link (for an organizer they name by email address, or for every meeting on
+  the deployment, until a date), and withdrawal, as every role has; see
+  [Consent given in advance](meeting-consent.md#consent-given-in-advance).
+  Signing in from a consent link opens that page. Signing in without one opens
+  My consents, with a banner they can dismiss with **Not now**, while the
+  deployment takes consent given in advance and they have no consent on
+  record and have not dismissed it; otherwise the home page.
 - **Voice enrollment**: enrolling their own voice and deleting it again, as
   every role can; see [Voice Enrollment](voice-enrollment.md).
 

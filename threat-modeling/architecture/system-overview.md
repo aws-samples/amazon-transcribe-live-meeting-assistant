@@ -4,8 +4,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Document Version** | 1.0 |
-| **Last Updated** | 2025-05-18 |
+| **Document Version** | 1.1 |
+| **Last Updated** | 2026-11-25 |
 | **Classification** | Internal |
 | **System Name** | Live Meeting Assistant (LMA) |
 
@@ -100,7 +100,7 @@ flowchart TD
 | **Audio Transcription** | Amazon Transcribe Streaming | Real-time speech-to-text with speaker diarization |
 | **Event Stream** | Amazon Kinesis Data Streams | Buffers transcription events for processing |
 | **Event Processing** | AWS Lambda (19 functions) | Strands agent processing, transcript handling |
-| **API Layer** | AWS AppSync (39 resolvers) | GraphQL API with real-time subscriptions |
+| **API Layer** | AWS AppSync | GraphQL API with real-time subscriptions |
 | **Data Store** | Amazon DynamoDB | Meeting metadata, transcripts, LLM templates, API keys |
 | **Audio Storage** | Amazon S3 | Stereo audio recordings, UI static assets |
 | **CDN** | Amazon CloudFront | Web UI delivery with geo restrictions |
@@ -134,6 +134,10 @@ flowchart TD
 | **MCP Integration** | Extend assistant with external tools (Salesforce, etc.) | API Gateway, Lambda Authorizer |
 | **Audio Recording** | Stereo recording stored in S3 | Fargate, S3 |
 | **Meeting Inventory** | Browse, share, manage meetings with access control | AppSync, DynamoDB |
+| **Roles** | Admin, User and Participant, named on every operation by the role matrix | Cognito triggers, AppSync |
+| **Participant Lists and Sharing** | Expected attendees per meeting; optional automatic read-only sharing with them; Participant accounts | DynamoDB streams, Lambda, Cognito |
+| **Meeting Consent** | Notice, replies, objections and evidence per meeting; consent given in advance on My consents | Lambda, DynamoDB, VP |
+| **Access Reviews** | Last sign-in, last active, MCP API key last use; `lma users list` | Cognito triggers, DynamoDB |
 | **Browser Extension** | Captures audio from any browser tab | Chrome Extension, WebSocket |
 | **Embeddable Components** | Iframe-embeddable meeting UI components | React, CloudFront |
 | **Lambda Hooks** | Customer extensibility for transcript processing | Lambda, customer-managed code |
@@ -262,6 +266,10 @@ flowchart TD
 | Meeting transcripts | Customer Confidential | DynamoDB | KMS encryption at rest |
 | Meeting summaries/notes | Customer Confidential | DynamoDB | KMS encryption at rest |
 | Meeting metadata | Internal | DynamoDB | KMS encryption at rest |
+| Participant lists and `AutoSharedWith` | Customer Confidential (names, email addresses) | DynamoDB (meeting record, VP record) | KMS encryption at rest |
+| Consent records and consents given in advance | Customer Confidential (names, addresses, replies) | DynamoDB (meetings table) | KMS encryption at rest |
+| Last sign-in and last active times | Internal | DynamoDB (`UserSignInTable`, Cognito stack) | Encryption at rest |
+| Daily account lookup and creation counters | Internal (address hashes) | DynamoDB (meetings table, two-day expiry) | KMS encryption at rest |
 | User credentials | Restricted | Cognito | AWS-managed encryption |
 | MCP API keys | Restricted | DynamoDB (SHA-256 hashed) | KMS encryption at rest |
 | Third-party API keys | Restricted | CloudFormation Parameters / Secrets | Encrypted parameters |
@@ -279,4 +287,4 @@ flowchart TD
 - **Multi-tenancy**: Single-tenant per deployment (one stack = one environment)
 - **Authentication**: Cognito User Pool with optional MFA, self-registration with email domain restrictions, admin group
 - **Network**: VPC with public/private subnets, NAT gateway, optional WAF
-- **Data retention**: Configurable DynamoDB TTL (default 90 days)
+- **Data retention**: Configurable DynamoDB TTL (default 90 days), optional deletion of the transcript and recordings after the summary, and a point-in-time recovery window for the meeting tables set by `MeetingDataPointInTimeRecoveryDays`

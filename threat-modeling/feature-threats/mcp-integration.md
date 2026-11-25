@@ -4,8 +4,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Document Version** | 1.0 |
-| **Last Updated** | 2025-05-18 |
+| **Document Version** | 1.1 |
+| **Last Updated** | 2026-11-25 |
 | **Feature** | MCP Server Integration, API Gateway, External Tool Access |
 | **Classification** | Internal |
 
@@ -86,7 +86,7 @@ flowchart TD
 | **Severity** | High (3) |
 | **Risk Score** | **6 (High)** |
 | **Affected Components** | API Gateway, Lambda Authorizer, DynamoDB (API Keys), MCP Handler Lambda |
-| **Existing Mitigations** | SHA-256 key hashing (keys not stored in plaintext), rate limiting (100 req/sec), custom Lambda Authorizer validation, access logging, request validation |
+| **Existing Mitigations** | SHA-256 key hashing (keys not stored in plaintext), rate limiting (100 req/sec), custom Lambda Authorizer validation, access logging, request validation, a key works only while its owner exists and holds a role with MCP access (read from the user pool on every request), and each key's last use and its owner's last activity are recorded for access reviews (see AUTH.T09) |
 | **Status** | Mitigated |
 | **Recommendations** | Implement API key rotation policy, add IP allowlisting per API key, enable anomaly detection on usage patterns, add key expiration with auto-rotation, consider mutual TLS for high-security deployments |
 
@@ -172,3 +172,4 @@ flowchart TD
 | **Response validation** | Size limits and format checks on MCP responses | MCP.T03 |
 | **Request validation** | API Gateway request validation enabled | MCP.T02, MCP.T04 |
 | **TLS encryption** | HTTPS for all MCP communications | MCP.T01, MCP.T03 |
+| **Key last use** | `LastUsedAt` on the key and `LastActiveAt` on the owner, written by the authorizer at most every 15 minutes | MCP.T02 |

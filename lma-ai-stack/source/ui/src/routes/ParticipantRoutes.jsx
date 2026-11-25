@@ -16,6 +16,9 @@ import ParticipantMeetingList from '../components/participant-meetings/Participa
 import ParticipantMeetingPage from '../components/participant-meetings/ParticipantMeetingPage';
 import VoiceEnrollmentPage from '../components/voice-enrollment/VoiceEnrollmentPage';
 import MyConsentsPage from '../components/my-consents/MyConsentsPage';
+import MyConsentsBreadcrumbs from '../components/my-consents/breadcrumbs';
+import MyConsentsToolsPanel from '../components/my-consents/tools-panel';
+import SignInLanding from '../components/my-consents/SignInLanding';
 import { PARTICIPANT, roleMayOpen } from '../components/common/roles';
 import SignOutRedirect from './SignOutRedirect';
 import {
@@ -49,12 +52,22 @@ const pageFor = (pathname) => {
   if (pathname === VOICE_ENROLLMENT_PATH || pathname.startsWith(`${VOICE_ENROLLMENT_PATH}/`)) {
     return <VoiceEnrollmentPage />;
   }
-  if (pathname === MY_CONSENTS_PATH) return <MyConsentsPage />;
+  if (pathname === MY_CONSENTS_PATH) return <MyConsentsPage offerPrompt />;
   return <ParticipantHome />;
 };
 
 const ParticipantPage = () => {
   const { pathname } = useLocation();
+  if (pathname === MY_CONSENTS_PATH) {
+    return (
+      <ParticipantLayout
+        breadcrumbs={<MyConsentsBreadcrumbs homeHref={`#${HOME_PATH}`} />}
+        tools={<MyConsentsToolsPanel />}
+      >
+        {pageFor(pathname)}
+      </ParticipantLayout>
+    );
+  }
   return <ParticipantLayout>{pageFor(pathname)}</ParticipantLayout>;
 };
 
@@ -70,6 +83,19 @@ export const afterSignIn = (redirectParam) => {
 };
 
 /**
+ * Where signing in lands: the page the sign-in link named, or, with none, the
+ * home page, or My consents while the person has no consent on record and has
+ * not dismissed the prompt there (SignInLanding).
+ */
+const SignInTarget = ({ redirectParam = '' }) => {
+  const target = afterSignIn(redirectParam);
+  if (target !== HOME_PATH) return <Navigate to={target} replace />;
+  return <SignInLanding />;
+};
+
+SignInTarget.propTypes = { redirectParam: PropTypes.string };
+
+/**
  * The routes of a signed-in Participant: their home page, the meetings shared
  * with them (read-only, through the Participant view operations only), their
  * own consents given in advance (My consents) and their own voice enrollment.
@@ -79,7 +105,7 @@ export const afterSignIn = (redirectParam) => {
 const ParticipantRoutes = ({ redirectParam = '' }) => (
   <Routes>
     <Route path="/" element={<Navigate to={HOME_PATH} replace />} />
-    <Route path={LOGIN_PATH} element={<Navigate to={afterSignIn(redirectParam)} replace />} />
+    <Route path={LOGIN_PATH} element={<SignInTarget redirectParam={redirectParam} />} />
     <Route path={LOGOUT_PATH} element={<SignOutRedirect />} />
     <Route path="*" element={<ParticipantPage />} />
   </Routes>

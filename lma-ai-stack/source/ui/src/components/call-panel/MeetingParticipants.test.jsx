@@ -122,10 +122,37 @@ describe('MeetingParticipants', () => {
     await waitFor(() => expect(onSave).toHaveBeenCalledWith([{ name: 'Cy', email: 'cy@example.net' }]));
   });
 
-  it('lets the owner add a list to a meeting that has none', () => {
-    render(<MeetingParticipants participants={[]} callId="c1" canManage onSave={vi.fn()} />);
+  it('lets the owner add a list to a meeting that has none, from the header and from the empty list', async () => {
+    const onSave = vi.fn(() => Promise.resolve({ ok: true }));
+    render(<MeetingParticipants participants={[]} callId="c1" canManage onSave={onSave} />);
     expect(screen.getByText('No participants listed.')).toBeTruthy();
+    expect(screen.queryByText('Edit')).toBeNull();
+    expect(screen.getByText(/can be changed at any time, before, during and after the meeting/)).toBeTruthy();
+    // One in the header, one in the empty list.
+    expect(screen.getAllByText('Add participants')).toHaveLength(2);
+    fireEvent.click(screen.getByLabelText('Add participants to the list'));
+    const field = screen.getByLabelText('Participants, one Name <email> per line');
+    expect(field.value).toBe('');
+    fireEvent.change(field, { target: { value: 'Cy <cy@example.net>' } });
+    fireEvent.click(within(screen.getByTestId('meeting-participants')).getByText('Save').closest('button'));
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith([{ name: 'Cy', email: 'cy@example.net' }]));
+  });
+
+  it('labels the button Edit once the list has people on it', () => {
+    answerWith(() => []);
+    render(<MeetingParticipants participants={PEOPLE} callId="c1" canManage onSave={vi.fn()} />);
     expect(screen.getByText('Edit')).toBeTruthy();
+    expect(screen.queryByText('Add participants')).toBeNull();
+  });
+
+  it('shows the message the save answers with and stays in the editor', async () => {
+    answerWith(() => []);
+    const onSave = vi.fn(() => Promise.resolve({ ok: false, message: 'Unauthorized' }));
+    render(<MeetingParticipants participants={PEOPLE} callId="c1" canManage onSave={onSave} />);
+    fireEvent.click(screen.getByText('Edit'));
+    fireEvent.click(within(screen.getByTestId('meeting-participants')).getByText('Save').closest('button'));
+    expect(await screen.findByText('Unauthorized')).toBeTruthy();
+    expect(screen.getByLabelText('Participants, one Name <email> per line')).toBeTruthy();
   });
 });
 
@@ -140,6 +167,15 @@ describe('the invitation to consent', () => {
     expect(screen.queryByText('Invite participants to consent')).toBeNull();
     unmount();
     render(<MeetingParticipants participants={PEOPLE} callId="c1" canManage isOwner />);
+    expect(await screen.findByText('Invite participants to consent')).toBeTruthy();
+  });
+
+  it('is offered once the list has people on it, and not while it is empty', async () => {
+    const { rerender } = render(
+      <MeetingParticipants participants={[]} callId="c1" canManage isOwner onSave={vi.fn()} />,
+    );
+    expect(screen.queryByText('Invite participants to consent')).toBeNull();
+    rerender(<MeetingParticipants participants={PEOPLE} callId="c1" canManage isOwner onSave={vi.fn()} />);
     expect(await screen.findByText('Invite participants to consent')).toBeTruthy();
   });
 

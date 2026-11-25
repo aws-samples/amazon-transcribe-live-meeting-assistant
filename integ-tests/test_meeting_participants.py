@@ -29,6 +29,19 @@ meeting, a second User, and a Participant. Then:
     address not on the list.
 ``test_the_owner_changes_the_list``
     updateCallParticipants, as the owner, replaces the list, normalized.
+``test_a_person_added_to_an_existing_meeting_s_list_is_shared_with``
+    updateCallParticipants, as the owner, adds the Participant to the list of
+    the meeting that already exists (another User is refused), and Meeting
+    Sharing shares the meeting with them and records the share as its own.
+``test_a_virtual_participant_s_page_changes_its_own_list_then_its_meeting_s``
+    updateCallParticipants named by VirtualParticipantId, as a never-launched
+    Virtual Participant's owner: its own list while it has no meeting (answer
+    null; another User is refused), and, once its row names the meeting's
+    CallId, the meeting's list, leaving its own as it was.
+``test_an_admin_creates_a_user_invited_to_the_meeting``
+    createUser with inviteToMeeting adds the new address to the meeting's list
+    (Cognito sends its invitation to a throwaway address); an unknown meeting
+    is refused.
 ``test_a_scheduled_virtual_participant_s_list_is_read_before_its_meeting_exists``
     A Virtual Participant scheduled a day ahead with a participant list, read
     by VirtualParticipantId; it is cancelled and its row deleted at the end.
@@ -54,6 +67,8 @@ pytest.importorskip("pycognito")
 pytest.importorskip("graphql")
 
 MEETING_RECORD_TIMEOUT_S = 90.0
+#: How long Meeting Sharing (the meetings table's stream) may take to share the meeting.
+SHARE_TIMEOUT_S = 90.0
 
 GET_ACCOUNTS = """
 query GetMeetingParticipantAccounts($CallId: ID, $VirtualParticipantId: ID) {
@@ -75,6 +90,11 @@ mutation UpdateCallParticipants($input: UpdateCallParticipantsInput!) {
 CREATE_VP = """
 mutation CreateVirtualParticipant($input: CreateVirtualParticipantInput!) {
   createVirtualParticipant(input: $input) { id participants { name email } }
+}
+"""
+CREATE_USER = """
+mutation CreateUser($input: CreateUserInput!) {
+  createUser(input: $input) { username email role }
 }
 """
 END_VP = """
@@ -119,6 +139,28 @@ def new_address(deployment, stamp) -> str:
         return f"{local}+integ-{stamp}@{domain}"
     domain = deployment.email_domain if deployment.email_domain != "example.com" else "example.invalid"
     return f"integ-participant-{stamp}@{domain}"
+
+
+@pytest.fixture(scope="module")
+def invited_address(deployment, stamp):
+    """The address an Admin creates a user for with a meeting to invite them to.
+
+    Chosen as new_address is, with its own tag, and sent one Cognito invitation
+    per run; the account is deleted afterwards.
+    """
+    chosen = os.environ.get("LMA_TEST_PARTICIPANT_EMAIL", "").strip()
+    if chosen:
+        local, _, domain = chosen.partition("@")
+        address = f"{local}+integ-invited-{stamp}@{domain}"
+    else:
+        domain = deployment.email_domain if deployment.email_domain != "example.com" else "example.invalid"
+        address = f"integ-invited-{stamp}@{domain}"
+    yield address
+    cognito = deployment.session.client("cognito-idp")
+    try:
+        cognito.admin_delete_user(UserPoolId=deployment.pool_id, Username=address)
+    except cognito.exceptions.UserNotFoundException:
+        pass
 
 
 @pytest.fixture(scope="module")
@@ -340,6 +382,179 @@ def test_the_owner_changes_the_list(deployment, meeting, users) -> None:
         deployment, owner, UPDATE_PARTICIPANTS, {"input": {"CallId": call_id, "Participants": [{"email": "x"}]}}
     )
     assert "not an email address" in _error_text(refused), refused
+
+
+def _listed_emails(deployment, call_id: str) -> list[str]:
+    record = read_meeting(
+        deployment.session.client("dynamodb"), deployment.ai_resources["EventSourcingTable"], call_id
+    )
+    return [p["email"] for p in (record or {}).get("Participants") or []]
+
+
+def _shared_with(deployment, call_id: str) -> tuple[list, list]:
+    record = (
+        read_meeting(
+            deployment.session.client("dynamodb"), deployment.ai_resources["EventSourcingTable"], call_id
+        )
+        or {}
+    )
+    shared = record.get("SharedWith") or []
+    if isinstance(shared, str):
+        shared = [s.strip() for s in shared.strip("[]").split(",") if s.strip()]
+    return list(shared), list(record.get("AutoSharedWith") or [])
+
+
+def test_a_person_added_to_an_existing_meeting_s_list_is_shared_with(deployment, meeting, users) -> None:
+    """The list of a meeting that already exists is changed through the API (as the meeting page
+    and the Virtual Participant's page change it, before, during or after the meeting), and
+    Meeting Sharing, on by default, shares the meeting with the person added."""
+    call_id, _record = meeting
+    owner = users["User"]
+    added = users["Participant"].username
+    # As test_the_owner_changes_the_list left it.
+    current = [{"name": "Integ Admin", "email": users["Admin"].username}]
+    refused = probe.call(
+        deployment,
+        users["Other"],
+        UPDATE_PARTICIPANTS,
+        {"input": {"CallId": call_id, "Participants": current + [{"name": "", "email": added}]}},
+    )
+    assert "Unauthorized" in _error_text(refused), refused
+    changed = _data(
+        probe.call(
+            deployment,
+            owner,
+            UPDATE_PARTICIPANTS,
+            {"input": {"CallId": call_id, "Participants": current + [{"name": "Integ Added", "email": added}]}},
+        ),
+        "updateCallParticipants",
+    )
+    assert changed["Participants"][-1] == {"name": "Integ Added", "email": added}
+    shared = wait_for(
+        lambda: added in _shared_with(deployment, call_id)[0] and _shared_with(deployment, call_id),
+        timeout=SHARE_TIMEOUT_S,
+        interval=4.0,
+    )
+    assert shared, (
+        f"the meeting was not shared with the person added to its list within {SHARE_TIMEOUT_S:.0f}s; "
+        "is Meeting Sharing › Share meetings with their listed participants on?"
+    )
+    assert added in shared[1], shared
+
+
+def test_a_virtual_participant_s_page_changes_its_own_list_then_its_meeting_s(deployment, meeting, users) -> None:
+    """updateCallParticipants named by VirtualParticipantId changes the Virtual Participant's list
+    until its meeting exists (and answers null), and the meeting's list once it does (and
+    answers the meeting), leaving the Virtual Participant's list as it was."""
+    call_id, _record = meeting
+    owner = users["User"]
+    admin = {"name": "Integ Admin", "email": users["Admin"].username}
+    participant = {"name": "Integ Participant", "email": users["Participant"].username}
+    vp = _data(
+        probe.call(
+            deployment,
+            owner,
+            CREATE_VP,
+            {
+                "input": {
+                    "meetingName": "integ-test (participant list from its page, never launched)",
+                    "meetingPlatform": "ZOOM",
+                    "meetingId": "0000000000",
+                    "isScheduled": True,
+                    "status": "SCHEDULED",
+                    "meetingTime": int(time.time()) + 24 * 3600,
+                    "participants": [admin],
+                }
+            },
+        ),
+        "createVirtualParticipant",
+    )
+    ddb = deployment.session.client("dynamodb")
+    vp_table = deployment.ai_resources["VirtualParticipantTable"]
+    key = {"id": {"S": vp["id"]}}
+
+    def vp_emails() -> list[str]:
+        item = ddb.get_item(TableName=vp_table, Key=key, ConsistentRead=True).get("Item") or {}
+        return [e["M"]["email"]["S"] for e in (item.get("participants") or {}).get("L", [])]
+
+    try:
+        before_meeting = probe.call(
+            deployment,
+            owner,
+            UPDATE_PARTICIPANTS,
+            {"input": {"VirtualParticipantId": vp["id"], "Participants": [admin, participant]}},
+        )
+        assert _data(before_meeting, "updateCallParticipants") is None
+        assert vp_emails() == [admin["email"], participant["email"]]
+        refused = probe.call(
+            deployment,
+            users["Other"],
+            UPDATE_PARTICIPANTS,
+            {"input": {"VirtualParticipantId": vp["id"], "Participants": []}},
+        )
+        assert "Unauthorized" in _error_text(refused), refused
+
+        # What the Virtual Participant does when it starts: link its meeting's CallId.
+        ddb.update_item(
+            TableName=vp_table,
+            Key=key,
+            UpdateExpression="SET CallId = :c",
+            ExpressionAttributeValues={":c": {"S": call_id}},
+        )
+        on_meeting = _data(
+            probe.call(
+                deployment,
+                owner,
+                UPDATE_PARTICIPANTS,
+                {"input": {"VirtualParticipantId": vp["id"], "Participants": [admin]}},
+            ),
+            "updateCallParticipants",
+        )
+        assert on_meeting["CallId"] == call_id
+        assert [p["email"] for p in on_meeting["Participants"]] == [admin["email"]]
+        # The record is read without a consistent read, so allow it a moment.
+        assert wait_for(lambda: _listed_emails(deployment, call_id) == [admin["email"]], timeout=15.0, interval=1.0)
+        assert vp_emails() == [admin["email"], participant["email"]]
+    finally:
+        # Unlinked first, so ending the never-launched Virtual Participant touches no meeting.
+        ddb.update_item(TableName=vp_table, Key=key, UpdateExpression="REMOVE CallId")
+        ended = probe.call(
+            deployment,
+            owner,
+            END_VP,
+            {"input": {"id": vp["id"], "endReason": "integ-test participant list: cancelled before launch"}},
+        )
+        ddb.delete_item(TableName=vp_table, Key=key)
+        assert not ended.get("errors"), ended
+
+
+def test_an_admin_creates_a_user_invited_to_the_meeting(deployment, meeting, users, invited_address) -> None:
+    """createUser with inviteToMeeting: the account is made (Cognito sends its invitation, with
+    the meeting's consent link, to a throwaway address) and the address is added to the list."""
+    call_id, _record = meeting
+    created = _data(
+        probe.call(
+            deployment,
+            users["Admin"],
+            CREATE_USER,
+            {"input": {"email": invited_address, "role": "Participant", "inviteToMeeting": call_id}},
+        ),
+        "createUser",
+    )
+    assert created["email"].casefold() == invited_address.casefold()
+    assert created["role"] == "Participant"
+    assert wait_for(
+        lambda: invited_address.casefold() in [e.casefold() for e in _listed_emails(deployment, call_id)],
+        timeout=15.0,
+        interval=1.0,
+    ), _listed_emails(deployment, call_id)
+    unknown = probe.call(
+        deployment,
+        users["Admin"],
+        CREATE_USER,
+        {"input": {"email": f"x-{invited_address}", "role": "User", "inviteToMeeting": "integ-no-such-meeting"}},
+    )
+    assert "no meeting or Virtual Participant" in _error_text(unknown), unknown
 
 
 def test_a_scheduled_virtual_participant_s_list_is_read_before_its_meeting_exists(

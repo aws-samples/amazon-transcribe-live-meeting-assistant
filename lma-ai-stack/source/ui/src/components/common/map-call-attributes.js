@@ -313,4 +313,16 @@ export const preparationChanged = (current, incoming) =>
     (field) => Boolean(incoming?.[field]) && incoming[field] !== current?.[field],
   );
 
+/**
+ * Whether a newer copy of a meeting turns one of its switches (live guidance,
+ * the whiteboards assistant) the other way from the copy on screen. Those
+ * writes leave UpdatedAt alone, as an agenda write does. A copy that carries
+ * no value for a switch (null or absent: a write that does not select it, or
+ * the list query) says nothing about it.
+ */
+export const switchesChanged = (current, incoming) =>
+  ['guidanceEnabled', 'whiteboardsEnabled'].some(
+    (field) => typeof incoming?.[field] === 'boolean' && incoming[field] !== current?.[field],
+  );
+
 export default mapCallsAttributes;

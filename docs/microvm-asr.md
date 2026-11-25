@@ -394,6 +394,7 @@ image (`model.env`), so nothing has to be tuned and nothing can be mis-set.
 | `parakeet-tdt-v3-live-titanet-small` | Parakeet TDT 0.6B v3 (offline engine) with a FastConformer live preview | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | CC-BY-4.0 + CC-BY-4.0 + CC-BY-4.0 + MIT + MIT (VAD) |
 | `parakeet-tdt-v3-live-nemotron35-titanet-small` | Parakeet TDT 0.6B v3 (offline engine) with a punctuated Nemotron 3.5 live preview | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | CC-BY-4.0 + OpenMDW-1.1 + CC-BY-4.0 + MIT + MIT (VAD) |
 | `parakeet-tdt-v3-sortformer` | Parakeet TDT 0.6B v3 (offline engine) | Nemotron 3 Diarization (end to end) | built in | none to tune; up to 8 speakers per channel | CC-BY-4.0 + OpenMDW-1.1 + MIT (VAD) |
+| `parakeet-tdt-v2-sortformer` | Parakeet TDT 0.6B v2, full precision (offline engine, English) | Nemotron 3 Diarization (end to end) | built in | none to tune; up to 8 speakers per channel | CC-BY-4.0 + OpenMDW-1.1 + MIT (VAD) |
 | `parakeet-tdt-v3-live-sortformer` | Parakeet TDT 0.6B v3 (offline engine) with a FastConformer live preview | Nemotron 3 Diarization | built in | none to tune; up to 8 speakers | CC-BY-4.0 + CC-BY-4.0 + OpenMDW-1.1 + MIT (VAD) |
 | `parakeet-tdt-v3-live-nemotron35-sortformer` (default) | Parakeet TDT 0.6B v3 (offline engine) with a Nemotron 3.5 live preview | Nemotron 3 Diarization | built in | none to tune; up to 8 speakers | CC-BY-4.0 + OpenMDW-1.1 + OpenMDW-1.1 + MIT (VAD) |
 | `parakeet-tdt-v3-live-kroko-sortformer` | Parakeet TDT 0.6B v3 (offline engine) with a Kroko live preview (English) | Nemotron 3 Diarization | built in | none to tune; up to 8 speakers | CC-BY-4.0 + CC-BY-SA (not redistributable) + OpenMDW-1.1 + MIT (VAD) |
@@ -418,6 +419,15 @@ channels in the live runs, but it drops or merges more words than any other mode
 catalog. The earlier
 Nemotron speech model is kept for deployments that accept the NVIDIA Open Model
 License; the catalog marks it `redistributable: false` and it is never the default.
+`parakeet-tdt-v2-sortformer` is for English-only deployments that want the most accurate
+transcript: full-precision Parakeet TDT 0.6B v2 finals with every word labelled by
+Nemotron 3 Diarization. Live on a dev stack with three clean AMI headset meetings it scored
+5.4-6.1% word error rate on the microphone channel, against 6.2-7.2% for the default bundle
+and 5.2-5.9% for Amazon Transcribe, and 6.1-8.0% on the meeting channel, against 6.7-7.5%
+and 5.1-6.8%. It averaged 3.0 cores, under the 4-vCPU baseline, so it costs the MicroVM's
+baseline (about $0.50 per audio hour in us-east-1), where the default bundle ran at about
+6.5 cores. It has no live preview, so a row appears only when its utterance ends.
+
 `parakeet-tdt-v3-live-kroko-sortformer` is the default bundle with Kroko, a lighter
 English streaming model, as its live preview. On three clean AMI headset meetings the
 Kroko preview's word error rate was 7.9-14.3%, against 20.2-33.1% for the default's

@@ -216,6 +216,10 @@ PRIMARY_RULES: tuple[Rule, ...] = _rules(
     # Before documentation, so a change to the profile is never a docs-only change.
     ("solution-profile/**", "solution_profile"),
     ("scripts/solution_profile/**", ("solution_profile", "solution_profile_check")),
+    # The published security test snapshots, README included. Before documentation:
+    # the security tooling's tests hold every snapshot to the curator's guard, and a
+    # new snapshot is never a docs-only change.
+    ("security/test-results/**", "security_tests"),
     # --- documentation -------------------------------------------------------
     ("CHANGELOG.md", "docs"),
     ("CONTRIBUTING.md", "docs"),
@@ -396,6 +400,11 @@ EXTRA_RULES: tuple[Rule, ...] = _rules(
     # The security tests' helper tests read the recording prefixes the access doc
     # names, the key-frame resolver's folder rule, and the ignore rule for scratch/.
     ("docs/user-based-access-control.md", "integ_plumbing"),
+    # The security tooling's tests hold SRT's setup to writing its placeholder AWS
+    # credentials only on CI runners (scripts/security/tests/test_srt_setup.py), and
+    # the assessment to running with SRT's scanner venv first on PATH (test_srt_run.py).
+    ("scripts/srt/setup.py", "security_tests"),
+    ("scripts/srt/run.py", "security_tests"),
     (f"{FUNCTIONS}/video_keyframes_resolver/index.py", "integ_plumbing"),
     (".gitignore", "integ_plumbing"),
     # The skills manager's tests import every Amazon Quick skill in the skills pack.

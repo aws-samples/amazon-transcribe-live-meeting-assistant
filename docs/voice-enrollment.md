@@ -227,11 +227,11 @@ neither.
 |---|---|
 | `fastconformer-titanet-small` | `parakeet-tdt-v3-live-nemotron35-sortformer` (**the default**) |
 | `nemotron35-titanet-small` | `parakeet-tdt-v3-sortformer` |
-| `nemotron-titanet-small` | `parakeet-tdt-v3-live-sortformer` |
-| `parakeet-tdt-v3-titanet-small` | `parakeet-tdt-v3-live-kroko-sortformer` |
-| `parakeet-tdt-v2-titanet-small` | `fastconformer-transcription-only` |
-| `qwen3-asr-titanet-small` | `qwen3-asr-transcription-only` |
-| `cohere-transcribe-titanet-small` | |
+| `nemotron-titanet-small` | `parakeet-tdt-v2-sortformer` |
+| `parakeet-tdt-v3-titanet-small` | `parakeet-tdt-v3-live-sortformer` |
+| `parakeet-tdt-v2-titanet-small` | `parakeet-tdt-v3-live-kroko-sortformer` |
+| `qwen3-asr-titanet-small` | `fastconformer-transcription-only` |
+| `cohere-transcribe-titanet-small` | `qwen3-asr-transcription-only` |
 | `parakeet-tdt-v3-live-titanet-small` | |
 | `parakeet-tdt-v3-live-nemotron35-titanet-small` | |
 
