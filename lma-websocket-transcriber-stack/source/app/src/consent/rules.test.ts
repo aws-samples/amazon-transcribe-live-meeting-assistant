@@ -193,6 +193,7 @@ test('unreadable settings refuse a client without a consent step, as the Refuse 
     assert.equal(refused.kind, 'reject');
     assert.equal(refused.kind === 'reject' && refused.code, 'CONSENT_REQUIRED');
     assert.match(refused.kind === 'reject' ? refused.message : '', /consent settings could not be read/);
+    assert.equal(refused.kind === 'reject' && refused.settingsUnread, true);
 });
 
 test('readable settings still accept a client without a consent step unless Refuse is chosen', () => {
@@ -201,6 +202,8 @@ test('readable settings still accept a client without a consent step unless Refu
     assert.equal(accepted.kind, 'capture');
     const refused = decideAtStart(effectiveSettings({ mode: 'notify', clientsWithoutConsent: CLIENTS_REJECT }), undefined);
     assert.equal(refused.kind === 'reject' && refused.code, 'CONSENT_REQUIRED');
+    // A refusal the settings themselves made is not one a held session can resume past.
+    assert.equal(refused.kind === 'reject' && refused.settingsUnread, undefined);
 });
 
 test('the notice channel and the default statement follow the method', () => {

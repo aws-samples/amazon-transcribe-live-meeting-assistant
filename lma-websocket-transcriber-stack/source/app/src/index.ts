@@ -725,27 +725,6 @@ const onTextMessage = async (
 
         callMetaData.agentId = callMetaData.agentId || randomUUID();
 
-        // Whether this meeting may be captured, from the Meeting Consent settings
-        // and the client's consent step (docs/meeting-consent.md). A refused
-        // meeting is not created at all.
-        const clientConsent = parseClientConsent(callMetaData.consent);
-        const consentDecision = decideAtStart(await readConsentSettings(server.log), clientConsent);
-        if (consentDecision.kind === 'reject') {
-            server.log.warn(
-                `[CONSENT]: [${clientIP}][${callMetaData.callId}] - Not capturing this meeting (${consentDecision.code}): ${consentDecision.message}`
-            );
-            sendFrame(ws, {
-                event: 'CONSENT_STATE',
-                callId: callMetaData.callId,
-                captureAllowed: false,
-                code: consentDecision.code,
-                message: consentDecision.message,
-            });
-            pendingConsentFrames.drop(ws);
-            sessions.dropAudio(ws);
-            ws.close(1008, 'meeting consent required');
-            return;
-        }
         // The same user reconnecting to a meeting whose connection dropped on
         // this task: carry on with that session rather than starting another.
         // Its old connection may not have been seen to close yet (a dropped
@@ -769,6 +748,37 @@ const onTextMessage = async (
             return Boolean(resumed);
         };
 
+        // Whether this meeting may be captured, from the Meeting Consent settings
+        // and the client's consent step (docs/meeting-consent.md). A refused
+        // meeting is not created at all.
+        const clientConsent = parseClientConsent(callMetaData.consent);
+        const consentDecision = decideAtStart(await readConsentSettings(server.log), clientConsent);
+        if (consentDecision.kind === 'reject') {
+            // Settings that could not be read do not end a session held on this
+            // task for the same meeting and caller, admitted when they could be:
+            // its reconnect resumes it, as for a meeting record that could not
+            // be read below.
+            if (consentDecision.settingsUnread && (await resumeHeldSession())) {
+                server.log.warn(
+                    `[CONSENT]: [${clientIP}][${callMetaData.callId}] - The consent settings could not be read; resumed the session held for this caller.`
+                );
+                return;
+            }
+            server.log.warn(
+                `[CONSENT]: [${clientIP}][${callMetaData.callId}] - Not capturing this meeting (${consentDecision.code}): ${consentDecision.message}`
+            );
+            sendFrame(ws, {
+                event: 'CONSENT_STATE',
+                callId: callMetaData.callId,
+                captureAllowed: false,
+                code: consentDecision.code,
+                message: consentDecision.message,
+            });
+            pendingConsentFrames.drop(ws);
+            sessions.dropAudio(ws);
+            ws.close(1008, 'meeting consent required');
+            return;
+        }
         // A START that names an existing meeting adds to it, so it is accepted
         // from the meeting's owner or an Admin; one that continues a meeting
         // must name the session reopenMeeting allowed on it. Checked before

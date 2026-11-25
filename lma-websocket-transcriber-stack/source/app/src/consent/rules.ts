@@ -250,7 +250,17 @@ export type StartDecision =
     /** Capture as LMA always has, with no consent record. */
     | { readonly kind: 'capture'; readonly warning?: string }
     /** Refuse the meeting: nothing is recorded or transcribed, and no meeting is created. */
-    | { readonly kind: 'reject'; readonly code: string; readonly message: string }
+    | {
+        readonly kind: 'reject';
+        readonly code: string;
+        readonly message: string;
+        /**
+         * Refused only because the settings could not be read: a session this
+         * task holds for the same meeting and caller, admitted when they could,
+         * may be resumed instead.
+         */
+        readonly settingsUnread?: boolean;
+    }
     /** Record the client's consent step on the meeting, and gate capture on the record. */
     | {
         readonly kind: 'consent';
@@ -298,6 +308,7 @@ export const decideAtStart = (
             message:
                 'The meeting consent settings could not be read, and this client did not send a consent step, ' +
                 'so the meeting was not recorded or transcribed. Try again in a moment.',
+            settingsUnread: true,
         };
     }
     if (settings.mode === MODE_OFF) {

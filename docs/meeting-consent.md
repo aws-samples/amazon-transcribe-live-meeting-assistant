@@ -1180,7 +1180,10 @@ with the code `CONSENT_REQUIRED` and a message saying that the consent settings
 could not be read, and the connection is closed. The transcriber logs the
 refusal, with the meeting's CallId, as a `[CONSENT]` warning after the warning
 that the settings could not be read; no metric counts it. Starting the meeting
-again once the settings can be read captures it as the setting says. A client
+again once the settings can be read captures it as the setting says. A
+reconnect to a meeting whose session the transcriber still holds for the same
+user (its connection dropped) is not refused this way: the held session, which
+was admitted when the settings could be read, is resumed. A client
 that sent a consent step is treated as before: its step is recorded in the mode
 it was shown for, and capture waits for the record.
 
