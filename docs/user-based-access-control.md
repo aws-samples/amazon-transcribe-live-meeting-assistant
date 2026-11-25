@@ -7,8 +7,10 @@ title: "User-Based Access Control"
 ## Table of Contents
 
 - [Overview](#overview)
+- [Roles](#roles)
 - [Admin User](#admin-user)
 - [Non-Admin User](#non-admin-user)
+- [Participant](#participant)
 - [Authorized Account Email Domain](#authorized-account-email-domain)
 - [Meeting Sharing](#meeting-sharing)
 - [Recording Playback](#recording-playback)
@@ -20,6 +22,83 @@ title: "User-Based Access Control"
 ## Overview
 
 Starting with v0.2.0, LMA provides User-Based Access Control (UBAC). Each non-admin user sees only their own meetings and meetings that have been explicitly shared with them. Admin users can see all meetings across all users. This ensures meeting privacy while still allowing collaboration through sharing.
+
+## Roles
+
+Every LMA account has exactly one of three roles, decided by its Amazon Cognito
+group membership:
+
+- **Admin**: a member of the `Admin` group.
+- **Participant**: a member of the `Participant` group and not of `Admin`.
+- **User**: an account in neither group. Every account created before the
+  Participant role existed, and every self-registered account, is a User.
+
+Admins choose a user's role on the [User Management](user-management.md) page.
+
+### What each role can use
+
+The table lists what each role can use. It is generated from the role matrix,
+`lma-ai-stack/source/appsync/role-matrix.json`, which names the roles of every
+GraphQL operation and every other entry point; the schema and the services named
+below are tested against it, so the table and the deployed behaviour agree.
+
+<!-- role-table:start -->
+| Capability | Admin | User | Participant | Notes |
+|---|---|---|---|---|
+| Participant home page | No | No | Yes | Admins and Users open the meetings list instead. |
+| Meetings list and meeting pages: transcripts, summaries, recordings, key frames, notifications, whiteboards, archives and cost | Yes | Yes | No | Admin: every meeting. User: their own meetings and those shared with them. |
+| Editing, sharing, deleting and reopening meetings: speakers, summaries, agendas, preparation, labels, guidance and whiteboards | Yes | Yes | No | Admin: every meeting. User: the meetings each operation's own rule allows (sharing and deleting: their own). |
+| Meeting consent records | Yes | Yes | No | Admin: every meeting. User: the meetings they own or that are shared with them. |
+| Meeting assistant chat, the Meetings Query Tool, the knowledge base, and reading the installed MCP servers and skills | Yes | Yes | No |  |
+| Meeting sources: Stream Audio/Video, Upload Audio, the browser extension and the Desktop Capture App | Yes | Yes | No |  |
+| Virtual Participant: launch, schedule, view, share, end and rejoin | Yes | Yes | No | Admin: every Virtual Participant. User: their own and those shared with them. |
+| AWS credentials the web UI signs its own requests with: recording playback and file links, transcript translation, the deployment settings, and Virtual Participant launch | Yes | Yes | No |  |
+| MCP API keys and the hosted MCP server (API key and OAuth endpoints) | Yes | Yes | No | Admin: every meeting through MCP. User: their own meetings and those shared with them. |
+| Enrolling your own voice | Yes | Yes | No |  |
+| Configuration: settings, profiles and their history, prompt templates, chat buttons, voice assistant, transcription engine and cost prices | Yes | No | No |  |
+| Installing and changing MCP servers and skills, and importing or exporting their libraries | Yes | No | No |  |
+| User Management: adding and deleting users and choosing their roles | Yes | No | No |  |
+| Troubleshooting agent | Yes | No | No |  |
+<!-- role-table:end -->
+
+### How the roles are applied
+
+Every token the user pool issues names the caller's role. A Cognito pre token
+generation trigger (`lma-cognito-stack`) writes the role into the token's
+`cognito:groups` claim, replacing the role groups and keeping any other group,
+so an account in no group carries `User`; it also adds the role to the ID token
+as the `lma_role` claim. The trigger runs at every sign-in, whether through the
+web UI, the browser extension or the Desktop Capture App, and at every token
+refresh. A change of role therefore reaches a user's tokens at their next
+sign-in or token refresh, which is at most an hour later.
+
+Each entry point then admits only the roles the role matrix lists for it:
+
+- **AppSync GraphQL API.** Every query, mutation and subscription names the
+  roles that may call it (`@aws_cognito_user_pools(cognito_groups: [...])`), and
+  a field that names none is refused to every signed-in caller. Resolvers still
+  apply their per-meeting rules (owner, shared with, Admin) on top.
+- **WebSocket transcriber (Stream Audio/Video page, browser extension, Desktop Capture App).**
+  The transcriber verifies the access token on every request and answers `403`
+  to a role that may not stream meetings.
+- **Cognito identity pool credentials for the web UI.** The web UI signs some
+  requests itself: recording playback and file links, transcript translation,
+  the deployment settings and Virtual Participant launch. The identity pool
+  chooses the IAM role from the `lma_role` claim: Admins and Users receive the
+  web UI's role, Participants a role with no permissions, and a token naming no
+  role receives no credentials.
+- **Hosted MCP server, API key endpoint.** The API key authorizer reads the key
+  owner's current groups from the user pool on every request. A key works only
+  while its owner's role includes MCP access, and only while the owner exists;
+  whether the caller is treated as an Admin also follows their current groups.
+- **Hosted MCP server, OAuth gateway.** The MCP server reads the role from the
+  `cognito:groups` claim the gateway forwards and refuses a role without MCP
+  access.
+- **Web UI.** Navigation and pages follow the role; a page the role may not use
+  shows **Access denied**. This is presentation: the entry points above are what
+  refuse the request.
+
+LMA declares no Lambda function URLs; a test fails if a template adds one.
 
 ## Admin User
 
@@ -51,6 +130,21 @@ are left as they are: speech and chat lines carry the sharing list, and an owner
 only where the producer sent an access token; meeting-assistant answers carry no
 sharing list. All of them are returned to Admins, and speech and chat lines also
 to the users the meeting is shared with.
+
+## Participant
+
+A Participant account is for someone who takes part in meetings without using
+LMA to capture them, for example a guest from another organization. An Admin
+creates it, or changes an existing account to it, on the
+[User Management](user-management.md) page.
+
+A Participant signs in to a home page that says their meetings and consents will
+appear there, and nothing else: no meetings list or meeting pages, no meeting
+sources (Stream Audio/Video, Upload Audio, Virtual Participant, browser
+extension, Desktop Capture App), no meeting assistant, MCP access or voice
+enrollment, and no configuration. Opening any other page shows **Access
+denied**. The browser extension and the Desktop Capture App accept a
+Participant's sign-in, and the transcriber then refuses their connection.
 
 ## Authorized Account Email Domain
 

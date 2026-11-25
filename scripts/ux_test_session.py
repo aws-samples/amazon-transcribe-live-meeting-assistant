@@ -22,15 +22,16 @@ Everything is read from the root LMA stack's CloudFormation outputs:
   output holding the pool id alone in every configuration, and this one is
   unconditional.
 
-LMA has two roles (``docs/user-management.md``). ``Admin`` is the one Cognito group
-``lma-cognito-stack`` creates; a user in no group is a regular ``User``, who sees
-only their own meetings and those shared with them. ``--group`` accepts every group
+LMA has three roles (``docs/user-management.md``). ``Admin`` and ``Participant`` are
+the Cognito groups ``lma-cognito-stack`` creates; a user in no group is a regular
+``User``, who sees only their own meetings and those shared with them, and a
+``Participant`` signs in to a minimal home page only. ``--group`` accepts every group
 the template creates, read from it so a new one is available without editing a list
 here, plus ``User`` for the groupless role.
 
 Usage:
   ./scripts/ux_test_session.py url <STACK_NAME> [--region us-east-1]
-  ./scripts/ux_test_session.py setup <STACK_NAME> [--group Admin|User] [--region ...]
+  ./scripts/ux_test_session.py setup <STACK_NAME> [--group Admin|Participant|User] [--region ...]
       [--email-domain example.invalid]
   ./scripts/ux_test_session.py teardown <STACK_NAME> --email <email> [--region ...]
   ./scripts/ux_test_session.py teardown <STACK_NAME> --stale [HOURS] [--region ...]

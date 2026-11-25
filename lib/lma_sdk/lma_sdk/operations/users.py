@@ -10,7 +10,8 @@ Available as ``client.users``::
         print(user.email, user.role, user.status, user.enabled, user.last_sign_in_at)
 
 Each user is read from the stack's Cognito user pool; the role is ``Admin`` for a
-member of the Admin group and ``User`` otherwise. The last sign-in time is the one
+member of the Admin group, otherwise ``Participant`` for a member of the Participant
+group, and ``User`` otherwise. The last sign-in time is the one
 the Cognito stack's PostAuthentication trigger records in its sign-in table,
 ``UserSignInTable``, keyed by Cognito sub: the last interactive sign-in. Renewing
 tokens with a refresh token does not run the trigger, so it is not a "last used"
@@ -41,6 +42,8 @@ if TYPE_CHECKING:
 
 #: The Cognito group whose members are Admins.
 ADMIN_GROUP = "Admin"
+#: The Cognito group whose members are Participants, unless they are also Admins.
+PARTICIPANT_GROUP = "Participant"
 #: The Cognito stack's logical id in the main stack, and the sign-in table's in it.
 COGNITO_STACK_LOGICAL_ID = "COGNITOSTACK"
 SIGN_IN_TABLE_LOGICAL_ID = "UserSignInTable"
@@ -66,6 +69,15 @@ def _attribute(user: Dict[str, Any], name: str) -> str:
         if attribute.get("Name") == name:
             return str(attribute.get("Value") or "")
     return ""
+
+
+def _role(username: str, admins: set, participants: set) -> str:
+    """Admin, then Participant, then User: the rule of the role matrix's effectiveRole."""
+    if username in admins:
+        return "Admin"
+    if username in participants:
+        return "Participant"
+    return "User"
 
 
 class SignInTimesUnavailable(Exception):
@@ -143,12 +155,12 @@ class UserOperations:
             if not token:
                 return users
 
-    def _admins(self, pool_id: str) -> set[str]:
+    def _group_members(self, pool_id: str, group: str) -> set[str]:
         cognito = self._client.session.client("cognito-idp")
         admins: set[str] = set()
         token: Optional[str] = None
         while True:
-            kwargs: Dict[str, Any] = {"UserPoolId": pool_id, "GroupName": ADMIN_GROUP}
+            kwargs: Dict[str, Any] = {"UserPoolId": pool_id, "GroupName": group}
             if token:
                 kwargs["NextToken"] = token
             try:
@@ -156,7 +168,7 @@ class UserOperations:
             except AWS_ERRORS as err:
                 raise aws_call_error(
                     "cognito-idp:ListUsersInGroup",
-                    f"list the {ADMIN_GROUP} group of user pool {pool_id}",
+                    f"list the {group} group of user pool {pool_id}",
                     err,
                     see=_SEE,
                 ) from err
@@ -216,7 +228,8 @@ class UserOperations:
         stack = self._client._require_stack()  # noqa: SLF001
         pool_id = self._client.vp.user_pool_id
         cognito_users = self._cognito_users(pool_id)
-        admins = self._admins(pool_id)
+        admins = self._group_members(pool_id, ADMIN_GROUP)
+        participants = self._group_members(pool_id, PARTICIPANT_GROUP)
         subs = [_attribute(user, "sub") for user in cognito_users]
 
         available, reason, times = True, "", {}
@@ -229,7 +242,7 @@ class UserOperations:
             UserRecord(
                 username=str(user.get("Username") or ""),
                 email=_attribute(user, "email") or str(user.get("Username") or ""),
-                role="Admin" if user.get("Username") in admins else "User",
+                role=_role(str(user.get("Username")), admins, participants),
                 status=str(user.get("UserStatus") or ""),
                 enabled=bool(user.get("Enabled", True)),
                 created_at=iso_utc(user.get("UserCreateDate")),

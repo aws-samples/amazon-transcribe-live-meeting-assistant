@@ -9,6 +9,7 @@ import dotenv from 'dotenv';
 import { normalizeErrorForLogging } from './common';
 import { getClientIP } from './headers';
 import { describeRequest, redactTokenLike } from './log-redaction';
+import { claimedGroups, effectiveRole, mayUseTranscriber } from './roles';
 
 // dotenv v17 prints an "injected env" banner to stdout by default; quiet
 // suppresses it to keep production logs clean.
@@ -41,14 +42,6 @@ export type AuthenticatedCaller = {
     username?: string;
     /** Cognito groups from the verified token; 'Admin' gates admin-only routes. */
     groups: string[];
-};
-
-const claimedGroups = (payload: Record<string, unknown>): string[] => {
-    const groups = payload['cognito:groups'];
-    if (Array.isArray(groups)) {
-        return groups.map(String);
-    }
-    return typeof groups === 'string' && groups.length > 0 ? [groups] : [];
 };
 
 /** Retrieve the identity established by jwtVerifier for this connection. */
@@ -88,13 +81,23 @@ export const jwtVerifier = async (request: FastifyRequest, reply: FastifyReply) 
 
             return reply.status(401).send();
         }
+        const groups = claimedGroups(payload as unknown as Record<string, unknown>);
+        // Only the roles the role matrix lists for meeting capture may stream.
+        // 403 rather than 401: the token is valid, its role is not admitted.
+        if (!mayUseTranscriber(groups)) {
+            request.log.warn(
+                `[AUTH]: [${clientIP}] - Role ${effectiveRole(groups)} may not use the transcriber. Returning 403. ${requestDescription}`
+            );
+
+            return reply.status(403).send();
+        }
         // Stash the verified identity for downstream per-call authorization.
         // Without this the handlers only know "some valid pool user", which is
         // not enough to stop one user acting on another user's call.
         (request as FastifyRequest & { lmaCaller?: AuthenticatedCaller }).lmaCaller = {
             sub: String(payload.sub),
             username: typeof payload['username'] === 'string' ? payload['username'] : undefined,
-            groups: claimedGroups(payload as unknown as Record<string, unknown>),
+            groups,
         };
         request.log.info(`[AUTH]: [${clientIP}] - Connection request authorized. ${requestDescription}`);
 

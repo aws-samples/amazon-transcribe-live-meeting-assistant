@@ -61,6 +61,10 @@ logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 ADMIN_GROUP = os.environ.get("ADMIN_GROUP", "Admin")
+PARTICIPANT_GROUP = "Participant"
+# The roles of the "mcp-access" capability in appsync/role-matrix.json.
+MCP_ROLES = ("Admin", "User")
+ROLE_REFUSAL_MESSAGE = "This LMA account's role does not include access to the MCP server."
 
 # The scopes of an MCP API key (tools/access.py). A new key is generated with
 # READ or READ_WRITE. A key stored before keys had scopes is LEGACY: it keeps
@@ -99,19 +103,33 @@ NO_IDENTITY_MESSAGE = (
 )
 
 
-def is_admin_claim(claims: Dict[str, Any]) -> bool:
-    """Whether the caller's `cognito:groups` claim contains the admin group.
+def claimed_groups(claims: Dict[str, Any]) -> List[str]:
+    """The caller's `cognito:groups` claim as a list of group names.
 
     The claim arrives as a list from the Cognito user-pool authorizer and as a
     comma-joined string from some token shapes. Both are normalized to a list of
-    group names so the comparison is an exact match on a whole group name.
+    group names so a comparison is an exact match on a whole group name.
     """
     groups = claims.get("cognito:groups") or []
     if isinstance(groups, str):
-        groups = [group.strip() for group in groups.split(",") if group.strip()]
-    elif not isinstance(groups, (list, tuple)):
-        groups = []
-    return ADMIN_GROUP in groups
+        return [group.strip() for group in groups.split(",") if group.strip()]
+    if not isinstance(groups, (list, tuple)):
+        return []
+    return [str(group) for group in groups]
+
+
+def is_admin_claim(claims: Dict[str, Any]) -> bool:
+    """Whether the caller's `cognito:groups` claim contains the admin group."""
+    return ADMIN_GROUP in claimed_groups(claims)
+
+
+def effective_role(groups: List[str]) -> str:
+    """A role from group names: Admin, then Participant, then User (role-matrix.json)."""
+    if ADMIN_GROUP in groups:
+        return "Admin"
+    if PARTICIPANT_GROUP in groups:
+        return "Participant"
+    return "User"
 
 
 def gateway_tool_name(context: Any) -> Optional[str]:
@@ -176,6 +194,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             if not user_id:
                 logger.warning("Request carries no caller identity - rejecting")
                 return error_response(403, NO_IDENTITY_MESSAGE)
+            # The authorizer refuses a key whose owner's role is not admitted,
+            # and passes the role it read; a role it names is checked again.
+            role = authorizer.get("role")
+            if role and role not in MCP_ROLES:
+                logger.warning(f"Refused a request for role {role}")
+                return error_response(403, ROLE_REFUSAL_MESSAGE)
 
             logger.info(f"API Gateway path - User: {username}, Admin: {is_admin}, Scope: {scope}")
             key_scope_to_apply = scope
@@ -206,6 +230,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             if not user_id:
                 logger.warning("Request carries no caller identity - rejecting")
                 return error_response(403, NO_IDENTITY_MESSAGE)
+            role = effective_role(claimed_groups(claims))
+            if role not in MCP_ROLES:
+                logger.warning(f"Refused a gateway request for role {role}")
+                return error_response(403, ROLE_REFUSAL_MESSAGE)
 
             tool_input = event
             tool_name = gateway_tool_name(context) or infer_tool(tool_input)

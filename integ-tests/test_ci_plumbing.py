@@ -1900,3 +1900,76 @@ def test_every_two_stream_page_slides_differ_by_more_than_the_detectors_pixel_de
     closest = min(abs(a - b) for i, a in enumerate(greys) for b in greys[i + 1:])
     # Three times the delta, for the encoder's and the scaler's rounding.
     assert closest > 3 * delta, greys
+
+
+# ── the role access probe (test_role_access.py) ───────────────────────────────
+
+
+def _role_probe():
+    pytest.importorskip("graphql")
+    import role_access_probe  # pylint: disable=import-outside-toplevel
+
+    return role_access_probe
+
+
+def test_the_role_probe_builds_a_valid_call_for_every_query_and_mutation() -> None:
+    """A schema change the builder cannot follow fails here, not on a deployed stack."""
+    from graphql import parse, validate  # pylint: disable=import-outside-toplevel
+
+    role_probe = _role_probe()
+    schema = role_probe.load_schema()
+    operations = [
+        op for op in role_probe.matrix_roles(role_probe.load_matrix()) if not op.startswith("Subscription.")
+    ]
+    assert len(operations) > 100
+    invalid = {}
+    for operation in operations:
+        document, variables = role_probe.build_operation(schema, operation)
+        errors = validate(schema, parse(document))
+        if errors:
+            invalid[operation] = [str(error) for error in errors]
+        type_name, field_name = operation.split(".")
+        required = [
+            name for name, arg in schema.get_type(type_name).fields[field_name].args.items()
+            if str(arg.type).endswith("!")
+        ]
+        assert sorted(variables) == sorted(required), operation
+    assert not invalid, invalid
+
+
+def test_the_role_probe_calls_every_operation_as_every_role_that_is_refused_it() -> None:
+    role_probe = _role_probe()
+    matrix = role_probe.load_matrix()
+    calls = role_probe.plan_calls(matrix, role_probe.load_schema()).calls
+    refused = {(op, role) for op, role, expect_refused in calls if expect_refused}
+    for operation, admitted in role_probe.matrix_roles(matrix).items():
+        if operation.startswith("Subscription."):
+            continue
+        for role in matrix["roles"]:
+            assert ((operation, role) in refused) == (role not in admitted), (operation, role)
+    # Every Query and Mutation is refused to a Participant.
+    assert {op for op, role in refused if role == "Participant"} == {
+        op for op in role_probe.matrix_roles(matrix) if not op.startswith("Subscription.")
+    } - {op for op, roles in role_probe.matrix_roles(matrix).items() if "Participant" in roles}
+
+
+def test_the_role_probe_never_calls_a_mutation_as_a_role_it_admits() -> None:
+    role_probe = _role_probe()
+    calls = role_probe.plan_calls(role_probe.load_matrix(), role_probe.load_schema()).calls
+    assert not [c for c in calls if c[0].startswith("Mutation.") and not c[2]]
+
+
+def test_the_role_probe_recognises_only_the_field_refusal_as_a_refusal() -> None:
+    role_probe = _role_probe()
+    refusal = {
+        "data": {"getCall": None},
+        "errors": [{"errorType": "Unauthorized", "message": "Not Authorized to access getCall on type Query"}],
+    }
+    assert role_probe.refused_at_field(refusal, "Query.getCall")
+    assert not role_probe.refused_at_field(refusal, "Query.listUsers")
+    assert not role_probe.refused_at_field({"data": {"getCall": None}}, "Query.getCall")
+    assert not role_probe.refused_at_field(
+        {"errors": [{"errorType": "Lambda:Unhandled", "message": "Unauthorized: Only Admin users"}]},
+        "Mutation.createUser",
+    )
+    assert not role_probe.refused_at_field(None, "Query.getCall")

@@ -194,6 +194,11 @@ Resources:
           - ShouldAllowSignUpEmailDomain
           - !GetAtt CognitoUserPoolEmailDomainVerifyFunction.Arn
           - !Ref AWS::NoValue
+        # Names the caller's role (Admin, User or Participant) in every token;
+        # see CognitoPreTokenGenerationFunction.
+        PreTokenGenerationConfig:
+          LambdaArn: !GetAtt CognitoPreTokenGenerationFunction.Arn
+          LambdaVersion: V1_0
       Policies:
         PasswordPolicy:
           MinimumLength: 8
@@ -335,6 +340,55 @@ Resources:
       IdentityPoolId: !Ref IdentityPool
       Roles:
         authenticated: !GetAtt CognitoAuthorizedRole.Arn
+      # The role comes from the ID token's lma_role claim, which the pre token
+      # generation trigger sets on every token: Admin and User get the web UI's
+      # role, Participant a role with no permissions. A token naming no role
+      # gets no credentials.
+      RoleMappings:
+        WebUiClient:
+          IdentityProvider: !Sub "${UserPool.ProviderName}:${UserPoolClient}"
+          Type: Rules
+          AmbiguousRoleResolution: Deny
+          RulesConfiguration:
+            Rules:
+              - Claim: lma_role
+                MatchType: Equals
+                Value: Admin
+                RoleARN: !GetAtt CognitoAuthorizedRole.Arn
+              - Claim: lma_role
+                MatchType: Equals
+                Value: User
+                RoleARN: !GetAtt CognitoAuthorizedRole.Arn
+              - Claim: lma_role
+                MatchType: Equals
+                Value: Participant
+                RoleARN: !GetAtt CognitoParticipantRole.Arn
+
+  # The identity pool role of the Participant role. The web UI needs identity
+  # pool credentials to start, so a Participant is given credentials, from a
+  # role that grants nothing: no recordings, settings parameter, translation or
+  # Virtual Participant launch.
+  CognitoParticipantRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Identity pool role for the Participant role; grants no permissions
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action:
+              - sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                "cognito-identity.amazonaws.com:aud": !Ref IdentityPool
+              "ForAnyValue:StringLike":
+                "cognito-identity.amazonaws.com:amr": authenticated
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
 
   CognitoAuthorizedRole:
     Type: AWS::IAM::Role
@@ -482,6 +536,92 @@ Resources:
       GroupName: !Ref AdminGroup
       Username: !Ref AdminUser
       UserPoolId: !Ref UserPool
+
+  # The Participant role: an account that signs in to a minimal home page and is
+  # refused every meeting source, meeting and setting. A user in neither this
+  # group nor Admin is a User. See docs/user-based-access-control.md.
+  ParticipantGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      Description: Participants
+      GroupName: Participant
+      Precedence: 1
+      UserPoolId: !Ref UserPool
+
+  ##########################################################################
+  # Cognito pre token generation trigger
+  #
+  # Puts exactly one role -- Admin, Participant or User -- in each token's
+  # cognito:groups claim, keeping any other group, and the same role in the ID
+  # token's lma_role claim. AppSync fields name the roles they admit, and the
+  # identity pool chooses its role from lma_role. A user in no group is a User.
+  # Event version 1: its group override applies to ID and access tokens, and it
+  # runs on every sign-in flow and on token refresh.
+  ##########################################################################
+
+  CognitoPreTokenGenerationFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AWSXRayDaemonWriteAccess"
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+
+  CognitoPreTokenGenerationFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/CognitoPreTokenGenerationFunction
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  CognitoPreTokenGenerationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: Names the caller's LMA role in each token Cognito issues
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      CodeUri: ../source/pre_token_generation
+      # Cognito waits at most 5 seconds for a trigger; this one does no I/O.
+      Timeout: 5
+      MemorySize: 128
+      Tracing: Active
+      Role: !GetAtt CognitoPreTokenGenerationFunctionRole.Arn
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/CognitoPreTokenGenerationFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access; it makes no network calls
+          - id: W92
+            reason: Function does not require reserved concurrency; it scales with sign-ins
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency; it scales with sign-ins"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for a synchronous Cognito trigger"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access; it makes no network calls"
+    # checkov:skip=CKV_AWS_173: "Function has no environment variables"
+    DependsOn:
+      - CognitoPreTokenGenerationFunctionLogGroup
+
+  CognitoPreTokenGenerationPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref CognitoPreTokenGenerationFunction
+      Principal: cognito-idp.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: !GetAtt UserPool.Arn
 
   CognitoUserPoolEmailDomainVerifyFunction:
     Type: AWS::Serverless::Function
