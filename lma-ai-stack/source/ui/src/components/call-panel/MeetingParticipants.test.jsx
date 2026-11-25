@@ -128,3 +128,53 @@ describe('MeetingParticipants', () => {
     expect(screen.getByText('Edit')).toBeTruthy();
   });
 });
+
+describe('the invitation to consent', () => {
+  beforeEach(() => {
+    answerWith(() => PEOPLE.map((p) => ({ ...p, account: 'Participant' })));
+  });
+
+  it('is offered to the meeting owner only, not to an Admin who does not own it', async () => {
+    const { unmount } = render(<MeetingParticipants participants={PEOPLE} callId="c1" canManage />);
+    await screen.findAllByText('Participant');
+    expect(screen.queryByText('Invite participants to consent')).toBeNull();
+    unmount();
+    render(<MeetingParticipants participants={PEOPLE} callId="c1" canManage isOwner />);
+    expect(await screen.findByText('Invite participants to consent')).toBeTruthy();
+  });
+
+  it('builds one email to everyone listed with one link to the meeting’s consent page', async () => {
+    render(
+      <MeetingParticipants
+        participants={PEOPLE}
+        virtualParticipantId="vp-1"
+        meetingName="Weekly sync"
+        owner="owner@example.com"
+        canManage
+        isOwner
+      />,
+    );
+    fireEvent.click(await screen.findByText('Invite participants to consent'));
+    const dialog = await screen.findByRole('dialog', { name: 'Invite participants to consent' });
+    expect(within(dialog).getByText('ana@example.com, bo@example.org')).toBeTruthy();
+    expect(within(dialog).getByText('Consent to recording: Weekly sync')).toBeTruthy();
+    const text = within(dialog).getByLabelText('Invitation text').value;
+    expect(text).toMatch(/\/#\/consents\?vp=vp-1\n/);
+    const mail = within(dialog).getByText('Open in mail app').closest('a');
+    expect(mail.getAttribute('href')).toMatch(/^mailto:ana%40example\.com,bo%40example\.org\?subject=/);
+    // Nothing is sent by LMA.
+    expect(calls('createParticipantAccounts')).toHaveLength(0);
+  });
+
+  it('shows the owner who asked to be added', async () => {
+    render(
+      <MeetingParticipants
+        participants={PEOPLE}
+        virtualParticipantId="vp-1"
+        canManage
+        requests={[{ name: 'Cy Diaz', email: 'cy@example.net', requestedAt: '2026-11-25T10:00:00Z' }]}
+      />,
+    );
+    expect(await screen.findByText(/Cy Diaz <cy@example.net>/)).toBeTruthy();
+  });
+});

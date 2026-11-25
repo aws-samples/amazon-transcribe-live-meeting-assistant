@@ -26,6 +26,7 @@ import ConfigurationRoutes from './ConfigurationRoutes';
 import movedConfigurationRoutes from './moved-configuration-routes';
 import EmbedRoutes from './EmbedRoutes';
 import VoiceEnrollmentRoutes from './VoiceEnrollmentRoutes';
+import MyConsentsRoutes from './MyConsentsRoutes';
 import TroubleshootingRoutes from './TroubleshootingRoutes';
 import ParticipantRoutes from './ParticipantRoutes';
 import SignOutRedirect from './SignOutRedirect';
@@ -49,6 +50,7 @@ import {
   CONFIGURATION_PATH,
   EMBED_PATH,
   VOICE_ENROLLMENT_PATH,
+  MY_CONSENTS_PATH,
   TROUBLESHOOTING_PATH,
 } from './constants';
 
@@ -91,6 +93,7 @@ const MemberRoutes = ({ redirectParam }) => {
         <Route path={`${CONFIGURATION_PATH}/*`} element={<ConfigurationRoutes />} />
         <Route path={`${EMBED_PATH}/*`} element={<EmbedRoutes />} />
         <Route path={`${VOICE_ENROLLMENT_PATH}/*`} element={<VoiceEnrollmentRoutes />} />
+        <Route path={`${MY_CONSENTS_PATH}/*`} element={<MyConsentsRoutes />} />
         <Route path={`${TROUBLESHOOTING_PATH}/*`} element={<TroubleshootingRoutes />} />
         <Route path="*" element={<Navigate to={DEFAULT_PATH} replace />} />
       </Routes>
@@ -112,7 +115,7 @@ const AuthRoutes = ({ redirectParam }) => {
   const { currentSession } = useAppContext();
   const groups = currentSession?.tokens?.idToken?.payload?.['cognito:groups'] || [];
   if (effectiveRole(groups) === PARTICIPANT) {
-    return <ParticipantRoutes />;
+    return <ParticipantRoutes redirectParam={redirectParam} />;
   }
   return <MemberRoutes redirectParam={redirectParam} />;
 };

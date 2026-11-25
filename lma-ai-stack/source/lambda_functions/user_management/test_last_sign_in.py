@@ -303,3 +303,76 @@ def test_a_failed_sign_in_item_delete_does_not_fail_the_user_deletion(env) -> No
 
     assert result["success"] is True
     assert cognito.deleted == ["new@example.com"]
+
+
+class FakeConsentTable:
+    """The deleted user's consents given in advance (pmc#<address>), as the resolver stores them."""
+
+    def __init__(self, items: list[dict]) -> None:
+        self.items = items
+        self.queries: list[dict] = []
+        self.updated: list[dict] = []
+
+    def delete_item(self, **_kwargs):
+        return {}
+
+    def query(self, **kwargs):
+        self.queries.append(kwargs)
+        pk = kwargs["ExpressionAttributeValues"][":pk"]
+        return {"Items": [dict(i) for i in self.items if i["PK"] == pk]}
+
+    def update_item(self, **kwargs):
+        self.updated.append(kwargs)
+        for item in self.items:
+            if (item["PK"], item["SK"]) == (kwargs["Key"]["PK"], kwargs["Key"]["SK"]):
+                item["WithdrawnAt"] = kwargs["ExpressionAttributeValues"][":w"]
+                item["WithdrawnReason"] = kwargs["ExpressionAttributeValues"][":r"]
+        return {}
+
+
+def test_deleting_a_user_withdraws_the_consents_they_gave_in_advance(env, monkeypatch) -> None:
+    table = FakeConsentTable(
+        [
+            {"PK": "pmc#new@example.com", "SK": "ac#1", "Subject": "sub-new"},
+            {"PK": "pmc#new@example.com", "SK": "ac#2", "Subject": "sub-new", "WithdrawnAt": "x"},
+            # Given by an earlier account with the same address: not this user's.
+            {"PK": "pmc#new@example.com", "SK": "ac#3", "Subject": "sub-earlier"},
+        ]
+    )
+    monkeypatch.setattr(index, "EVENT_SOURCING_TABLE", "events")
+    monkeypatch.setattr(
+        index.boto3, "resource", lambda _service: mock.Mock(Table=lambda _name: table)
+    )
+
+    result = index.handler(
+        admin_event("deleteUser", {"input": {"username": "new@example.com"}}), None
+    )
+
+    assert result["success"] is True
+    assert [u["Key"]["SK"] for u in table.updated] == ["ac#1"]
+    assert table.items[0]["WithdrawnReason"] == "account_deleted"
+    assert table.items[1]["WithdrawnAt"] == "x"
+    assert "WithdrawnAt" not in table.items[2]
+
+
+def test_a_failed_consent_withdrawal_does_not_fail_the_user_deletion(env, monkeypatch) -> None:
+    cognito, _dynamo = env
+
+    def failing(**_kwargs):
+        raise _denied("Query")
+
+    monkeypatch.setattr(index, "EVENT_SOURCING_TABLE", "events")
+    monkeypatch.setattr(
+        index.boto3,
+        "resource",
+        lambda _service: mock.Mock(
+            Table=lambda _name: mock.Mock(query=failing, delete_item=lambda **_k: {})
+        ),
+    )
+
+    result = index.handler(
+        admin_event("deleteUser", {"input": {"username": "new@example.com"}}), None
+    )
+
+    assert result["success"] is True
+    assert cognito.deleted == ["new@example.com"]

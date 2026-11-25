@@ -26,6 +26,7 @@ import {
   HOME_PATH,
   MCP_SERVERS_PATH,
   MEETINGS_QUERY_PATH,
+  MY_CONSENTS_PATH,
   SHARED_MEETINGS_PATH,
   SKILLS_PATH,
   STREAM_AUDIO_PATH,
@@ -71,6 +72,8 @@ export const ROUTE_ROLES = {
   [DESKTOP_CAPTURE_APP_PATH]: MEMBERS,
   // Each person enrolls and deletes their own voice, whatever their role.
   [VOICE_ENROLLMENT_PATH]: ROLES,
+  // Each person gives, reads and withdraws their own consents, whatever their role.
+  [MY_CONSENTS_PATH]: ROLES,
   [MCP_SERVERS_PATH]: MEMBERS,
   [SKILLS_PATH]: MEMBERS,
   [CONFIGURATION_PATH]: [ADMIN],

@@ -59,6 +59,7 @@ below are tested against it, so the table and the deployed behaviour agree.
 | Enrolling your own voice | Yes | Yes | Yes | Each person their own voice only: enrolling it, and deleting it. |
 | Configuration: settings, profiles and their history, prompt templates, chat buttons, voice assistant, transcription engine and cost prices | Yes | No | No |  |
 | Installing and changing MCP servers and skills, and importing or exporting their libraries | Yes | No | No |  |
+| Consent given in advance: your own consents, a meeting's consent page, and asking to be added to its participant list | Yes | Yes | Yes | Each person their own consents only, kept under the email address the user pool holds for them. Giving consent needs that address on the meeting's participant list; someone not on it is told only that, and may ask to be added, which notifies the meeting's owner in LMA. |
 | A meeting's participant list: changing it and reading whether each person on it has an LMA account | Yes | Yes | No | Admin: every meeting. User: their own meetings only, not those shared with them, and at most 1,000 different addresses looked up a day. The list itself is part of the meeting record, read with it; the account answer is none or the account's role, nothing else about it. |
 | Creating Participant accounts for the people on a meeting's participant list | Yes | Yes | No | Admin: any meeting. User: their own meetings only, at most 25 accounts a day. Only addresses on the meeting's list without an account, and only ever the Participant role; other roles and role changes stay with User Management. |
 | User Management: adding and deleting users and choosing their roles | Yes | No | No |  |
@@ -146,7 +147,7 @@ creates it, or changes an existing account to it, on the
 one for a person on their meeting's participant list (see
 [Participant accounts for a meeting](user-management.md#participant-accounts-for-a-meeting)).
 
-A Participant signs in to a home page with three pages beside it:
+A Participant signs in to a home page with four pages beside it:
 
 - **Shared meetings**: the meetings shared with them, newest first. A meeting
   is shared with a Participant when its owner shares it by hand, or, with
@@ -155,6 +156,10 @@ A Participant signs in to a home page with three pages beside it:
 - **A meeting's page**, read-only: its transcript (live while the meeting is in
   progress), summary, meeting chat, recordings and consent record, and a
   meeting assistant panel for questions about that meeting.
+- **My consents**: the consents they gave before meetings, a meeting's
+  consent page opened from its consent link, and withdrawal, as every role
+  has; see [Consent given in advance](meeting-consent.md#consent-given-in-advance).
+  Signing in from a consent link opens that page.
 - **Voice enrollment**: enrolling their own voice and deleting it again, as
   every role can; see [Voice Enrollment](voice-enrollment.md).
 

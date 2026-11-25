@@ -20,6 +20,7 @@ import {
   USER_MANAGEMENT_PATH,
   CONFIGURATION_PATH,
   VOICE_ENROLLMENT_PATH,
+  MY_CONSENTS_PATH,
   TROUBLESHOOTING_PATH,
   DEFAULT_PATH,
 } from '../../routes/constants';
@@ -87,6 +88,10 @@ export const generateNavigationItems = (settings, isAdmin) => {
       info: <Badge color="blue">Beta</Badge>,
     });
   }
+
+  // Each person's own consents given in advance, whatever their role; a
+  // standalone page, like voice enrollment.
+  navigationItems.push({ type: 'link', text: 'My consents', href: `#${MY_CONSENTS_PATH}`, external: true });
 
   // Add Configuration section (admin only)
   if (isAdmin) {

@@ -45,6 +45,7 @@ import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import quote
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
@@ -406,7 +407,7 @@ def delete_user(event, args):
             "Cannot delete the last remaining Admin user. Create another Admin first."
         )
 
-    sub = _sub_of(username)
+    sub, email = _sub_and_email_of(username)
     logger.info("Deleting user %s (role=%s)", username, target_role)
     try:
         cognito.admin_delete_user(UserPoolId=USER_POOL_ID, Username=username)
@@ -415,19 +416,58 @@ def delete_user(event, args):
 
     _delete_notification_preferences(username)
     _delete_last_sign_in(sub)
+    _withdraw_advance_consents(email, sub)
     return {"username": username, "success": True}
 
 
-def _sub_of(username):
-    """The user's Cognito sub, read before the user is deleted; "" if it cannot be read."""
-    if not USER_SIGN_IN_TABLE:
-        return ""
+def _sub_and_email_of(username):
+    """The user's Cognito sub and email address, read before the user is deleted.
+
+    Each is "" when it cannot be read.
+    """
     try:
         user = cognito.admin_get_user(UserPoolId=USER_POOL_ID, Username=username)
     except (ClientError, BotoCoreError):
         # A missing user is reported by the delete itself.
-        return ""
-    return _attr(user, "sub") or ""
+        return "", ""
+    return _attr(user, "sub") or "", (_attr(user, "email") or "").strip()
+
+
+def _withdraw_advance_consents(email, sub):
+    """Withdraw the consents a deleted user gave in advance. Best effort: the user is gone.
+
+    Consents are kept under the account's email address (PK pmc#<address>, see
+    advance_consent_resolver); only those the deleted account gave (its sub)
+    and still in force are withdrawn, with the reason account_deleted, so no
+    later meeting counts them. The records stay until they expire, as
+    withdrawn ones do.
+    """
+    if not EVENT_SOURCING_TABLE or not email or not sub:
+        return
+    table = boto3.resource("dynamodb").Table(EVENT_SOURCING_TABLE)
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    try:
+        items = table.query(
+            KeyConditionExpression="PK = :pk AND begins_with(SK, :ac)",
+            ExpressionAttributeValues={":pk": f"pmc#{email.casefold()}", ":ac": "ac#"},
+        ).get("Items", [])
+        for item in items:
+            if item.get("WithdrawnAt") or item.get("Subject") != sub:
+                continue
+            try:
+                table.update_item(
+                    Key={"PK": item["PK"], "SK": item["SK"]},
+                    UpdateExpression="SET WithdrawnAt = :w, WithdrawnReason = :r",
+                    ConditionExpression="attribute_not_exists(WithdrawnAt)",
+                    ExpressionAttributeValues={":w": now, ":r": "account_deleted"},
+                )
+            except ClientError as exc:
+                if exc.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
+                    raise
+    except (ClientError, BotoCoreError):
+        logger.warning(
+            "Could not withdraw the consents given in advance by a deleted user", exc_info=True
+        )
 
 
 def _delete_last_sign_in(sub):
@@ -537,7 +577,7 @@ def _read_meeting_for_participants(kind, ref_id):
         item = dynamodb.get_item(
             TableName=VIRTUAL_PARTICIPANT_TABLE,
             Key={"id": {"S": ref_id}},
-            ProjectionExpression="#o, participants",
+            ProjectionExpression="#o, participants, meetingName",
             ExpressionAttributeNames={"#o": "Owner"},
         ).get("Item")
         participants_attr = "participants"
@@ -546,6 +586,7 @@ def _read_meeting_for_participants(kind, ref_id):
     return {
         "owner": (item.get("Owner") or {}).get("S") or "",
         "participants": _plain_participants(item.get(participants_attr)),
+        "name": (item.get("meetingName") or {}).get("S") or (ref_id if kind == "call" else ""),
     }
 
 
@@ -735,7 +776,22 @@ def _remaining_today(username, now):
     return max(PARTICIPANT_ACCOUNTS_PER_DAY - used, 0)
 
 
-def _create_participant_account(email):
+def _invitation_metadata(kind, ref_id, meeting):
+    """The client metadata that has the invitation name the meeting and link its consent page.
+
+    Read by the user pool's CustomMessage trigger
+    (lma-cognito-stack/source/custom_message), which builds the link from the
+    web UI's address and this query. Cognito passes client metadata to the
+    trigger only; it is not stored.
+    """
+    return {
+        "lmaInvitation": "meeting_participant",
+        "meetingName": (meeting.get("name") or "")[:200],
+        "consentQuery": f"{'meeting' if kind == 'call' else 'vp'}={quote(ref_id, safe='')}",
+    }
+
+
+def _create_participant_account(email, client_metadata=None):
     """Create the account in the Participant group; "created" or "exists".
 
     The account is created with its invitation suppressed, added to the
@@ -766,6 +822,8 @@ def _create_participant_account(email):
             Username=email,
             MessageAction="RESEND",
             DesiredDeliveryMediums=["EMAIL"],
+            # The invitation names the meeting and links to its consent page.
+            **({"ClientMetadata": client_metadata} if client_metadata else {}),
         )
     except ClientError:
         logger.exception("Could not finish a new participant account; removing it")
@@ -782,6 +840,7 @@ def create_participant_accounts(event, args):
     caller = _get_caller_identity(event)
     payload = args.get("input") or {}
     meeting = _meeting_for_caller(caller, payload)
+    invitation = _invitation_metadata(*_meeting_ref(payload), meeting)
     listed = {p["email"].casefold(): p["email"] for p in meeting["participants"]}
 
     requested = payload.get("emails")
@@ -840,7 +899,7 @@ def create_participant_accounts(event, args):
             continue
         attempts += 1
         try:
-            outcome = _create_participant_account(email)
+            outcome = _create_participant_account(email, invitation)
         except ClientError as exc:
             logger.warning("Could not create a participant account: %s", exc)
             outcome = "failed"

@@ -29,9 +29,12 @@ vi.mock('../components/participant-meetings/ParticipantMeetingPage', () => ({
 vi.mock('../components/voice-enrollment/VoiceEnrollmentPage', () => ({
   default: () => <div>participant: voice enrollment</div>,
 }));
+vi.mock('../components/my-consents/MyConsentsPage', () => ({
+  default: () => <div>participant: my consents</div>,
+}));
 
 /* eslint-disable import/first */
-import ParticipantRoutes from './ParticipantRoutes';
+import ParticipantRoutes, { afterSignIn } from './ParticipantRoutes';
 import AuthRoutes from './AuthRoutes';
 /* eslint-enable import/first */
 
@@ -78,6 +81,22 @@ describe('a Participant', () => {
     cleanup();
     renderAt('/voice-enrollment');
     expect(screen.getByText('participant: voice enrollment')).toBeTruthy();
+  });
+
+  it("opens My consents, and a meeting's consent link after signing in", () => {
+    renderAt('/consents');
+    expect(screen.getByText('participant: my consents')).toBeTruthy();
+    cleanup();
+    renderAt('/login', <ParticipantRoutes redirectParam="/consents?meeting=Weekly%20sync" />);
+    expect(screen.getByText('participant: my consents')).toBeTruthy();
+  });
+
+  it('follows a sign-in redirect only to a page of its own', () => {
+    expect(afterSignIn('/consents?vp=abc')).toBe('/consents?vp=abc');
+    expect(afterSignIn('/shared-meetings')).toBe('/shared-meetings');
+    ['', '/calls', '//evil.example/x', 'https://evil.example', '/login', '/configuration/settings'].forEach(
+      (redirect) => expect(afterSignIn(redirect)).toBe('/home'),
+    );
   });
 
   it('is denied a path no route names', () => {

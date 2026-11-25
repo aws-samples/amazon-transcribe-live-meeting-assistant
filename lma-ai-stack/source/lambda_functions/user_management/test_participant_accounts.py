@@ -345,6 +345,29 @@ def test_the_invitation_is_sent_only_once_the_account_is_in_the_participant_grou
     assert resend["DesiredDeliveryMediums"] == ["EMAIL"]
 
 
+def test_the_invitation_names_the_meeting_and_its_consent_page(pool, ddb):
+    """Read by the user pool's CustomMessage trigger, which builds the link."""
+    ddb.meetings["Weekly sync / review"] = ddb.meetings[CALL_ID]
+    create({"CallId": "Weekly sync / review", "emails": ["di@example.com"]})
+    resend = [kw for name, kw in pool.calls if kw.get("MessageAction") == "RESEND"][0]
+    assert resend["ClientMetadata"] == {
+        "lmaInvitation": "meeting_participant",
+        "meetingName": "Weekly sync / review",
+        "consentQuery": "meeting=Weekly%20sync%20%2F%20review",
+    }
+    # Only the invitation carries it, not the suppressed create.
+    suppressed = [kw for name, kw in pool.calls if kw.get("MessageAction") == "SUPPRESS"][0]
+    assert "ClientMetadata" not in suppressed
+
+
+def test_a_vp_invitation_links_the_vp_consent_page(pool, ddb):
+    ddb.vps[VP_ID]["meetingName"] = {"S": "Planning"}
+    create({"VirtualParticipantId": VP_ID, "emails": ["Bo@Example.org"]})
+    resend = [kw for name, kw in pool.calls if kw.get("MessageAction") == "RESEND"][0]
+    assert resend["ClientMetadata"]["meetingName"] == "Planning"
+    assert resend["ClientMetadata"]["consentQuery"] == f"vp={VP_ID}"
+
+
 def test_only_listed_addresses_may_be_named(pool, ddb):
     with pytest.raises(Exception, match="participant list"):
         create({"CallId": CALL_ID, "emails": ["ana@example.com", "stranger@example.com"]})

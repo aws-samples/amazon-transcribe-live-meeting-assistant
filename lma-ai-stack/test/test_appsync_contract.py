@@ -320,6 +320,14 @@ OTHER_FIELDS = [
     ("Query", "getParticipantMeeting"),
     ("Query", "getParticipantMeetingTranscript"),
     ("Query", "getParticipantMeetingRecordings"),
+    # Consent given in advance: every signed-in role, each acting on the
+    # caller's own records only, kept under the email address the user pool
+    # holds for them (advance_consent_resolver).
+    ("Query", "listMyAdvanceConsents"),
+    ("Query", "getAdvanceConsentInvitation"),
+    ("Mutation", "giveAdvanceConsent"),
+    ("Mutation", "withdrawAdvanceConsent"),
+    ("Mutation", "askToBeAddedToMeeting"),
     # A digest of one meeting: a Lambda resolver applying the same rule in
     # `caller_may_edit`.
     ("Mutation", "requestMeetingDigest"),

@@ -47,5 +47,8 @@ export const EMBED_PATH = '/embed';
 // administrative task -- only the person whose voice it is can consent to it
 // being stored.
 export const VOICE_ENROLLMENT_PATH = '/voice-enrollment';
+// Each person's own consents given in advance, and a meeting's consent page
+// (/consents?meeting=<CallId> or ?vp=<Virtual Participant id>), for every role.
+export const MY_CONSENTS_PATH = '/consents';
 export const REDIRECT_URL_PARAM = 'redirect';
 export const MEETINGS_QUERY_PATH = `${CALLS_PATH}/query`;

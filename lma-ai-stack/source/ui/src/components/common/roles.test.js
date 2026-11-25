@@ -80,9 +80,9 @@ describe('navigation by role', () => {
     expect(refused).toEqual([]);
   });
 
-  it('links a Participant to their home page, their shared meetings and their voice enrollment only', () => {
+  it('links a Participant to their home page, shared meetings, consents and voice enrollment only', () => {
     const links = internalLinks(participantNavigationItems());
-    expect(links).toEqual(['/home', '/shared-meetings', '/voice-enrollment']);
+    expect(links).toEqual(['/home', '/shared-meetings', '/consents', '/voice-enrollment']);
     expect(links.filter((route) => !roleMayOpen(PARTICIPANT, route))).toEqual([]);
   });
 
@@ -91,6 +91,12 @@ describe('navigation by role', () => {
     expect(roleMayOpen(USER, '/shared-meetings/m-1')).toBe(false);
     expect(roleMayOpen(ADMIN, '/shared-meetings')).toBe(false);
     expect(roleMayOpen(PARTICIPANT, '/voice-enrollment')).toBe(true);
+  });
+
+  it('opens My consents to every role, and links every role to it', () => {
+    [ADMIN, USER, PARTICIPANT].forEach((role) => expect(roleMayOpen(role, '/consents')).toBe(true));
+    expect(internalLinks(generateNavigationItems(settings, false))).toContain('/consents');
+    expect(internalLinks(generateNavigationItems(settings, true))).toContain('/consents');
   });
 
   it('links a User to no Admin-only page', () => {

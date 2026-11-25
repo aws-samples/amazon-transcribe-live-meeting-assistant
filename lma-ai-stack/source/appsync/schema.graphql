@@ -525,6 +525,15 @@ type Mutation @aws_iam {
 	grantVoiceConsent: VoiceEnrollmentResult @aws_cognito_user_pools(cognito_groups: ["Admin", "User", "Participant"])
 	enrolMyVoice(input: EnrolMyVoiceInput!): VoiceEnrollmentResult @aws_cognito_user_pools(cognito_groups: ["Admin", "User", "Participant"])
 	revokeVoiceConsent(input: RevokeVoiceConsentInput): VoiceEnrollmentResult @aws_cognito_user_pools(cognito_groups: ["Admin", "User", "Participant"])
+	# Consent given in advance, by the signed-in person for themselves
+	# (advance_consent_resolver). Giving needs the caller on the meeting's
+	# participant list and the NoticeHash getAdvanceConsentInvitation returned
+	# for the same choice; asking to be added is for someone not on it, and
+	# tells the meeting's owner in LMA. See
+	# docs/meeting-consent.md#consent-given-in-advance.
+	giveAdvanceConsent(input: GiveAdvanceConsentInput!): AdvanceConsent @aws_cognito_user_pools(cognito_groups: ["Admin", "User", "Participant"])
+	withdrawAdvanceConsent(input: WithdrawAdvanceConsentInput!): AdvanceConsent @aws_cognito_user_pools(cognito_groups: ["Admin", "User", "Participant"])
+	askToBeAddedToMeeting(input: AskToBeAddedToMeetingInput!): AskToBeAddedToMeetingOutput @aws_cognito_user_pools(cognito_groups: ["Admin", "User", "Participant"])
 	addCallSummaryText(input: AddCallSummaryTextInput!): Call @aws_iam
 	addTranscriptSegment(input: AddTranscriptSegmentInput!): TranscriptSegment @aws_iam
 	# Written by the call event processor for an ADD_VIDEO_KEYFRAME event; IAM only,
@@ -786,6 +795,16 @@ type Query @aws_iam {
 	getParticipantMeeting(CallId: ID!): ParticipantMeeting @aws_cognito_user_pools(cognito_groups: ["Participant"])
 	getParticipantMeetingTranscript(CallId: ID!, nextToken: String): ParticipantTranscriptPage @aws_cognito_user_pools(cognito_groups: ["Participant"])
 	getParticipantMeetingRecordings(CallId: ID!): [ParticipantMeetingRecording] @aws_cognito_user_pools(cognito_groups: ["Participant"])
+	# Consent given in advance (advance_consent_resolver): the signed-in
+	# person's own consents, and a meeting's consent page as they see it.
+	# Each acts on the caller's own records only, by the email address the user
+	# pool holds for them. See docs/meeting-consent.md#consent-given-in-advance.
+	listMyAdvanceConsents: AdvanceConsentList @aws_cognito_user_pools(cognito_groups: ["Admin", "User", "Participant"])
+	# The meeting is named by CallId, or by VirtualParticipantId for a Virtual
+	# Participant that may not have created it yet (exactly one). Scope,
+	# ValidUntil (YYYY-MM-DD) and LabelKey choose the consent whose text is
+	# returned. Someone not on the meeting's participant list is told only that.
+	getAdvanceConsentInvitation(CallId: ID, VirtualParticipantId: ID, Scope: String, ValidUntil: String, LabelKey: String): AdvanceConsentInvitation @aws_cognito_user_pools(cognito_groups: ["Admin", "User", "Participant"])
 }
 
 type ZoomCredentialsStatus @aws_cognito_user_pools {
@@ -872,6 +891,10 @@ type VirtualParticipant @aws_cognito_user_pools @aws_iam {
 	# by the meeting preparation resolver. Read by the VP container when it
 	# starts, which puts it on the meeting record it creates as Participants.
 	participants: [MeetingParticipant]
+	# People not on that list who asked, from the meeting's consent link, to be
+	# added (askToBeAddedToMeeting; at most 20). Shown to the owner on the
+	# Virtual Participant's page.
+	participantListRequests: [ParticipantListRequest]
 	# The meeting consent mode and opt-in rule chosen for this meeting when the
 	# VP was started or scheduled; absent means the deployment's (see
 	# docs/meeting-consent.md). Read by the VP container when it starts, like
@@ -3575,4 +3598,125 @@ type ParticipantMeetingRecording @aws_cognito_user_pools {
 	SessionNumber: Int
 	Url: String!
 	ExpiresInSeconds: Int
+}
+
+# ----------------------------------------------------------------------------
+# Consent given in advance (advance_consent_resolver). A person's own consent
+# to a meeting, or to the meetings one organizer holds until a date, given
+# before the meeting from its consent page. Never the device it was given
+# from, even where the deployment keeps that with it. See
+# docs/meeting-consent.md#consent-given-in-advance.
+# ----------------------------------------------------------------------------
+
+type AdvanceConsent @aws_cognito_user_pools {
+	ConsentId: ID!
+	# "meeting" or "organizer".
+	Scope: String!
+	# The meeting of a "meeting" consent: its CallId, and the Virtual
+	# Participant it was given through, either or both.
+	CallId: String
+	VirtualParticipantId: String
+	# The meeting the consent page was opened for, as it was named then.
+	MeetingName: String
+	# The meeting's owner in LMA; an "organizer" consent covers their meetings.
+	Organizer: String
+	# An "organizer" consent limited to the meetings with this label.
+	LabelKey: String
+	LabelValue: String
+	GrantedAt: AWSDateTime!
+	ValidUntil: AWSDateTime!
+	WithdrawnAt: AWSDateTime
+	# "withdrawn", or "replaced" by a later consent for the same thing.
+	WithdrawnReason: String
+	# The exact text agreed to, its SHA-256 in hex, and the version of the
+	# configured wording it came from.
+	NoticeText: String!
+	NoticeHash: String!
+	NoticeVersion: String!
+	# "pre_meeting".
+	Source: String!
+	Email: String!
+	# "active", "withdrawn" or "expired".
+	Status: String!
+	# Whether the sign-in device's details were kept with it (the Meeting
+	# Consent setting); the details themselves are never returned.
+	DeviceDetailsKept: Boolean
+}
+
+type AdvanceConsentList @aws_cognito_user_pools {
+	Consents: [AdvanceConsent]
+	# Whether the deployment takes consent given in advance, and for how many
+	# days at most.
+	Enabled: Boolean
+	MaxDays: Int
+	# The address the consents are kept under: the caller's, as the user pool holds it.
+	Email: String
+}
+
+type AdvanceConsentInvitation @aws_cognito_user_pools {
+	# Whether the caller's email address is on the meeting's participant list.
+	# When it is not, only Listed, Requested, Enabled and Email are returned.
+	Listed: Boolean!
+	# Whether the caller has asked to be added to the list (in the last 30 days).
+	Requested: Boolean
+	Enabled: Boolean!
+	Email: String
+	# The name the list gives the caller.
+	ListedName: String
+	CallId: String
+	VirtualParticipantId: String
+	MeetingName: String
+	Organizer: String
+	ScheduledFor: AWSDateTime
+	# The meeting's labels, which an "organizer" consent may be limited to.
+	Labels: [CallLabel]
+	# The consent the arguments chose, with the exact text it would be given
+	# with and that text's hash, which giveAdvanceConsent must send back.
+	Scope: String
+	ValidUntil: AWSDateTime
+	LabelKey: String
+	LabelValue: String
+	NoticeText: String
+	NoticeHash: String
+	MaxDays: Int
+	# The caller's consents in force that cover this meeting.
+	ActiveConsents: [AdvanceConsent]
+}
+
+input GiveAdvanceConsentInput {
+	CallId: ID
+	VirtualParticipantId: ID
+	# "meeting" (the default) or "organizer".
+	Scope: String
+	# YYYY-MM-DD, required for "organizer": at most the Meeting Consent
+	# setting's number of days ahead (365 at most).
+	ValidUntil: String
+	LabelKey: String
+	NoticeHash: String!
+}
+
+input WithdrawAdvanceConsentInput {
+	ConsentId: ID!
+}
+
+input AskToBeAddedToMeetingInput {
+	CallId: ID
+	VirtualParticipantId: ID
+	# The name to show the owner beside the caller's email address.
+	Name: String
+}
+
+type AskToBeAddedToMeetingOutput @aws_cognito_user_pools {
+	Requested: Boolean!
+	# The caller is already on the list; nothing was asked.
+	Listed: Boolean!
+}
+
+# A signed-in person not on a Virtual Participant's participant list who asked
+# to be added, from its consent link. Shown to the owner on the Virtual
+# Participant's page.
+type ParticipantListRequest @aws_cognito_user_pools @aws_iam {
+	name: String
+	email: String!
+	requestedAt: AWSDateTime
 }

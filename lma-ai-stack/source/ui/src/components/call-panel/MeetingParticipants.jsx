@@ -22,6 +22,7 @@ import {
 } from '@cloudscape-design/components';
 
 import { createParticipantAccounts, getMeetingParticipantAccounts } from '../../graphql/queries/meetingParticipants';
+import { appBase, consentInvitation, consentLink } from '../common/advance-consent';
 import {
   MAX_PARTICIPANTS,
   accountCreationSummary,
@@ -44,6 +45,86 @@ const accountCellContent = (accounts, accountsError, email) => {
 const errorText = (error, fallback) => error?.errors?.[0]?.message || error?.message || fallback;
 
 /**
+ * The invitation to consent in advance: one email to everyone on the list,
+ * from the organizer's own mail client or copied, with one link to the
+ * meeting's consent page. The page requires sign-in and checks the address
+ * signed in with is on the list, so one link serves everyone.
+ */
+export const ConsentInvitationModal = ({ visible, onDismiss, invitation }) => {
+  const [copied, setCopied] = useState('');
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(invitation.text);
+      setCopied('success');
+    } catch (error) {
+      logger.error('could not copy the invitation', error);
+      setCopied('error');
+    }
+  };
+  return (
+    <Modal
+      visible={visible}
+      onDismiss={onDismiss}
+      header="Invite participants to consent"
+      size="large"
+      footer={
+        <Box float="right">
+          <SpaceBetween size="xs" direction="horizontal">
+            <Button variant="link" onClick={onDismiss}>
+              Close
+            </Button>
+            <Button onClick={copy} iconName="copy">
+              Copy text
+            </Button>
+            <Button variant="primary" href={invitation.mailto} iconName="envelope">
+              Open in mail app
+            </Button>
+          </SpaceBetween>
+        </Box>
+      }
+    >
+      <SpaceBetween size="s">
+        <Box>
+          One email to everyone on the list, sent from your own mail client, with one link to this meeting&apos;s
+          consent page. Each person signs in to LMA with the address it was sent to; anyone not on the list is told so
+          and can ask you to add them. LMA does not send this email.
+        </Box>
+        {invitation.shortened && (
+          <Alert type="info">
+            The list is too long for a mail link, so the mail app opens without recipients. Use Copy text, or add the
+            recipients below yourself.
+          </Alert>
+        )}
+        {copied === 'success' && <StatusIndicator type="success">Copied</StatusIndicator>}
+        {copied === 'error' && <StatusIndicator type="error">Could not copy; select the text below</StatusIndicator>}
+        <FormField label="To">
+          <Box>{invitation.to.join(', ')}</Box>
+        </FormField>
+        <FormField label="Subject">
+          <Box>{invitation.subject}</Box>
+        </FormField>
+        <FormField label="Text" stretch>
+          <Textarea value={invitation.body} readOnly rows={14} ariaLabel="Invitation text" />
+        </FormField>
+      </SpaceBetween>
+    </Modal>
+  );
+};
+
+ConsentInvitationModal.propTypes = {
+  visible: PropTypes.bool.isRequired,
+  onDismiss: PropTypes.func.isRequired,
+  invitation: PropTypes.shape({
+    to: PropTypes.arrayOf(PropTypes.string),
+    subject: PropTypes.string,
+    body: PropTypes.string,
+    text: PropTypes.string,
+    mailto: PropTypes.string,
+    shortened: PropTypes.bool,
+  }).isRequired,
+};
+
+/**
  * The meeting's participant list: the people expected at it, from the Virtual
  * Participant form, an MCP client or this panel's editor.
  *
@@ -59,6 +140,11 @@ const MeetingParticipants = ({
   callId = '',
   virtualParticipantId = '',
   canManage = false,
+  isOwner = false,
+  meetingName = '',
+  owner = '',
+  scheduledFor = '',
+  requests = [],
   onSave = undefined,
 }) => {
   const people = participantsInput(participants);
@@ -75,6 +161,7 @@ const MeetingParticipants = ({
   const [confirming, setConfirming] = useState(false);
   const [creating, setCreating] = useState(false);
   const [summary, setSummary] = useState(null);
+  const [inviting, setInviting] = useState(false);
 
   const loadAccounts = useCallback(async () => {
     if (!canManage || !hasRef || !people.length) {
@@ -175,6 +262,11 @@ const MeetingParticipants = ({
           Edit
         </Button>
       )}
+      {isOwner && people.length > 0 && hasRef && (
+        <Button iconName="envelope" onClick={() => setInviting(true)}>
+          Invite participants to consent
+        </Button>
+      )}
       {people.length > 0 && hasRef && (
         <Button
           onClick={() => setConfirming(true)}
@@ -212,6 +304,14 @@ const MeetingParticipants = ({
           </Alert>
         )}
         {accountsError && <Alert type="warning">{accountsError}</Alert>}
+        {canManage && requests.length > 0 && (
+          <Alert type="info" header="Asked to be added">
+            {`${requests.length === 1 ? 'This person' : 'These people'} opened the meeting's consent link and ` +
+              `${requests.length === 1 ? 'is' : 'are'} not on the list: ` +
+              `${requests.map((r) => (r.name ? `${r.name} <${r.email}>` : r.email)).join(', ')}. ` +
+              'Add them to the list to let them give consent in advance.'}
+          </Alert>
+        )}
         {editing ? (
           <SpaceBetween size="s">
             <FormField
@@ -247,6 +347,19 @@ const MeetingParticipants = ({
           />
         )}
       </SpaceBetween>
+      {inviting && (
+        <ConsentInvitationModal
+          visible={inviting}
+          onDismiss={() => setInviting(false)}
+          invitation={consentInvitation({
+            meetingName: meetingName || callId,
+            organizer: owner,
+            scheduledFor,
+            participants: people,
+            link: consentLink(appBase(), { callId, virtualParticipantId }),
+          })}
+        />
+      )}
       <Modal
         visible={confirming}
         onDismiss={() => setConfirming(false)}
@@ -285,6 +398,14 @@ MeetingParticipants.propTypes = {
   callId: PropTypes.string,
   virtualParticipantId: PropTypes.string,
   canManage: PropTypes.bool,
+  // The meeting's owner, who alone sends the invitation to consent, from
+  // their own mail client.
+  isOwner: PropTypes.bool,
+  meetingName: PropTypes.string,
+  owner: PropTypes.string,
+  scheduledFor: PropTypes.string,
+  // People not on the list who asked to be added (a Virtual Participant's).
+  requests: PropTypes.arrayOf(PropTypes.shape({ name: PropTypes.string, email: PropTypes.string })),
   onSave: PropTypes.func,
 };
 

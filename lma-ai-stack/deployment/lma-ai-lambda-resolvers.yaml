@@ -78,6 +78,11 @@ Parameters:
     Description: >-
       The recordings bucket. The Participant view signs links to the audio
       and video recordings in it.
+  UserPoolId:
+    Type: String
+    Description: >-
+      The LMA user pool. Consent given in advance reads the signed-in
+      person's own email address from it.
   TranscriptionExpirationInDays:
     Type: Number
     Description: >-
@@ -407,6 +412,7 @@ Resources:
                   - !GetAtt QueryKnowledgeBaseResolverFunction.Arn
                   - !GetAtt MeetingInvitationParserFunction.Arn
                   - !GetAtt ParticipantMeetingResolverFunction.Arn
+                  - !GetAtt AdvanceConsentResolverFunction.Arn
 
   UpdateChatButtonConfigResolverFunction:
     Type: AWS::Serverless::Function
@@ -2650,6 +2656,158 @@ Resources:
       LambdaConfig:
         LambdaFunctionArn: !GetAtt ParticipantMeetingResolverFunction.Arn
 
+  ##########################################################################
+  # Consent given in advance (listMyAdvanceConsents,
+  # getAdvanceConsentInvitation, giveAdvanceConsent, withdrawAdvanceConsent,
+  # askToBeAddedToMeeting). Each person's own consents, kept in the meetings
+  # table under pmc#<email address>; a request to be added to a meeting's list
+  # under pmr#. Reads the meeting's owner and participant list, and the
+  # caller's own email address from the user pool. See
+  # docs/meeting-consent.md#consent-given-in-advance.
+  ##########################################################################
+  AdvanceConsentResolverFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt AdvanceConsentResolverFunctionExecutionRole.Arn
+      Runtime: python3.12
+      Architectures:
+        - arm64
+      CodeUri: ../source/lambda_functions/advance_consent_resolver
+      Description: Consent given in advance, by each signed-in person for themselves
+      MemorySize: 256
+      Timeout: 30
+      Tracing: Active
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          EVENT_SOURCING_TABLE: !Ref EventSourcingTable
+          VIRTUAL_PARTICIPANT_TABLE: !Ref VirtualParticipantTable
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+          USER_POOL_ID: !Ref UserPoolId
+          APPSYNC_GRAPHQL_URL: !Ref AppSyncGraphQLUrl
+          MEETING_RECORD_EXPIRATION_IN_DAYS: !Ref MeetingRecordExpirationInDays
+      Layers:
+        # lma_consent, lma_config and lma_notifications.
+        - !Ref ConfigurationPythonLayer
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AIStackName}/resolvers/lambda/AdvanceConsentResolverFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required: AppSync returns the error to the caller"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only table, user pool and endpoint names and a number of days"
+    DependsOn:
+      - AdvanceConsentResolverFunctionLogGroup
+
+  AdvanceConsentResolverFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AIStackName}/resolvers/lambda/AdvanceConsentResolverFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  AdvanceConsentResolverFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Consent given in advance Lambda Role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub "lambda.${AWS::URLSuffix}"
+            Action:
+              - "sts:AssumeRole"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AWSXRayDaemonWriteAccess"
+      Policies:
+        - PolicyName: !Sub ${AIStackName}-AdvanceConsent
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              # The consents (pmc#), the requests to be added (pmr#) and the
+              # daily count of those requests (usr#): read and written.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                Resource: !Ref EventSourcingTableArn
+                Condition:
+                  ForAllValues:StringLike:
+                    "dynamodb:LeadingKeys":
+                      - "pmc#*"
+                      - "pmr#*"
+                      - "usr#*"
+              # The meeting rows (c#): read only, for the owner, the
+              # participant list and the labels.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                Resource: !Ref EventSourcingTableArn
+                Condition:
+                  ForAllValues:StringLike:
+                    "dynamodb:LeadingKeys":
+                      - "c#*"
+              # A Virtual Participant's owner, name, list and meeting; and the
+              # requests to be added kept on it for its owner.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                Resource: !Ref VirtualParticipantTableArn
+              # Read-only, on the shared configuration table: the Meeting
+              # Consent section.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                Resource: !Ref ConfigurationTableArn
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
+              # The caller's own email address, read by their username.
+              - Effect: Allow
+                Action:
+                  - cognito-idp:AdminGetUser
+                Resource: !Sub "arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}"
+              # Tells a meeting's owner that someone asked to be added.
+              - Effect: Allow
+                Action:
+                  - appsync:GraphQL
+                Resource: !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/types/Mutation/fields/publishMeetingNotification"
+
+  AdvanceConsentLambdaDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !Ref AppSyncApiId
+      Name: AdvanceConsentFunction
+      Description: Consent given in advance, by each signed-in person for themselves
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncLambdaRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt AdvanceConsentResolverFunction.Arn
+
 Outputs:
   UpdateChatButtonConfigLambdaDataSourceName:
     Value: !GetAtt UpdateChatButtonConfigLambdaDataSource.Name
@@ -2681,6 +2839,8 @@ Outputs:
     Value: !GetAtt StrandsChatDataSource.Name
   ParticipantMeetingLambdaDataSourceName:
     Value: !GetAtt ParticipantMeetingLambdaDataSource.Name
+  AdvanceConsentLambdaDataSourceName:
+    Value: !GetAtt AdvanceConsentLambdaDataSource.Name
   MeetingInvitationParserDataSourceName:
     Value: !GetAtt MeetingInvitationParserDataSource.Name
   MicrovmVncTokenDataSourceName:

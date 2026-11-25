@@ -84,6 +84,9 @@ PRESET_VALUES = {
             "keepEvidenceScreenshots": True,
             "clientsWithoutConsent": "accept_with_warning",
             "leaveOnObjection": False,
+            "advanceConsentEnabled": True,
+            "advanceConsentMaxDays": 365,
+            "keepAdvanceConsentDeviceDetails": False,
         },
         "retention": {
             "transcriptDeletionAfterSummary": "off",
@@ -105,6 +108,9 @@ PRESET_VALUES = {
             "keepEvidenceScreenshots": True,
             "clientsWithoutConsent": "accept_with_warning",
             "leaveOnObjection": False,
+            "advanceConsentEnabled": True,
+            "advanceConsentMaxDays": 365,
+            "keepAdvanceConsentDeviceDetails": False,
         },
         "retention": {
             "transcriptDeletionAfterSummary": "off",
@@ -126,6 +132,9 @@ PRESET_VALUES = {
             "keepEvidenceScreenshots": True,
             "clientsWithoutConsent": "reject",
             "leaveOnObjection": True,
+            "advanceConsentEnabled": True,
+            "advanceConsentMaxDays": 180,
+            "keepAdvanceConsentDeviceDetails": False,
         },
         "retention": {
             "transcriptDeletionAfterSummary": "after_15_minutes",
@@ -151,6 +160,9 @@ PRESET_VALUES = {
             "keepEvidenceScreenshots": True,
             "clientsWithoutConsent": "reject",
             "leaveOnObjection": True,
+            "advanceConsentEnabled": True,
+            "advanceConsentMaxDays": 180,
+            "keepAdvanceConsentDeviceDetails": False,
         },
         "retention": {
             "transcriptDeletionAfterSummary": "after_15_minutes",
@@ -176,6 +188,9 @@ PRESET_VALUES = {
             "keepEvidenceScreenshots": True,
             "clientsWithoutConsent": "reject",
             "leaveOnObjection": True,
+            "advanceConsentEnabled": True,
+            "advanceConsentMaxDays": 180,
+            "keepAdvanceConsentDeviceDetails": False,
         },
         "retention": {
             "transcriptDeletionAfterSummary": "off",
@@ -211,6 +226,9 @@ PRESET_VALUES = {
             "keepEvidenceScreenshots": True,
             "clientsWithoutConsent": "reject",
             "leaveOnObjection": False,
+            "advanceConsentEnabled": True,
+            "advanceConsentMaxDays": 365,
+            "keepAdvanceConsentDeviceDetails": False,
         },
         "retention": {
             "transcriptDeletionAfterSummary": "off",
@@ -246,6 +264,9 @@ PRESET_VALUES = {
             "keepEvidenceScreenshots": True,
             "clientsWithoutConsent": "reject",
             "leaveOnObjection": True,
+            "advanceConsentEnabled": True,
+            "advanceConsentMaxDays": 365,
+            "keepAdvanceConsentDeviceDetails": False,
         },
         "retention": {
             "transcriptDeletionAfterSummary": "immediately",
