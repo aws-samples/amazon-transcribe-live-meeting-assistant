@@ -100,7 +100,7 @@ The setting is read when the invitation is sent, from the active configuration, 
 
 The user's Cognito group membership changes at once. Their role changes at their next sign-in or token refresh, which is at most an hour later; until then they keep the role they had when they signed in. The hosted MCP server's API key endpoint reads the role on every request, so it applies there immediately: a key belonging to a user who is now a Participant is refused, and works again if they become a User or an Admin.
 
-You cannot change your own role, and the last remaining Admin cannot be moved to another role.
+You cannot change your own role, and the last remaining Admin cannot be moved to another role. For either, **Change role** is unavailable and shows why when you point to it.
 
 ## Deleting users
 

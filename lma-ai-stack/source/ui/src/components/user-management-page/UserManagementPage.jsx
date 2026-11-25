@@ -31,6 +31,7 @@ import {
   setUserRole,
   listInvitableMeetings,
 } from '../../graphql/queries/userManagementQueries';
+import useAppContext from '../../contexts/app';
 import { INVITABLE_MEETING_DAYS, invitableMeetingOptions, meetingRefFromText } from './invite-meeting';
 
 const client = generateClient();
@@ -122,7 +123,22 @@ const columnDefinitions = (lastSignInAvailable) => [
   },
 ];
 
+export const OWN_ROLE_REASON = "You can't change your own role";
+export const LAST_ADMIN_REASON = 'At least one Admin is required';
+
+// Why Change role is unavailable for this user, or null when it is available.
+// The setUserRole resolver applies the same two rules; this only keeps the UI
+// from offering a change it would refuse.
+export const changeRoleBlockedReason = (target, users, signedInUsername) => {
+  if (!target) return null;
+  const own = (signedInUsername || '').toLowerCase();
+  if (own && (target.username || '').toLowerCase() === own) return OWN_ROLE_REASON;
+  if (target.role === 'Admin' && users.filter((u) => u.role === 'Admin').length <= 1) return LAST_ADMIN_REASON;
+  return null;
+};
+
 const UserManagementPage = () => {
+  const { user: signedInUser } = useAppContext() || {};
   const [users, setUsers] = useState([]);
   const [lastSignInAvailable, setLastSignInAvailable] = useState(true);
   const [loading, setLoading] = useState(false);
@@ -249,9 +265,10 @@ const UserManagementPage = () => {
   };
 
   const roleTarget = selected.length === 1 ? selected[0] : null;
+  const roleBlockedReason = changeRoleBlockedReason(roleTarget, users, signedInUser?.username);
 
   const handleOpenRole = () => {
-    if (!roleTarget) return;
+    if (!roleTarget || roleBlockedReason) return;
     setRoleChoice(ROLE_OPTIONS.find((option) => option.value === roleTarget.role) || ROLE_OPTIONS[0]);
     setRoleErr(null);
     setRoleOpen(true);
@@ -341,7 +358,11 @@ const UserManagementPage = () => {
                 <Button iconName="refresh" onClick={fetchUsers} loading={loading}>
                   Refresh
                 </Button>
-                <Button disabled={!roleTarget} onClick={handleOpenRole}>
+                <Button
+                  disabled={!roleTarget || Boolean(roleBlockedReason)}
+                  disabledReason={roleBlockedReason || undefined}
+                  onClick={handleOpenRole}
+                >
                   Change role
                 </Button>
                 <Button disabled={selected.length === 0} onClick={handleOpenDelete}>
