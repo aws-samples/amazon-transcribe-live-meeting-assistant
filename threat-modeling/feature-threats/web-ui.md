@@ -4,8 +4,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Document Version** | 1.0 |
-| **Last Updated** | 2025-05-18 |
+| **Document Version** | 1.1 |
+| **Last Updated** | 2026-11-25 |
 | **Feature** | React UI, CloudFront, AppSync GraphQL, Embeddable Iframes |
 | **Classification** | Internal |
 
@@ -18,6 +18,9 @@ The Web UI is the primary user interface for LMA:
 - **Embeddable iframes**: Meeting components embeddable in external applications
 - **Real-time subscriptions**: WebSocket-based subscriptions for live transcript streaming
 - **Meeting inventory**: Browse, search, share, and manage meeting recordings
+- **Participant pages**: a read-only home page, shared meetings list and meeting page for the Participant role, with a live transcript subscription of its own
+- **My consents**: every role's own consents given in advance, a meeting's consent page opened from its consent link, and withdrawal
+- **Response headers**: a CloudFront response headers policy with a Content-Security-Policy and cross-origin and transport headers
 
 ## 2. Architecture
 
@@ -83,7 +86,7 @@ flowchart TD
 | **Severity** | High (3) |
 | **Risk Score** | **6 (High)** |
 | **Affected Components** | AppSync subscriptions, subscription authorization resolvers, meeting access control |
-| **Existing Mitigations** | Subscription authorization in AppSync resolvers, user-scoped subscription filters, meeting ID validation against user access |
+| **Existing Mitigations** | Subscription authorization in AppSync resolvers, user-scoped subscription filters, meeting ID validation against user access, roles named on every subscription, and a separate Participant subscription filtered on each message's sharing list (see UI.T06) |
 | **Status** | Mitigated |
 | **Recommendations** | Audit all subscription resolvers for proper authorization, implement server-side subscription filtering (not client-side), add integration tests for subscription access control, log subscription registration events |
 
@@ -100,7 +103,7 @@ flowchart TD
 | **Severity** | Medium (2) |
 | **Risk Score** | **4 (Medium)** |
 | **Affected Components** | Embeddable iframe components, CloudFront response headers, React UI |
-| **Existing Mitigations** | Content-Security-Policy `frame-ancestors` of `'self'` plus the origins in the `AllowedEmbedOrigins` stack parameter (empty by default), with `X-Frame-Options: DENY` while that list is empty; embed `postMessage` listeners accept messages only from the `allowedOrigins` query parameter's origins, or the embed's own origin when it is empty, and send events only to the first of them |
+| **Existing Mitigations** | Content-Security-Policy `frame-ancestors` of `'self'` plus the origins in the `AllowedEmbedOrigins` stack parameter (empty by default) in the web UI's response headers policy (see UI.T07), with `X-Frame-Options: DENY` while that list is empty; embed `postMessage` listeners accept messages only from the `allowedOrigins` query parameter's origins, or the embed's own origin when it is empty, and send events only to the first of them |
 | **Status** | Mitigated |
 | **Recommendations** | Keep `AllowedEmbedOrigins` to the exact origins that embed LMA, preferring exact hosts to a `*.` wildcard where the parent domain also serves sites the operator does not control; minimize data exposed through the iframe API |
 
@@ -110,7 +113,7 @@ flowchart TD
 |-----------|-------|
 | **Threat ID** | UI.T04 |
 | **Category** | STRIDE: Information Disclosure, Denial of Service |
-| **Description** | AppSync GraphQL API with 39 resolvers exposes a rich query surface. Attackers could use introspection to discover the full schema, craft expensive queries to cause DoS, or exploit overly permissive queries to extract more data than intended. |
+| **Description** | The AppSync GraphQL API exposes a rich query surface. Attackers could use introspection to discover the full schema, craft expensive queries to cause DoS, or exploit overly permissive queries to extract more data than intended. |
 | **Attack Vector** | Attacker uses GraphQL introspection to map the full API schema, then crafts deeply nested or batched queries that consume excessive Lambda/DynamoDB resources, or discovers undocumented queries that expose additional data |
 | **Impact** | API schema disclosure aiding further attacks, DDoS via expensive queries, unauthorized data access via discovered queries |
 | **Likelihood** | Medium (2) |
@@ -136,7 +139,41 @@ flowchart TD
 | **Affected Components** | CloudFront, S3 UI bucket, React application bundles |
 | **Existing Mitigations** | All exposed endpoints require Cognito authentication, CloudFront Origin Access Control (OAC) restricts direct S3 access, endpoints are not secret (security through access control, not obscurity) |
 | **Status** | Accepted |
-| **Recommendations** | Verify OAC is properly configured, ensure no sensitive data in client-side config, add response headers (X-Content-Type-Options, Strict-Transport-Security) |
+| **Recommendations** | Verify OAC is properly configured, ensure no sensitive data in client-side config; `X-Content-Type-Options` and `Strict-Transport-Security` are sent by the response headers policy (see UI.T07) |
+
+### UI.T06: Participant Read-Only View and Live Transcript Subscription
+
+| Attribute | Value |
+|-----------|-------|
+| **Threat ID** | UI.T06 |
+| **Category** | STRIDE: Information Disclosure |
+| **Description** | A Participant reads a shared meeting through operations of their own: the meeting list, a meeting's page, its transcript, its recordings and a live transcript subscription (`onAddParticipantTranscriptSegment`). If these returned fields beyond the read-only view, the owner's own material, or lines of a meeting no longer shared with the caller, a Participant would see more than the share is meant to give. |
+| **Attack Vector** | A Participant selects extra fields in a GraphQL query or subscription, subscribes to a meeting not shared with them, or keeps a live transcript open after the meeting is unshared |
+| **Impact** | Disclosure of the owner's material (meeting context, checklist, labels, assistant answers, sharing list, participant addresses) or of another meeting's transcript |
+| **Likelihood** | Low (1) |
+| **Severity** | High (3) |
+| **Risk Score** | **3 (Medium)** |
+| **Affected Components** | Participant meeting resolver, `participantTranscriptSubscription.js`, `ParticipantMeeting` and `ParticipantTranscriptSegment` types, Participant meeting page |
+| **Existing Mitigations** | Only the Participant role may call the Participant operations, and the member operations (`getCall`, `getTranscriptSegments`, `onAddTranscriptSegment` and every other) refuse a Participant at the field; the Participant queries return types of their own, built from an allowlist rather than the meeting record with fields removed, so a field the meeting record gains reaches a Participant only when it is added to the allowlist; a meeting is answered only when its sharing list names the caller (owning a meeting is not enough for this role); the live subscription is admitted only while the meeting is shared with the caller and only for the fields a `ParticipantTranscriptSegment` has, and each message is filtered on the meeting, on the speech and meeting-chat channels and on the sharing list it is published with, so an unshared meeting stops reaching the page with the next line; the page reads the meeting again every 30 seconds while it is in progress; a Participant's meeting assistant question is answered from that meeting only, without the meeting context, checklist or Virtual Participant controls, and is not added to the transcript |
+| **Status** | Mitigated |
+| **Recommendations** | When adding a field to the meeting record, decide explicitly whether it belongs in the Participant allowlist; keep the live access tests for the Participant role in the integration suite; see [What a Participant sees of a shared meeting](../../docs/user-based-access-control.md#what-a-participant-sees-of-a-shared-meeting) |
+
+### UI.T07: Browser-Side Script Loading, Framing and Transport Downgrade
+
+| Attribute | Value |
+|-----------|-------|
+| **Threat ID** | UI.T07 |
+| **Category** | STRIDE: Tampering, Information Disclosure |
+| **Description** | The web UI renders meeting content (transcripts, chat, summaries, documents) that participants and models produce. Without restrictive response headers, injected content could load scripts or connect to origins the web UI does not use, a page could be framed by another site, a response could be interpreted as a different content type, or a connection could be made over plain HTTP. |
+| **Attack Vector** | Content in a transcript or summary that a rendering library turns into markup; a third-party page that frames the web UI; a network position that downgrades a first connection |
+| **Impact** | Script execution in a signed-in user's session, exfiltration of meeting content to another origin, clickjacking |
+| **Likelihood** | Low (1) |
+| **Severity** | High (3) |
+| **Risk Score** | **3 (Medium)** |
+| **Affected Components** | CloudFront distribution of the web UI, response headers policy `SecurityHeadersPolicy`, React SPA |
+| **Existing Mitigations** | The distribution adds a response headers policy to every response: a Content-Security-Policy whose directives name each source the web UI uses (`script-src 'self'` with no `eval`, `object-src` and `base-uri` `'none'`, `connect-src` limited to the stack's AppSync, Cognito, S3 and other named AWS endpoints in the stack's Region and the few named external hosts), framing restrictions (`frame-ancestors 'self'` plus the `AllowedEmbedOrigins` origins, and `X-Frame-Options: DENY` while that list is empty), `Strict-Transport-Security`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, a `Permissions-Policy` that allows camera, microphone and display capture only for the web UI's own origin and denies other device features, and `Cross-Origin-Resource-Policy: same-origin`; the origin's `Server` header is removed; a unit test fails when the UI constructs an AWS SDK client whose service is not in `connect-src`, and an integration test checks the deployed headers |
+| **Status** | Mitigated |
+| **Recommendations** | When customizing the web UI, add each new origin to the matching directive rather than widening a directive; see [Response headers](../../docs/infrastructure-and-security.md#response-headers) |
 
 ## 4. Security Controls Summary
 
@@ -152,3 +189,7 @@ flowchart TD
 | **Geo restrictions** | CloudFront geographic access control | UI.T01, UI.T04 |
 | **Optional WAF** | IP allowlisting and rate limiting | UI.T04 |
 | **HTTPS only** | TLS 1.2+ enforced on all connections | All |
+| **Participant operations** | Participant-only queries and subscription returning allowlisted types | UI.T06 |
+| **Per-message sharing filter** | Participant live transcript filtered on the sharing list each line is published with | UI.T02, UI.T06 |
+| **Response headers policy** | `SecurityHeadersPolicy`: CSP, HSTS, nosniff, framing, Referrer-Policy, Permissions-Policy, CORP | UI.T01, UI.T03, UI.T07 |
+| **Header tests** | Unit test of `connect-src` against the UI's AWS clients; integration test of the deployed headers | UI.T07 |

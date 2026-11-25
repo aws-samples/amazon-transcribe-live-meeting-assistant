@@ -180,6 +180,21 @@
       "notes": "Every word labelled from the diarizer's frame activity, so short turns and overlaps keep their own speaker. Up to eight speakers per channel. Not yet run live."
     },
     {
+      "id": "parakeet-tdt-v2-sortformer",
+      "name": "Parakeet TDT 0.6B v2 offline (full precision) + Nemotron 3 Diarization (CC-BY-4.0 + OpenMDW-1.1)",
+      "status": "experimental",
+      "modelId": "parakeet-tdt-0.6b-v2",
+      "vadModelId": "silero-vad-v5",
+      "speakerModelId": "none",
+      "segmentationModelId": "none",
+      "diarizerModelId": "nemotron-3-diarization-int8",
+      "minSegmentMs": 2500,
+      "baselineMemoryMiB": 8192,
+      "redistributable": true,
+      "licenceSummary": "CC-BY-4.0 (ASR) + OpenMDW-1.1 (diarization) + MIT (VAD)",
+      "notes": "English only. On clean English headset audio it was more accurate than the default bundle on both channels and within about 0.2 points of Amazon Transcribe on the microphone channel, about 1 point behind it on the meeting channel. No live preview, so a row appears when its utterance ends. It ran live at 3.0 cores, under the 4-vCPU baseline, so a MicroVM costs the baseline: about $0.50 per audio hour at us-east-1 prices. Every word labelled by Nemotron 3 Diarization, up to eight speakers per channel."
+    },
+    {
       "id": "parakeet-tdt-v3-live-sortformer",
       "name": "Parakeet TDT 0.6B v3 offline with a FastConformer live preview + Nemotron 3 Diarization (CC-BY-4.0 + OpenMDW-1.1)",
       "status": "experimental",
@@ -504,6 +519,55 @@
       "provenanceVerified": "2026-11-07",
       "requiresVad": true,
       "note": "OFFLINE, not streaming: it is driven by the accurate engine, which segments audio with Silero VAD and decodes each closed utterance. That trades latency for accuracy - there is no interim text DURING an utterance, only when it ends - so it suits accuracy-first use more than a live meeting view. Chosen over Whisper (also permissive) because TDT is a transducer and reports token timestamps: turn splitting and live cutting both need word timings, and sherpa's Whisper export provides none, which would silently reduce diarization to one speaker per VAD segment. The int8 export is fetched file by file from the sherpa-onnx maintainer's Hugging Face repository pinned to commit 2bda32e (2025-08-16), so each checksum names a fixed revision. No warm-up WAV: the export's sample clips are not 16 kHz, so the image warms with a synthetic tone. Languages are the 25 European languages of NVIDIA's model card (2026-11-10); the model identifies the spoken language itself, so no language is configured and none is reported back. On synthetic single-speaker clips on 2026-11-10 its final text scored 0-6% word error rate in es-ES, es-US, fr-FR, de-DE, it-IT, pt-BR and nl-NL, and followed a mid-utterance switch from English to Spanish."
+    },
+    {
+      "id": "parakeet-tdt-0.6b-v2",
+      "name": "NVIDIA Parakeet TDT 0.6B v2 (offline, full precision, CC-BY-4.0)",
+      "engine": "accurate",
+      "archive": "files",
+      "files": {
+        "encoder": {
+          "path": "encoder.onnx",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2/resolve/86891485dd8ad7cb28cb1aade45c3e23d0197c30/encoder.onnx",
+          "sha256": "7ce8d2b3f45fcd3b553d3b7a188436db7748c271081cc004f28bf76f3df01893"
+        },
+        "encoder_data": {
+          "path": "encoder.weights",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2/resolve/86891485dd8ad7cb28cb1aade45c3e23d0197c30/encoder.weights",
+          "sha256": "90cd4bb6c9b60496d49be9bec3a844f4e9bf22c62a45ea93f391cc00f9a47cfe"
+        },
+        "decoder": {
+          "path": "decoder.onnx",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2/resolve/86891485dd8ad7cb28cb1aade45c3e23d0197c30/decoder.onnx",
+          "sha256": "0140d12782ccf550a9709f03a52c2782b3c54d045f47ce14af39c713ab42de7f"
+        },
+        "joiner": {
+          "path": "joiner.onnx",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2/resolve/86891485dd8ad7cb28cb1aade45c3e23d0197c30/joiner.onnx",
+          "sha256": "a9e57e488cd1016cbefd51f60712896af6590e3f61ff466a540e085bbd6af59e"
+        },
+        "tokens": {
+          "path": "tokens.txt",
+          "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2/resolve/86891485dd8ad7cb28cb1aade45c3e23d0197c30/tokens.txt",
+          "sha256": "ec182b70dd42113aff6c5372c75cac58c952443eb22322f57bbd7f53977d497d"
+        }
+      },
+      "warmWav": {
+        "url": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2/resolve/86891485dd8ad7cb28cb1aade45c3e23d0197c30/test_wavs/0.wav",
+        "sha256": "5fceacff0315d49cb59fcc505bcecf1ed5f2f35c2897b1e65a59f30e5d922150"
+      },
+      "sampleRate": 16000,
+      "languages": [
+        "en"
+      ],
+      "license": "CC-BY-4.0",
+      "licenseUrl": "https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2",
+      "sherpaOnnx": "1.13.4",
+      "onnxruntime": "1.27.0",
+      "approxDownloadMb": 2420,
+      "provenanceVerified": "2026-11-16",
+      "requiresVad": true,
+      "note": "English only. The full-precision export of Parakeet TDT 0.6B v2 by the sherpa-onnx maintainer, fetched file by file pinned to commit 8689148; the encoder keeps its weights in encoder.weights, whose name the graph records. warmWav is the export's 16 kHz sample clip, the same clip the int8 entry uses. In parakeet-tdt-v2-sortformer, live on a dev stack on 2026-11-17 with three clean AMI headset meetings (IS1009b/c/d, close-talk, no crosstalk), it scored 5.4-6.1% word error rate on the microphone channel and 6.1-8.0% on the meeting channel, against 5.2-5.9% and 5.1-6.8% for Amazon Transcribe and 6.2-7.2% and 6.7-7.5% for the default bundle. That MicroVM averaged 3.0 cores, under its 4-vCPU baseline, with about 3.0 GB resident."
     },
     {
       "id": "parakeet-tdt-0.6b-v2-int8",

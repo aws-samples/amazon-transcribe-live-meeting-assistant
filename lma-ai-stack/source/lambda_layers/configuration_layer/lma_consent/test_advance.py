@@ -194,3 +194,70 @@ def test_a_name_two_attendees_show_matches_nobody():
 
 def test_an_empty_name_matches_nobody():
     assert advance.match_listed(["", "  "], LISTED) == {}
+
+
+# ── standing consents given with no meeting named, and the deployment scope ──
+
+
+def test_a_deployment_consent_covers_every_meeting_until_its_date():
+    everywhere = consent(Scope="deployment", CallId=None, Organizer=None)
+    assert advance.covers(everywhere, MEETING, NOW)
+    assert advance.covers(everywhere, {"CallId": "Other", "Owner": "someone@example.com"}, NOW)
+    assert not advance.covers(everywhere, MEETING, datetime(2027, 11, 26, tzinfo=timezone.utc))
+    assert not advance.covers({**everywhere, "WithdrawnAt": "2026-11-25T11:30:00Z"}, MEETING, NOW)
+
+
+def test_a_deployment_consent_runs_to_a_date_within_the_period():
+    with pytest.raises(advance.InvalidConsent):
+        advance.valid_until("deployment", None, NOW, 180)
+    with pytest.raises(advance.InvalidConsent, match="180 days"):
+        advance.valid_until("deployment", "2027-05-25", NOW, 180)
+    until = advance.valid_until("deployment", "2027-05-24", NOW, 180)
+    assert advance.iso(until) == "2027-05-24T23:59:59Z"
+
+
+def test_an_organizer_is_compared_ignoring_case():
+    standing = consent(Scope="organizer", CallId=None, Organizer="owner@example.com")
+    assert advance.covers(standing, {**MEETING, "Owner": "Owner@Example.com"}, NOW)
+    assert advance.same_scope(standing, {**standing, "Organizer": "OWNER@example.com"})
+    assert not advance.covers({**standing, "Organizer": None}, MEETING, NOW)
+
+
+def test_deployment_consents_replace_each_other_and_no_other_scope():
+    everywhere = consent(Scope="deployment", CallId=None, Organizer=None)
+    assert advance.same_scope(everywhere, {**everywhere, "ConsentId": "x"})
+    assert not advance.same_scope(everywhere, consent(Scope="organizer", CallId=None))
+    assert not advance.same_scope(consent(Scope="organizer", CallId=None), everywhere)
+
+
+def test_the_deployment_text_names_no_organizer_and_no_meeting():
+    until = datetime(2027, 1, 31, 23, 59, 59, tzinfo=timezone.utc)
+    phrase = advance.scope_phrase("deployment", until=until)
+    assert phrase.startswith("every meeting on this Live Meeting Assistant deployment")
+    assert "until the end of 2027-01-31 (UTC)" in phrase
+    text = advance.render_text(
+        "{organizer} may record {meeting}: {scope}.",
+        organizer=advance.EACH_ORGANIZER,
+        meeting_name="",
+        scope=phrase,
+        standing=True,
+    )
+    assert text.startswith("the organizer of each meeting may record the meetings this consent")
+
+
+@pytest.mark.parametrize("typed", ["", None, "owner", "a@b", "x" * 250 + "@example.com", 3])
+def test_a_typed_organizer_must_be_an_email_address(typed):
+    with pytest.raises(advance.InvalidConsent):
+        advance.organizer_address(typed)
+
+
+def test_a_typed_organizer_is_kept_in_lower_case():
+    assert advance.organizer_address("  Owner@Example.COM ") == "owner@example.com"
+
+
+def test_a_typed_label_needs_both_its_key_and_value():
+    assert advance.typed_label("", None) is None
+    assert advance.typed_label(" engagement ", "acme") == ("engagement", "acme")
+    for key, value in (("engagement", ""), ("", "acme"), ("k" * 257, "acme")):
+        with pytest.raises(advance.InvalidConsent):
+            advance.typed_label(key, value)

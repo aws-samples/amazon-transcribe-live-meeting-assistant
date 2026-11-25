@@ -21,7 +21,8 @@ account; two call a deployed stack.
 | **ZAP DAST** (OWASP ZAP, dynamic scan) | a deployed stack's GraphQL API, web UI and MCP endpoint | `make stacktest-zap STACK=<name>` | weekly, or by hand, in GitLab |
 
 `make security-results` runs them as a set and writes one summary; see
-[Running everything](#running-everything).
+[Running everything](#running-everything). Each release's counts are published
+in `security/test-results/<version>/`; see [Release snapshots](#release-snapshots).
 
 The role matrix, `lma-ai-stack/source/appsync/role-matrix.json`, is the single
 source of truth for who may call each GraphQL operation and use each other entry
@@ -33,6 +34,7 @@ roles and per-meeting rules the tests hold the stack to.
 - [Live access tests](#live-access-tests)
 - [ZAP DAST](#zap-dast)
 - [Running everything](#running-everything)
+- [Release snapshots](#release-snapshots)
 - [Schedule](#schedule)
 - [What these tests do not exercise](#what-these-tests-do-not-exercise)
 - [Reporting a result](#reporting-a-result)
@@ -221,6 +223,59 @@ summary, with each step's outcome, time and counts, is written to
 `scratch/security-results/summary.md` and `summary.json`, and each step's output
 to `<step>.log` beside them.
 
+## Release snapshots
+
+Each release commits a published record of its security test results, in
+[`security/test-results/<version>/`](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/tree/develop/security/test-results):
+`summary.md` to read and `summary.json` with the same content for tools. A
+snapshot holds **counts only**:
+
+| Section | What it gives |
+|---|---|
+| Provenance | the release version (`VERSION`), the date the snapshot was written, the tested stack's version (from its template description), and for each test the date it was measured and the commit its tests ran from, or `not recorded` |
+| SRT | findings by priority (Critical, High, Medium, Low, Info) and status (Open, Reopened, Suppressed, Resolved); how many suppressed findings have a recorded decision in `.srt/suppressions.json`, and how many have none |
+| Static role checks | tests passed, failed, errored and skipped |
+| Live access tests | checks passed, failed and not run in each suite of [What is checked](#what-is-checked), and the reason given for each check not run |
+| ZAP DAST | the scan mode, and per target (`graphql`, `web`, `mcp`) ZAP's rule outcomes (PASS, WARN, FAIL, IGNORE, INFO) and the alert counts by risk after the triage in `zap-rules.conf` |
+| Not run in this snapshot | every test that did not run, with the reason, and the active ZAP scan when the scan was passive |
+| What these tests do not exercise | the scope limits in [What these tests do not exercise](#what-these-tests-do-not-exercise) |
+
+It never names an alert, a finding, an operation that was called or what it
+answered, a URL, a host, an account, a Region or a stack. The detail stays in the
+local reports, as [Reporting a result](#reporting-a-result) requires.
+
+**Reading a snapshot.** A test that did not run is listed as not run rather than
+left out, and a check not run is not a pass. Compare the measured dates: a
+snapshot can be curated from runs made on different days, and each test shows its
+own. A ZAP alert count is not a failure (the scan is WARN-only); a non-zero
+`FAIL` rule count or a failed access check is. SRT's *Open* column is what
+remained unreviewed when the scan ran; *Suppressed* findings each carry a reviewed
+decision. The stack's version says which release the live tests and the ZAP scan
+ran against; a development stack shows a development version such as
+`0.4.1.dev1`.
+
+**Producing one.** For a release, on the release commit and against a
+non-production stack built from it:
+
+```bash
+AWS_PROFILE=default make security-results STACK=<stack name> REGION=<region> SNAPSHOT=1
+```
+
+This runs the whole set and writes the snapshot of that run's reports;
+`make security-snapshot` curates reports already on disk instead.
+`scripts/security/curate_snapshot.py` reads only the fields above from the raw
+reports and refuses to write anything (exit 1) when its output matches the shape
+of a URL, host name, ARN, account id, pool id, email address or local path, uses
+ZAP alert wording, or contains any string from the raw reports, such as an alert
+name, a finding's text or the stack name. It also refuses a snapshot that records
+a failed check or test or a ZAP `FAIL` rule until `ALLOW_FAILURES=1` is given,
+which is for after the failure has been reported and handled as
+[Reporting a result](#reporting-a-result) describes. An existing version's
+snapshot is not overwritten unless `REPLACE=1` is given. Read the snapshot before committing it;
+the steps are in the
+[`curate-security-results`](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/blob/develop/.claude/skills/curate-security-results.md)
+skill.
+
 ## Schedule
 
 | What | Where | When |
@@ -264,6 +319,9 @@ So that a green run is not read as more than it is:
   entry points tested here; their own code is covered by their unit tests.
 - **Token revocation after sign-out**, **TLS protocol versions** and **rate
   limits** are not tested.
+- **ZAP sends HTTP requests only.** It scans the GraphQL API, the web UI and the
+  MCP endpoint, not the WebSocket transcriber, which the live access tests call
+  instead.
 - **Recording links per meeting.** The web UI signs recording links itself,
   with credentials scoped to the recordings prefixes, as
   [Recording Playback](user-based-access-control.md#recording-playback)

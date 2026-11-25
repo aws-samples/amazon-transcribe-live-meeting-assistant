@@ -87,7 +87,7 @@ export const MAX_PARTICIPANTS = 100;
  * resolver when it was stored; an entry without an email address is left out,
  * and an address is kept once, compared ignoring case.
  */
-function participantEntries(value: unknown): MeetingParticipant[] {
+export function participantsFromVpRow(value: unknown): MeetingParticipant[] {
   if (!Array.isArray(value)) return [];
   const seen = new Set<string>();
   const participants: MeetingParticipant[] = [];
@@ -157,7 +157,7 @@ export function preparationFromVpRow(
       ? row.summaryProfile
       : null;
   const guidanceEnabled = typeof row?.guidanceEnabled === 'boolean' ? row.guidanceEnabled : null;
-  const participants = participantEntries(row?.participants);
+  const participants = participantsFromVpRow(row?.participants);
   if (
     !labels.length &&
     !audience &&
@@ -178,6 +178,28 @@ export function preparationFromVpRow(
     summaryProfile,
     meetingSharedWith,
     guidanceEnabled,
+    participants,
+  };
+}
+
+/**
+ * The preparation with its participant list replaced by `participants`, the
+ * list read from the row again just before the meeting is created. A VP that
+ * started with no preparation gets one holding the list alone.
+ */
+export function withParticipants(
+  preparation: VpPreparation | null,
+  participants: MeetingParticipant[],
+): VpPreparation {
+  return {
+    labels: [],
+    audience: null,
+    meetingContext: '',
+    checklist: [],
+    summaryProfile: null,
+    meetingSharedWith: [],
+    guidanceEnabled: null,
+    ...(preparation ?? {}),
     participants,
   };
 }

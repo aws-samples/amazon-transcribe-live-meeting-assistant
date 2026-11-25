@@ -811,7 +811,7 @@ endif
 	@echo -e "$(CYAN)Running the live access tests against '$(SECTEST_STACK)'...$(NC)"
 	$(SECTEST_REGION_ENV) $(if $(filter 1 true yes,$(SHARED)),LMA_SECTEST_NO_CLIENT_CHANGE=1) \
 		$(PYTHON) -m pytest integ-tests/test_role_access.py integ-tests/test_security_access.py \
-		--stack-name "$(SECTEST_STACK)" --no-skips
+		--stack-name "$(SECTEST_STACK)" --no-skips $(RBAC_PYTEST_ARGS)
 	@echo -e "$(GREEN)✅ Live access tests passed against '$(SECTEST_STACK)'. Report: scratch/api-test-results/report.md$(NC)"
 
 # OWASP ZAP in Docker. Passive unless ZAP_ACTIVE=1, which sends attack payloads
@@ -831,9 +831,21 @@ endif
 
 # Offline: SRT and the static role checks. With STACK: also stacktest-rbac and a
 # passive stacktest-zap. Every step runs; summary in scratch/security-results/.
-security-results: ## Run the security tests as a set (Usage: make security-results [STACK=<name> REGION=<region>])
+# SNAPSHOT=1 then writes this run's counts-only snapshot to
+# security/test-results/<VERSION>/ (committed; see the curate-security-results
+# skill). REPLACE=1 overwrites an existing snapshot of that version.
+# ALLOW_FAILURES=1 writes one that records failures, once they are handled.
+SNAPSHOT_FLAGS = $(if $(filter 1 true yes,$(REPLACE)),--replace) \
+	$(if $(filter 1 true yes,$(ALLOW_FAILURES)),--allow-failures)
+security-results: ## Run the security tests as a set (Usage: make security-results [STACK=<name> REGION=<region>] [SNAPSHOT=1])
 	$(SECTEST_REGION_ENV) $(PYTHON) scripts/security/security_results.py \
-		$(if $(STACK),--stack-name "$(STACK)") $(if $(REGION),--region "$(REGION)")
+		$(if $(STACK),--stack-name "$(STACK)") $(if $(REGION),--region "$(REGION)") \
+		$(if $(filter 1 true yes,$(SNAPSHOT)),--snapshot $(SNAPSHOT_FLAGS))
+
+# Curate the snapshot from reports already on disk, without running the tests.
+# CURATE_ARGS passes flags through, e.g. --stack-version 0.4.1 --commit live-rbac=<sha>.
+security-snapshot: ## Write security/test-results/<VERSION>/ from existing local reports (Usage: make security-snapshot [CURATE_ARGS=...])
+	$(PYTHON) scripts/security/curate_snapshot.py $(SNAPSHOT_FLAGS) $(CURATE_ARGS)
 
 ##@ Product Demo Recording
 # Narrated demo videos of the web UI: see .claude/skills/product-demo.md. The

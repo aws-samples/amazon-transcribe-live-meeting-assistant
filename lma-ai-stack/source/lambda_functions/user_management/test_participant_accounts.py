@@ -178,6 +178,8 @@ class FakeDynamo:
 
     def update_item(self, **kwargs):
         self.updates.append(kwargs)
+        if "list_append" in kwargs["UpdateExpression"]:
+            return self._append_participant(**kwargs)
         key = (kwargs["Key"]["PK"]["S"], kwargs["Key"]["SK"]["S"])
         values = kwargs["ExpressionAttributeValues"]
         current = self.counts.get(key)
@@ -199,6 +201,25 @@ class FakeDynamo:
             self.counts[key] = (current or 0) + int(values[":minus"]["N"])
         return {}
 
+    def appended(self) -> list:
+        return [u for u in self.updates if "list_append" in u["UpdateExpression"]]
+
+    def _append_participant(self, **kwargs):
+        """createUser's append to a participant list, with its condition."""
+        values = kwargs["ExpressionAttributeValues"]
+        attribute = kwargs["ExpressionAttributeNames"]["#p"]
+        if "PK" in kwargs["Key"]:
+            item = self.meetings.get(kwargs["Key"]["PK"]["S"][2:])
+        else:
+            item = self.vps.get(kwargs["Key"]["id"]["S"])
+        current = (item or {}).get(attribute, {"L": []})["L"]
+        if item is None or len(current) >= int(values[":max"]["N"]):
+            raise ClientError({"Error": {"Code": "ConditionalCheckFailedException"}}, "UpdateItem")
+        item[attribute] = {"L": current + values[":entry"]["L"]}
+        if ":by" in values:
+            item["ParticipantsUpdatedBy"] = values[":by"]
+        return {}
+
 
 @pytest.fixture(name="pool")
 def pool_fixture(monkeypatch):
@@ -216,6 +237,8 @@ def ddb_fixture(monkeypatch):
     monkeypatch.setattr(index, "VIRTUAL_PARTICIPANT_TABLE", "vps")
     monkeypatch.setattr(index.boto3, "client", lambda *_a, **_k: fake)
     monkeypatch.setattr(index, "ALLOWED_SIGNUP_EMAIL_DOMAINS", "")
+    # Meeting Consent › Allow consent given in advance, as read from the configuration.
+    monkeypatch.setattr(index, "_advance_consent_enabled", lambda: True)
     return fake
 
 
@@ -351,6 +374,8 @@ def test_the_invitation_names_the_meeting_and_its_consent_page(pool, ddb):
     create({"CallId": "Weekly sync / review", "emails": ["di@example.com"]})
     resend = [kw for name, kw in pool.calls if kw.get("MessageAction") == "RESEND"][0]
     assert resend["ClientMetadata"] == {
+        "lmaRole": "Participant",
+        "lmaAdvanceConsent": "on",
         "lmaInvitation": "meeting_participant",
         "meetingName": "Weekly sync / review",
         "consentQuery": "meeting=Weekly%20sync%20%2F%20review",
@@ -488,3 +513,139 @@ def test_an_admin_s_lookups_are_not_counted(pool, ddb, monkeypatch):
 def test_the_owner_is_compared_exactly(pool, ddb):
     with pytest.raises(Exception, match="Unauthorized"):
         accounts({"CallId": CALL_ID}, username=OWNER.upper())
+
+
+# ── a Virtual Participant whose meeting exists ───────────────────────────────
+
+
+def test_a_vp_whose_meeting_exists_is_read_as_that_meeting_s_list(pool, ddb):
+    """Its page edits the meeting's list once the meeting exists, so that list is the one read."""
+    ddb.vps[VP_ID]["CallId"] = {"S": CALL_ID}
+    assert [a["email"] for a in accounts({"VirtualParticipantId": VP_ID})] == [
+        p["email"] for p in LISTED
+    ]
+    # Still named and linked as the Virtual Participant.
+    ddb.vps[VP_ID]["meetingName"] = {"S": "Planning"}
+    create({"VirtualParticipantId": VP_ID, "emails": ["di@example.com"]})
+    resend = [kw for name, kw in pool.calls if kw.get("MessageAction") == "RESEND"][0]
+    assert resend["ClientMetadata"]["consentQuery"] == f"vp={VP_ID}"
+    assert resend["ClientMetadata"]["meetingName"] == "Planning"
+
+
+def test_a_vp_s_linked_meeting_with_another_owner_is_not_followed(pool, ddb):
+    ddb.vps[VP_ID]["CallId"] = {"S": CALL_ID}
+    ddb.meetings[CALL_ID]["Owner"] = {"S": OTHER}
+    assert len(accounts({"VirtualParticipantId": VP_ID})) == 2
+
+
+def test_the_invitation_says_nothing_of_consent_given_in_advance_when_it_is_off(
+    pool, ddb, monkeypatch
+):
+    monkeypatch.setattr(index, "_advance_consent_enabled", lambda: False)
+    create({"CallId": CALL_ID, "emails": ["di@example.com"]})
+    resend = [kw for name, kw in pool.calls if kw.get("MessageAction") == "RESEND"][0]
+    assert resend["ClientMetadata"]["lmaRole"] == "Participant"
+    assert "lmaAdvanceConsent" not in resend["ClientMetadata"]
+
+
+# ── createUser with a meeting to invite the person to ────────────────────────
+
+ADMIN = {"username": "admin@example.com", "groups": ["Admin"]}
+
+
+def create_user(payload, **caller):
+    return index.handler(event("createUser", {"input": payload}, **{**ADMIN, **caller}), None)
+
+
+def _sent_metadata(pool):
+    sent = [kw for name, kw in pool.calls if name == "admin_create_user"]
+    assert len(sent) == 1
+    return sent[0]["ClientMetadata"]
+
+
+def _emails(attribute):
+    return [entry["M"]["email"]["S"] for entry in attribute["L"]]
+
+
+@pytest.mark.parametrize("role", ["Admin", "User", "Participant"])
+def test_without_a_meeting_the_invitation_carries_only_the_role(pool, ddb, role):
+    create_user({"email": "new@example.com", "role": role})
+    assert _sent_metadata(pool) == {"lmaRole": role, "lmaAdvanceConsent": "on"}
+    assert ddb.appended() == []
+
+
+@pytest.mark.parametrize("role", ["Admin", "User", "Participant"])
+def test_a_user_invited_to_a_meeting_gets_its_consent_link_and_is_listed(pool, ddb, role):
+    create_user({"email": "new@example.com", "role": role, "inviteToMeeting": CALL_ID})
+    assert _sent_metadata(pool) == {
+        "lmaRole": role,
+        "lmaAdvanceConsent": "on",
+        "lmaInvitation": "meeting_participant",
+        "meetingName": CALL_ID,
+        "consentQuery": f"meeting={CALL_ID}",
+    }
+    meeting = ddb.meetings[CALL_ID]
+    assert _emails(meeting["Participants"])[-1] == "new@example.com"
+    assert len(meeting["Participants"]["L"]) == len(LISTED) + 1
+    assert meeting["ParticipantsUpdatedBy"] == {"S": "admin@example.com"}
+    # The list is changed before the account is made.
+    assert pool.names_called().index("admin_create_user") > 0
+
+
+def test_a_vp_without_a_meeting_gets_the_address_on_its_own_list(pool, ddb):
+    ddb.vps[VP_ID]["meetingName"] = {"S": "Planning"}
+    create_user({"email": "new@example.com", "role": "Participant", "inviteToMeeting": VP_ID})
+    metadata = _sent_metadata(pool)
+    assert metadata["consentQuery"] == f"vp={VP_ID}" and metadata["meetingName"] == "Planning"
+    assert _emails(ddb.vps[VP_ID]["participants"])[-1] == "new@example.com"
+    assert len(ddb.meetings[CALL_ID]["Participants"]["L"]) == len(LISTED)
+
+
+def test_a_vp_whose_meeting_exists_gets_the_address_on_the_meeting_s_list(pool, ddb):
+    ddb.vps[VP_ID]["CallId"] = {"S": CALL_ID}
+    create_user({"email": "new@example.com", "role": "User", "inviteToMeeting": VP_ID})
+    assert _sent_metadata(pool)["consentQuery"] == f"vp={VP_ID}"
+    assert _emails(ddb.meetings[CALL_ID]["Participants"])[-1] == "new@example.com"
+    assert len(ddb.vps[VP_ID]["participants"]["L"]) == 2
+
+
+def test_an_address_already_listed_is_not_listed_again(pool, ddb):
+    create_user({"email": "DI@example.com", "role": "Participant", "inviteToMeeting": CALL_ID})
+    assert ddb.appended() == []
+    assert _sent_metadata(pool)["consentQuery"] == f"meeting={CALL_ID}"
+
+
+def test_an_unknown_meeting_is_refused_and_no_account_is_made(pool, ddb):
+    with pytest.raises(Exception, match="no meeting or Virtual Participant"):
+        create_user({"email": "new@example.com", "role": "User", "inviteToMeeting": "nope"})
+    assert "admin_create_user" not in pool.names_called() and ddb.appended() == []
+
+
+def test_an_existing_account_is_refused_before_the_list_is_changed(pool, ddb):
+    pool.add("new@example.com")
+    with pytest.raises(Exception, match="already exists"):
+        create_user({"email": "new@example.com", "role": "User", "inviteToMeeting": CALL_ID})
+    assert ddb.appended() == []
+
+
+def test_a_full_list_is_refused_and_no_account_is_made(pool, ddb):
+    people = [{"name": "", "email": f"p{n}@example.com"} for n in range(index.MAX_PARTICIPANTS)]
+    ddb.meetings[CALL_ID]["Participants"] = _participants_attr(people)
+    with pytest.raises(Exception, match="already has 100 people"):
+        create_user({"email": "new@example.com", "role": "User", "inviteToMeeting": CALL_ID})
+    assert "admin_create_user" not in pool.names_called()
+
+
+def test_a_blank_meeting_is_the_same_as_none(pool, ddb):
+    create_user({"email": "new@example.com", "role": "User", "inviteToMeeting": "  "})
+    assert "lmaInvitation" not in _sent_metadata(pool)
+
+
+def test_only_an_admin_may_create_a_user_for_a_meeting(pool, ddb):
+    with pytest.raises(Exception, match="Unauthorized"):
+        create_user(
+            {"email": "new@example.com", "role": "User", "inviteToMeeting": CALL_ID},
+            username=OWNER,
+            groups=["User"],
+        )
+    assert pool.calls == [] and ddb.updates == []

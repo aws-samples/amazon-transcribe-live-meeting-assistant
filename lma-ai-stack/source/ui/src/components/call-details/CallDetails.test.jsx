@@ -106,6 +106,38 @@ describe('the meeting page follows the meeting', () => {
   });
 });
 
+describe('the meeting page follows its switches', () => {
+  const ENDED = { Status: 'ENDED', WhiteboardsEnabled: false, GuidanceEnabled: false };
+
+  it('takes up a whiteboards switch change, which leaves UpdatedAt alone', async () => {
+    const { rerender, view } = renderPage([], meeting(ENDED));
+    await waitFor(() => expect(panel.props?.item.whiteboardsEnabled).toBe(false));
+    context.value = { ...context.value, calls: [meeting({ ...ENDED, WhiteboardsEnabled: true })] };
+    rerender(view());
+    await waitFor(() => expect(panel.props.item.whiteboardsEnabled).toBe(true));
+  });
+
+  it('takes up a live guidance switch change, which leaves UpdatedAt alone', async () => {
+    const { rerender, view } = renderPage([], meeting(ENDED));
+    await waitFor(() => expect(panel.props?.item.guidanceEnabled).toBe(false));
+    context.value = { ...context.value, calls: [meeting({ ...ENDED, GuidanceEnabled: true })] };
+    rerender(view());
+    await waitFor(() => expect(panel.props.item.guidanceEnabled).toBe(true));
+  });
+
+  it('keeps the switches when an update carries none', async () => {
+    const { rerender, view } = renderPage([], meeting({ ...ENDED, WhiteboardsEnabled: true }));
+    await waitFor(() => expect(panel.props?.item.whiteboardsEnabled).toBe(true));
+    context.value = {
+      ...context.value,
+      calls: [meeting({ ...ENDED, WhiteboardsEnabled: null, UpdatedAt: '2026-11-03T14:31:00.000Z' })],
+    };
+    rerender(view());
+    await waitFor(() => expect(panel.props.item.updatedAt).toBe('2026-11-03T14:31:00.000Z'));
+    expect(panel.props.item.whiteboardsEnabled).toBe(true);
+  });
+});
+
 describe('the meeting page keeps the agenda during a live meeting', () => {
   const AGENDA = {
     Agenda: 'Budget\nHiring',

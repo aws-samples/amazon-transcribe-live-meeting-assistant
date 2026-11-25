@@ -112,6 +112,23 @@ with the release's version in hand:
    features generically, name no customer, consumer or internal programme, and
    follow CLAUDE.md's Security Disclosure Hygiene in limitation text as anywhere else.
 
+## Capture the security test snapshot
+
+Every release commits a counts-only record of its security test results to
+`security/test-results/<version>/`. After `make version V=<x.y.z>`, on the release
+commit and against a non-production stack built from it (the user names it):
+
+```bash
+AWS_PROFILE=default make security-results STACK=<name> REGION=<region> SNAPSHOT=1
+```
+
+Then read the snapshot line by line and commit it, as
+[`curate-security-results.md`](curate-security-results.md) describes. A test that
+could not be run is recorded as not run; say so in the release PR rather than
+leaving the snapshot out. Do not replace a shipped version's snapshot.
+
+## After the release is published
+
 After the GitHub Release is published,
 `.github/workflows/solution-profile-release.yml` attaches the tarball, its
 `.sha256` and its `.build.json`. Check the release page shows all three.

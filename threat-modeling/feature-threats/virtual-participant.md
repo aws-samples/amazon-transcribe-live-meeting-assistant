@@ -4,8 +4,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Document Version** | 1.0 |
-| **Last Updated** | 2025-05-18 |
+| **Document Version** | 1.1 |
+| **Last Updated** | 2026-11-25 |
 | **Feature** | Virtual Participant (Headless Chrome on ECS Fargate) |
 | **Classification** | Internal |
 
@@ -17,6 +17,8 @@ The Virtual Participant enables LMA to join meetings autonomously by running a h
 - **Audio capture**: Captures two-channel audio from the browser
 - **Voice assistant**: Optional — speaks responses into the meeting via Nova Sonic or ElevenLabs
 - **Avatar display**: Optional — shows animated avatar via Simli in the meeting
+- **Meeting consent**: posts the consent notice, reads replies sent to everyone in the chat or said aloud, and counts consents given in advance for attendees matched to the participant list
+- **Meeting video**: optional screen recording, allowed only when the `EnableVideoRecording` stack parameter, the **Record Virtual Participant meeting video** setting and the launch all allow it
 
 The VP runs as a Fargate task in private subnets with access to meeting platforms over the internet via NAT gateway.
 
@@ -128,7 +130,7 @@ flowchart TD
 | **Severity** | High (3) |
 | **Risk Score** | **9 (Very High)** |
 | **Affected Components** | Virtual Participant, meeting platforms, audio recording pipeline |
-| **Existing Mitigations** | VP announces itself as a bot participant (visible in meeting participant list), recording notification in most meeting platforms, admin-only VP launch capability |
+| **Existing Mitigations** | VP announces itself as a bot participant (visible in meeting participant list), recording notification in most meeting platforms, VP launch limited to the Admin and User roles (a User sees and ends only their own Virtual Participants and those shared with them; the Participant role cannot launch), the Meeting Consent notice and replies (see REC.T03), and video recorded only when the `EnableVideoRecording` stack parameter, the **Record Virtual Participant meeting video** setting and the launch all allow it, with the setting read again when the VP starts and the consent notice carrying a video sentence only when video is recorded |
 | **Status** | Partially Mitigated |
 | **Recommendations** | Implement mandatory consent notification mechanism, add VP display name clearly indicating recording, provide meeting host with ability to kick VP, add audit trail for VP launches with justification, document consent requirements in deployment guide |
 
@@ -166,6 +168,40 @@ flowchart TD
 | **Status** | Accepted |
 | **Recommendations** | Implement Chrome memory limit monitoring, add graceful degradation (reduce features under load), configure ECS task auto-recovery, alert on task OOM kills |
 
+### VP.T07: Consent Given in Advance Matched to an Attendee by Display Name
+
+| Attribute | Value |
+|-----------|-------|
+| **Threat ID** | VP.T07 |
+| **Category** | STRIDE: Spoofing |
+| **Description** | In a meeting a Virtual Participant joins, an attendee is matched to a consent given in advance by comparing their display name with the names on the meeting's participant list. A display name is not a verified identity, so someone showing a listed person's name would be counted under that person's consent. |
+| **Attack Vector** | An attendee joins with the display name of a listed person who consented in advance, so that capture starts without that attendee's own reply |
+| **Impact** | Capture counted as consented for an attendee who did not consent |
+| **Likelihood** | Low (1) |
+| **Severity** | High (3) |
+| **Risk Score** | **3 (Medium)** |
+| **Affected Components** | Meeting consent resolver (`setMeetingConsentParticipants`), Virtual Participant consent runtime, consent records given in advance |
+| **Existing Mitigations** | Documented design limit, with these controls: the notice is always posted, as in any meeting; an attendee matches only when exactly one listed person has that name and only one attendee shows it, and only while the attendee has no other reply on the record; the Virtual Participant posts a line naming, by display name, everyone counted under a consent given in advance, with the reminder that anyone can still object; the record notes the basis of the match (`MatchBasis: display_name`) with the consent's scope, dates and text hash, and evidence screenshots are kept as usual; an objection from anyone, including the person whose name is shown, always stops capture, whenever it is made; a consent withdrawn on My consents during the meeting is recorded as an objection and the Virtual Participant stops capture within about 10 seconds; consent given in advance is counted only in Notify and Opt-in meetings with **Allow consent given in advance** on, and never for streaming clients, which have no roster to match |
+| **Status** | Partially Mitigated |
+| **Recommendations** | Where a deployment cannot accept a display-name match, turn **Allow consent given in advance** off so that every attendee replies in the meeting; see [In the meeting](../../docs/meeting-consent.md#in-the-meeting) and [Limitations](../../docs/meeting-consent.md#limitations) |
+
+### VP.T08: Instructions to the Virtual Participant Sent as Private Chat Messages
+
+| Attribute | Value |
+|-----------|-------|
+| **Threat ID** | VP.T08 |
+| **Category** | STRIDE: Tampering, Repudiation |
+| **Description** | The Virtual Participant reads the meeting chat for chat commands (`LMA leave`, `LMA pause`), meeting assistant questions and consent replies. A message that only its sender and the Virtual Participant can see would let one participant change what the Virtual Participant does, or record a consent or objection, without the rest of the meeting seeing it. |
+| **Attack Vector** | A participant sends the Virtual Participant a direct message with a command, a question, or a consent reply |
+| **Impact** | Changes to capture, assistant answers, or consent replies that other participants cannot see or dispute |
+| **Likelihood** | Low (1) |
+| **Severity** | Medium (2) |
+| **Risk Score** | **2 (Low)** |
+| **Affected Components** | Virtual Participant chat readers per platform, chat addressing, consent reply reader |
+| **Existing Mitigations** | The Virtual Participant acts only on chat messages sent to everyone in the meeting: a message sent privately, to the Virtual Participant or to anyone else, is not read for a chat command, a question or a consent reply, and the Virtual Participant posts nothing in reply to it; how each platform shows a message's recipient, and how a message is treated where the recipient cannot be read, is listed per platform in [Only messages sent to everyone](../../docs/virtual-participant.md#only-messages-sent-to-everyone) |
+| **Status** | Mitigated |
+| **Recommendations** | Send commands, questions and consent replies to everyone; use the meeting page's Consent section to record a reply that cannot be made in the chat |
+
 ## 4. Security Controls Summary
 
 | Control | Implementation | Threats Mitigated |
@@ -174,8 +210,12 @@ flowchart TD
 | **Ephemeral containers** | No persistent storage, fresh container per meeting | VP.T01, VP.T02 |
 | **IAM least-privilege** | Minimal task role (write to WebSocket, read config) | VP.T01, VP.T02 |
 | **KMS log encryption** | CloudWatch Logs encrypted with customer key | VP.T01 |
-| **Admin-only launch** | Only admin group can start VP sessions | VP.T04, VP.T05 |
+| **Role-limited launch** | Only the Admin and User roles can start VP sessions; a User only their own | VP.T04, VP.T05 |
 | **Bot identification** | VP identified as bot in meeting participant list | VP.T04, VP.T05 |
 | **Container/network isolation** | VP browser runs with `--no-sandbox`, so container isolation + least-privilege IAM + restricted NAT egress are the primary controls for browser-exploit containment | VP.T02 |
 | **Audit logging** | All VP launch/stop events logged | VP.T04, VP.T05 |
 | **Health checks** | ECS health monitoring with task restart | VP.T06 |
+| **Display-name match limits** | Unique match only, notice always posted, covered names posted, objection always wins | VP.T07 |
+| **Withdrawal during a meeting** | Withdrawal on My consents recorded as an objection; capture stops | VP.T07 |
+| **Chat sent to everyone only** | Commands, questions and consent replies read only from messages sent to everyone | VP.T08 |
+| **Video recording ceiling** | `EnableVideoRecording`, the VP video setting and the launch toggle; the first that says no wins | VP.T04 |

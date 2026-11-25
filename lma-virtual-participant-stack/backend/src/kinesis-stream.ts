@@ -4,7 +4,13 @@ import { details } from './details.js';
 import { buildDiarizedSegments, type TranscribeItem } from './transcribe-diarization.js';
 import { SpeakerFusion } from './speaker-fusion.js';
 import { agendaStartFields, type VpAgenda } from './meeting-agenda.js';
-import { meetingPlatformName, preparationStartFields, type VpPreparation } from './meeting-preparation.js';
+import {
+  meetingPlatformName,
+  preparationStartFields,
+  withParticipants,
+  type MeetingParticipant,
+  type VpPreparation,
+} from './meeting-preparation.js';
 import { createLogger } from './logger.js';
 import { resultLanguageCode } from './transcribe-language.js';
 import { MEETING_CHAT_CHANNEL, REMOTE_CHANNEL } from './channels.js';
@@ -13,6 +19,11 @@ import type { AsrEngineName } from './asr-microvm-client.js';
 import type { ChatAttachmentEvent } from './chat-attachments.js';
 
 const log = createLogger('kinesis-stream');
+
+/** Whether two participant lists are the same people, names and order. */
+const sameParticipants = (a: MeetingParticipant[], b: MeetingParticipant[]): boolean =>
+  JSON.stringify(a.map(({ name, email }) => [name || '', email])) ===
+  JSON.stringify(b.map(({ name, email }) => [name || '', email]));
 
 export interface TranscriptSegment {
   channel: string;
@@ -141,6 +152,99 @@ class KinesisStreamManager {
   }
 
   /**
+   * Reads the participant list from the VP's row again, just before START:
+   * its owner can change the list from the VP's page while the VP is joining,
+   * after the startup read, and the meeting record does not exist yet to take
+   * the change. Answers null when the list cannot be read. Unset (local runs),
+   * the list read at startup is sent.
+   */
+  private participantReader: (() => Promise<MeetingParticipant[] | null>) | null = null;
+
+  setParticipantReader(reader: (() => Promise<MeetingParticipant[] | null>) | null): void {
+    this.participantReader = reader;
+  }
+
+  /** The longest START waits for that read before it keeps the list read at startup. */
+  static readonly PARTICIPANT_READ_TIMEOUT_MS = 5000;
+
+  private async refreshParticipants(): Promise<void> {
+    if (!this.participantReader) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const latest = await Promise.race([
+        this.participantReader(),
+        new Promise<null>((resolve) => {
+          timer = setTimeout(() => resolve(null), KinesisStreamManager.PARTICIPANT_READ_TIMEOUT_MS);
+        }),
+      ]);
+      if (latest === null) return;
+      const before = this.preparation?.participants?.length ?? 0;
+      this.preparation = withParticipants(this.preparation, latest);
+      log.info(`Participant list read again before START: ${before} -> ${latest.length} people`);
+    } catch (error) {
+      log.warn(`Could not read the participant list again; keeping the one read at startup: ${error}`);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /**
+   * After START: the meeting record is created a few seconds later, and until
+   * it exists a change saved from the VP's page goes to the VP's row. So once
+   * the record exists, the row's list is read once more and, if it changed
+   * since the read before START while the meeting's list has not, put on the
+   * meeting (updateCallParticipants).
+   * From then on the page changes the meeting's list itself (its resolver
+   * also writes the meeting when the record appears during its own write), so
+   * no change is left on the row. Unset (local runs), nothing is done.
+   */
+  private participantSync: {
+    /** The meeting record's participant list; null while there is no record (or it cannot be read). */
+    readMeetingList: (callId: string) => Promise<MeetingParticipant[] | null>;
+    writeMeetingList: (callId: string, participants: MeetingParticipant[]) => Promise<boolean>;
+  } | null = null;
+
+  setParticipantSync(sync: KinesisStreamManager['participantSync']): void {
+    this.participantSync = sync;
+  }
+
+  /** How long, and how often, the record is looked for before the list is read once more. */
+  static PARTICIPANT_SYNC_WAIT_MS = 60000;
+  static PARTICIPANT_SYNC_POLL_MS = 3000;
+
+  async syncParticipantsAfterStart(sent: MeetingParticipant[]): Promise<void> {
+    const sync = this.participantSync;
+    const reader = this.participantReader;
+    if (!sync || !reader) return;
+    const callId = this.callId;
+    try {
+      const deadline = Date.now() + KinesisStreamManager.PARTICIPANT_SYNC_WAIT_MS;
+      let onMeeting = await sync.readMeetingList(callId);
+      while (onMeeting === null && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, KinesisStreamManager.PARTICIPANT_SYNC_POLL_MS));
+        onMeeting = await sync.readMeetingList(callId);
+      }
+      if (onMeeting === null) {
+        log.warn('The meeting record did not appear; the participant list is not read again');
+        return;
+      }
+      // A change made on the meeting's list since it was created is newer than
+      // anything on the row, and is kept.
+      if (!sameParticipants(onMeeting, sent)) return;
+      const latest = await reader();
+      if (latest === null || sameParticipants(latest, sent)) return;
+      const written = await sync.writeMeetingList(callId, latest);
+      log.info(
+        written
+          ? `Participant list changed while the meeting was created; put on the meeting (${latest.length} people)`
+          : 'Participant list changed while the meeting was created, and could not be put on the meeting',
+      );
+    } catch (error) {
+      log.warn(`Could not bring the participant list over to the meeting: ${error}`);
+    }
+  }
+
+  /**
    * The engine, language and speaker separation the meeting is expected to be
    * transcribed with, stored on its record by the START event. Null leaves them
    * off the record.
@@ -265,6 +369,7 @@ class KinesisStreamManager {
   }
 
   async sendStartMeeting(): Promise<void> {
+    await this.refreshParticipants();
     // Match Python kds.py format exactly
     const record: any = {
       EventType: 'START',
@@ -304,6 +409,9 @@ class KinesisStreamManager {
         } catch (error) {
             log.warn(`Failed to link CallId to VP: ${error}`);
         }
+        // Not awaited: it waits for the meeting record, which the call event
+        // processor creates from this START.
+        void this.syncParticipantsAfterStart(this.preparation?.participants ?? []);
     }
   }
 

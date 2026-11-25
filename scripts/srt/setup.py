@@ -8,6 +8,7 @@ Pin a version with ``SRT_VERSION=v1.0.2``.
 import json
 import os
 import platform
+import shutil
 import subprocess  # nosec B404 - hardcoded commands only
 import sys
 import urllib.request
@@ -111,7 +112,60 @@ def get_installed_version(srt_dir):
     return None
 
 
-def _run_srt_config_with_pexpect(srt_dir, timeout=900):
+# The scanners (Bandit in particular) report different findings, and some on
+# different lines, under different Python versions. CI runs SRT in the
+# python:3.13 image (.gitlab-ci.yml), so the scanner venv is built with the same
+# minor version everywhere; review decisions recorded against one scan then match
+# the other.
+SCANNER_PYTHON_VERSION = "3.13"
+
+
+def scanner_python(env=None):
+    """The interpreter `srt config` should build .srt/.venv with, or None.
+
+    $SRT_PYTHON if set, else ``python3.<minor>`` on PATH.
+    """
+    env = os.environ if env is None else env
+    explicit = env.get("SRT_PYTHON", "").strip()
+    if explicit:
+        return explicit
+    return shutil.which(f"python{SCANNER_PYTHON_VERSION}", path=env.get("PATH"))
+
+
+def venv_version(srt_dir):
+    """The ``major.minor`` Python version .srt/.venv was built with, or None."""
+    cfg = srt_dir / ".venv" / "pyvenv.cfg"
+    if not cfg.exists():
+        return None
+    for line in cfg.read_text().splitlines():
+        key, _, value = line.partition("=")
+        if key.strip() in ("version", "version_info"):
+            return ".".join(value.strip().split(".")[:2])
+    return None
+
+
+def srt_env(srt_dir, python, env=None):
+    """The environment `srt config` runs in, with ``python3`` resolving to *python*.
+
+    SRT builds its scanner venv with whichever ``python3`` is first on PATH, so a
+    shim directory holding ``python3`` and ``python`` links to the chosen
+    interpreter is put first.
+    """
+    env = dict(os.environ if env is None else env)
+    if not python:
+        return env
+    shim = srt_dir / ".python-shim"
+    shim.mkdir(exist_ok=True)
+    for name in ("python3", "python"):
+        link = shim / name
+        if link.is_symlink() or link.exists():
+            link.unlink()
+        link.symlink_to(python)
+    env["PATH"] = f"{shim}{os.pathsep}{env.get('PATH', '')}"
+    return env
+
+
+def _run_srt_config_with_pexpect(srt_dir, timeout=900, env=None):
     """Run ``srt config`` under a pty and answer its inquirer prompts.
 
     SRT's config flow uses interactive prompts that ignore plain stdin pipes.
@@ -130,7 +184,7 @@ def _run_srt_config_with_pexpect(srt_dir, timeout=900):
     binary = srt_dir / "srt"
     captured = []
     child = pexpect.spawn(
-        str(binary), ["config"], cwd=str(srt_dir), timeout=timeout, encoding="utf-8"
+        str(binary), ["config"], cwd=str(srt_dir), timeout=timeout, encoding="utf-8", env=env
     )
 
     try:
@@ -182,10 +236,79 @@ def _run_srt_config_with_pexpect(srt_dir, timeout=900):
     return False
 
 
+PLACEHOLDER_CREDENTIALS = (
+    "[default]\n"
+    "aws_access_key_id = SRT-CI-PLACEHOLDER-NOT-A-REAL-KEY\n"
+    "aws_secret_access_key = SRT-CI-PLACEHOLDER-NOT-A-REAL-SECRET\n"
+)
+
+#: Environment variables that each name a credential source of their own.
+CREDENTIAL_ENV = (
+    "AWS_ACCESS_KEY_ID",
+    "AWS_PROFILE",
+    "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+    "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+    "AWS_WEB_IDENTITY_TOKEN_FILE",
+)
+
+
+def on_ci_runner(env=None):
+    """True on a GitLab or GitHub Actions runner; a bare ``CI`` variable is not enough."""
+    env = os.environ if env is None else env
+    return bool(env.get("GITLAB_CI") or env.get("GITHUB_ACTIONS"))
+
+
+def other_credentials_available(env=None, home=None):
+    """True when the environment or ~/.aws/config names a credential source of its own.
+
+    The instance metadata service is not consulted: the placeholder is only ever
+    written on a CI runner, whose host can answer metadata requests from inside
+    the job even when no credentials are meant for the job, and the placeholder
+    is removed again as soon as ``srt config`` ends.
+    """
+    env = os.environ if env is None else env
+    home = Path.home() if home is None else Path(home)
+    if any(env.get(name) for name in CREDENTIAL_ENV):
+        return True
+    config = home / ".aws" / "config"
+    if config.is_file():
+        text = config.read_text(encoding="utf-8", errors="replace")
+        if any(key in text for key in ("credential_process", "sso_", "role_arn", "source_profile")):
+            return True
+    return False
+
+
+def write_placeholder_credentials(env=None, home=None):
+    """Write SRT's placeholder AWS credentials on a CI runner whose environment and
+    ~/.aws/config name no credential source.
+
+    Returns the file written, or None. ``srt config`` will not install its
+    scanners without ~/.aws/credentials; the scans themselves do not use it.
+    """
+    home = Path.home() if home is None else Path(home)
+    creds = home / ".aws" / "credentials"
+    if not on_ci_runner(env) or creds.exists():
+        return None
+    if other_credentials_available(env, home):
+        return None
+    creds.parent.mkdir(exist_ok=True)
+    creds.write_text(PLACEHOLDER_CREDENTIALS, encoding="utf-8")
+    return creds
+
+
+def remove_placeholder_credentials(path):
+    """Delete the placeholder written by ``write_placeholder_credentials``, if it is still ours."""
+    if path is not None and path.is_file():
+        if path.read_text(encoding="utf-8", errors="replace") == PLACEHOLDER_CREDENTIALS:
+            path.unlink()
+
+
 def main():
     project_root = Path(__file__).parent.parent.parent
     srt_dir = project_root / ".srt"
-    is_ci = bool(os.getenv("CI") or os.getenv("GITLAB_CI") or os.getenv("GITHUB_ACTIONS"))
+    # Non-interactive configuration under any CI flag; the placeholder credentials
+    # only on a real CI runner (write_placeholder_credentials).
+    is_ci = bool(os.getenv("CI")) or on_ci_runner()
 
     pinned = os.getenv("SRT_VERSION", "").strip() or None
     if pinned and not pinned.startswith("v"):
@@ -217,6 +340,21 @@ def main():
         binary.chmod(0o755)
 
     config_file = srt_dir / "srtconfig.json"
+    python = scanner_python()
+    if python is None:
+        print(
+            f"⚠️  python{SCANNER_PYTHON_VERSION} not found: the scanners will use the default "
+            f"python3, and their findings can differ from CI's. Install Python "
+            f"{SCANNER_PYTHON_VERSION} (for example `uv python install {SCANNER_PYTHON_VERSION}`) "
+            "or set SRT_PYTHON."
+        )
+    rebuild = False
+    built_with = venv_version(srt_dir)
+    if python and built_with and built_with != SCANNER_PYTHON_VERSION:
+        print(f"Rebuilding the scanner venv: built with Python {built_with}, CI uses {SCANNER_PYTHON_VERSION}")
+        shutil.rmtree(srt_dir / ".venv")
+        rebuild = True
+    env = srt_env(srt_dir, python)
     if is_ci:
         # SRT requires an AWS profile before it will install scanner prerequisites.
         # CI runners typically have no ~/.aws/config; write a placeholder default.
@@ -225,35 +363,37 @@ def main():
         aws_config = aws_dir / "config"
         if not aws_config.exists():
             aws_config.write_text("[default]\nregion = us-east-1\noutput = json\n")
-        aws_creds = aws_dir / "credentials"
-        if not aws_creds.exists():
-            # SRT's `srt config` flow refuses to install scanner prerequisites
-            # (Checkov/Semgrep/Syft/Bandit/Jupyter) unless ~/.aws/credentials
-            # exists.  CI runners (GitLab/GitHub) don't ship one, so we write a
-            # placeholder that satisfies SRT's input parsing without ever
-            # holding real credentials.  The values below are deliberately NOT
-            # in AWS access-key format (no AKIA prefix, no 40-char secret) so
-            # they can't be mistaken for real credentials by humans or by
-            # secret-detection scanners.  SRT does not validate them — the
-            # actual scanner runs use AWS_PROFILE / AWS_REGION env vars.
-            aws_creds.write_text(
-                "[default]\n"
-                "aws_access_key_id = SRT-CI-PLACEHOLDER-NOT-A-REAL-KEY\n"
-                "aws_secret_access_key = SRT-CI-PLACEHOLDER-NOT-A-REAL-SECRET\n"
-            )
+        # SRT's `srt config` flow refuses to install scanner prerequisites
+        # (Checkov/Semgrep/Syft/Bandit/Jupyter) unless ~/.aws/credentials
+        # exists. A CI runner (GITLAB_CI or GITHUB_ACTIONS) whose environment and
+        # ~/.aws/config name no credential source gets a placeholder that
+        # satisfies SRT's input parsing without holding real credentials, and it
+        # is removed again once `srt config` ends: the scans do not read it. The
+        # values are deliberately NOT in AWS access-key format (no AKIA prefix,
+        # no 40-char secret). Outside a CI runner the placeholder is never
+        # written, since it would take precedence over the host's own credentials.
+        # On a runner it takes precedence over an instance profile while
+        # `srt config` runs, for every process sharing this HOME. The GitLab job
+        # runs in its own container, so that is the job alone; on a GitHub-hosted
+        # runner it is the job's own VM.
+        placeholder = write_placeholder_credentials()
         config_file.write_text(json.dumps({
             "AWS_PROFILE": os.getenv("AWS_PROFILE", "default"),
             "AWS_REGION": os.getenv("AWS_DEFAULT_REGION", "us-east-1"),
             "TELEMETRY_ENABLED": False,
             "INSTALLATION_ID": os.getenv("CI_COMMIT_SHORT_SHA", "ci-build"),
         }, indent=2))
-        if not _run_srt_config_with_pexpect(srt_dir):
+        try:
+            configured = _run_srt_config_with_pexpect(srt_dir, env=env)
+        finally:
+            remove_placeholder_credentials(placeholder)
+        if not configured:
             print("❌ Failed to install SRT scanner prerequisites in CI")
             sys.exit(1)
         print("✅ SRT configured for CI")
-    elif not config_file.exists():
+    elif rebuild or not config_file.exists():
         print("Configuring SRT (follow the prompts)...")
-        subprocess.run(["./srt", "config"], cwd=srt_dir, check=False)  # nosec B603 B607
+        subprocess.run(["./srt", "config"], cwd=srt_dir, check=False, env=env)  # nosec B603 B607
 
     issues_file = srt_dir / "issues.json"
     legacy_dsr = project_root / ".dsr" / "issues.json"
