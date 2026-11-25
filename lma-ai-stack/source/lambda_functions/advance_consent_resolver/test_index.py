@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import json
 import os
 import sys
 from datetime import datetime, timedelta, timezone
@@ -504,7 +505,15 @@ def test_asking_to_be_added_notifies_the_owner_once_and_records_no_consent(aws):
     assert notification["category"] == "meeting"
     assert notification["type"] == "participant_list_request"
     assert "Bo \\*Chen\\* \\<bo@example\\.com\\>" in notification["body"]
-    assert notification["actions"][0]["payload"] == "Bo *Chen* <bo@example.com>"
+    assert notification["actions"][0]["payload"] == {"text": "Bo *Chen* <bo@example.com>"}
+    assert notification["timeout"] == 10
+    # The notification is one the publish helper accepts.
+    import lma_notifications  # pylint: disable=import-outside-toplevel
+
+    built = lma_notifications.build_input(
+        call_id, **{k: v for k, v in notification.items() if k != "timeout"}
+    )
+    assert json.loads(built["Actions"][0]["Payload"]) == {"text": "Bo *Chen* <bo@example.com>"}
     assert stored(aws, BO) == []
     # Asking again, and the page, say it was asked; nobody is notified again.
     call("askToBeAddedToMeeting", BO, {"input": {"CallId": CALL_ID}})

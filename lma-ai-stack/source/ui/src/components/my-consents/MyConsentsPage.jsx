@@ -133,7 +133,7 @@ export const MeetingConsentInvitation = ({ meetingRef, onGiven }) => {
                   label="Your name (optional)"
                   description={
                     'Your name and email address are shown to the people who can see the meeting in LMA: its ' +
-                    'organizer, the people it is shared with, and administrators.'
+                    'organizer, the users it is shared with, and administrators.'
                   }
                 >
                   <Input value={requestName} onChange={({ detail }) => setRequestName(detail.value)} />

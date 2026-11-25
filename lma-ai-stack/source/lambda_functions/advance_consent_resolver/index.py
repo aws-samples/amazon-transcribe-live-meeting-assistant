@@ -693,8 +693,13 @@ def _notify_owner(meeting: Mapping[str, Any], email: str, name: str) -> bool:
                 ),
                 severity="suggestion",
                 dedup_key=f"participant_list_request:{hashlib.sha256(email.encode()).hexdigest()[:16]}",
-                actions=[{"label": "Copy name and address", "kind": "copy", "payload": who}],
+                actions=[
+                    {"label": "Copy name and address", "kind": "copy", "payload": {"text": who}}
+                ],
                 source="advance-consent",
+                # Well inside the function's own 30 seconds, so a request that
+                # reached nobody is still forgotten and can be made again.
+                timeout=10,
             )
         except (NotificationError, OSError, ValueError):
             LOGGER.exception("could not notify the meeting's owner")
