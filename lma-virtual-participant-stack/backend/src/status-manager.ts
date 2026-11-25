@@ -613,20 +613,21 @@ export class VirtualParticipantStatusManager {
     }
   }
 
-  /** Whether the meeting record exists yet (getCall answers it). False when it cannot be read. */
-  async meetingExists(callId: string): Promise<boolean> {
-    if (!this.graphqlEndpoint) return false;
+  /** The meeting record's participant list; null while there is no record, or when it cannot be read. */
+  async getMeetingParticipants(callId: string): Promise<MeetingParticipant[] | null> {
+    if (!this.graphqlEndpoint) return null;
     try {
       const query = `
         query GetCall($CallId: ID!) {
-          getCall(CallId: $CallId) { CallId }
+          getCall(CallId: $CallId) { CallId Participants { name email } }
         }
       `;
       const result = await this.signAndSendGraphQLRequest(query, { CallId: callId });
-      return Boolean(result?.getCall?.CallId);
+      const meeting = result?.getCall;
+      return meeting?.CallId ? participantsFromVpRow(meeting.Participants) : null;
     } catch (error) {
-      log.warn(`Could not read whether the meeting record exists: ${error}`);
-      return false;
+      log.warn(`Could not read the meeting record's participant list: ${error}`);
+      return null;
     }
   }
 

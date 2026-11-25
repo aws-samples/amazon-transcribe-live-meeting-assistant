@@ -20,6 +20,11 @@ import type { ChatAttachmentEvent } from './chat-attachments.js';
 
 const log = createLogger('kinesis-stream');
 
+/** Whether two participant lists are the same people, names and order. */
+const sameParticipants = (a: MeetingParticipant[], b: MeetingParticipant[]): boolean =>
+  JSON.stringify(a.map(({ name, email }) => [name || '', email])) ===
+  JSON.stringify(b.map(({ name, email }) => [name || '', email]));
+
 export interface TranscriptSegment {
   channel: string;
   segmentId: string;
@@ -187,13 +192,15 @@ class KinesisStreamManager {
    * After START: the meeting record is created a few seconds later, and until
    * it exists a change saved from the VP's page goes to the VP's row. So once
    * the record exists, the row's list is read once more and, if it changed
-   * since the read before START, put on the meeting (updateCallParticipants).
+   * since the read before START while the meeting's list has not, put on the
+   * meeting (updateCallParticipants).
    * From then on the page changes the meeting's list itself (its resolver
    * also writes the meeting when the record appears during its own write), so
    * no change is left on the row. Unset (local runs), nothing is done.
    */
   private participantSync: {
-    meetingExists: (callId: string) => Promise<boolean>;
+    /** The meeting record's participant list; null while there is no record (or it cannot be read). */
+    readMeetingList: (callId: string) => Promise<MeetingParticipant[] | null>;
     writeMeetingList: (callId: string, participants: MeetingParticipant[]) => Promise<boolean>;
   } | null = null;
 
@@ -212,17 +219,20 @@ class KinesisStreamManager {
     const callId = this.callId;
     try {
       const deadline = Date.now() + KinesisStreamManager.PARTICIPANT_SYNC_WAIT_MS;
-      let exists = await sync.meetingExists(callId);
-      while (!exists && Date.now() < deadline) {
+      let onMeeting = await sync.readMeetingList(callId);
+      while (onMeeting === null && Date.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, KinesisStreamManager.PARTICIPANT_SYNC_POLL_MS));
-        exists = await sync.meetingExists(callId);
+        onMeeting = await sync.readMeetingList(callId);
       }
-      if (!exists) {
+      if (onMeeting === null) {
         log.warn('The meeting record did not appear; the participant list is not read again');
         return;
       }
+      // A change made on the meeting's list since it was created is newer than
+      // anything on the row, and is kept.
+      if (!sameParticipants(onMeeting, sent)) return;
       const latest = await reader();
-      if (latest === null || JSON.stringify(latest) === JSON.stringify(sent)) return;
+      if (latest === null || sameParticipants(latest, sent)) return;
       const written = await sync.writeMeetingList(callId, latest);
       log.info(
         written

@@ -409,7 +409,7 @@ const main = async (): Promise<void> => {
             agendaStream.setParticipantReader(() => startupStatusManager.getParticipantList());
             // And once more after START, once the meeting record exists.
             agendaStream.setParticipantSync({
-                meetingExists: (callId) => startupStatusManager.meetingExists(callId),
+                readMeetingList: (callId) => startupStatusManager.getMeetingParticipants(callId),
                 writeMeetingList: (callId, participants) =>
                     startupStatusManager.setMeetingParticipants(callId, participants),
             });

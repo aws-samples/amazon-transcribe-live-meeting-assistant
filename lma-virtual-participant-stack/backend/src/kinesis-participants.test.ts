@@ -93,13 +93,13 @@ describe('the participant list after START', () => {
         kinesisStreamManager.setParticipantSync(null);
     });
 
-    const syncWith = (appearsAfter: number) => {
+    const syncWith = (appearsAfter: number, onMeeting: MeetingParticipant[] = [ANA]) => {
         let checks = 0;
         const written: MeetingParticipant[][] = [];
         kinesisStreamManager.setParticipantSync({
-            meetingExists: async () => {
+            readMeetingList: async () => {
                 checks += 1;
-                return checks > appearsAfter;
+                return checks > appearsAfter ? onMeeting : null;
             },
             writeMeetingList: async (_callId, participants) => {
                 written.push(participants);
@@ -114,6 +114,13 @@ describe('the participant list after START', () => {
         kinesisStreamManager.setParticipantReader(async () => [ANA, BO]);
         await kinesisStreamManager.syncParticipantsAfterStart([ANA]);
         assert.deepEqual(written, [[ANA, BO]]);
+    });
+
+    it('keeps a change already made to the meeting’s list since it was created', async () => {
+        const written = syncWith(0, [BO]);
+        kinesisStreamManager.setParticipantReader(async () => [ANA, BO]);
+        await kinesisStreamManager.syncParticipantsAfterStart([ANA]);
+        assert.deepEqual(written, []);
     });
 
     it('writes nothing when the list did not change', async () => {

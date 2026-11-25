@@ -627,7 +627,7 @@ def update_vp_participants(
 
     One list at a time: once the meeting record exists, the meeting's list is
     the one changed (and the meeting is returned), and the Virtual
-    Participant's row keeps the list it was started with. Until then the row's
+    Participant's row keeps the last list saved to it before then. Until then the row's
     list is changed and nothing is returned; the Virtual Participant reads that
     list again just before it creates the meeting (sendStartMeeting in
     lma-virtual-participant-stack/backend/src/kinesis-stream.ts), so a change
