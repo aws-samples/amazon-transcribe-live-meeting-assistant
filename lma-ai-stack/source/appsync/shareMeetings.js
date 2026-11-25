@@ -62,6 +62,11 @@ export function response(ctx) {
     if (error) {
         util.error(error.message, error.type, result);
     }
+    // A meeting's sharing list was not the one the caller read (ExpectedSharedWith):
+    // nothing was changed, and the share dialog shows the message and reads the list again.
+    if (result && result.ErrorType) {
+        util.error(result.Result, result.ErrorType);
+    }
     // Published to the onShareMeetings subscription, filtered on SharedWith in
     // subscription.js; the Lambda returns the recipients as they were typed.
     if (result && result.SharedWith !== undefined && result.SharedWith !== null) {

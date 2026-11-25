@@ -40,11 +40,15 @@ def test_deleting_a_meeting_deletes_its_frames_and_its_image_folder(monkeypatch)
 
 
 def test_sharing_a_meeting_shares_its_frames(monkeypatch) -> None:
+    # complete_sharing gives every item under kf#<CallId> the meeting's list.
+    assert "kf" in index.FANOUT_STAGES
     table = KeyframeTable(KEYS)
     monkeypatch.setattr(index, "ddbTable", table)
-    assert index.share_keyframes("m 1", ["a@example.com", "b@example.com"]) == 3
+    for key in KEYS:
+        index._give_item(key, ["a@example.com", "b@example.com"])
     assert [u["Key"] for u in table.updates] == KEYS
     assert all(u["UpdateExpression"] == "SET SharedWith = :val" for u in table.updates)
+    assert all(u["ConditionExpression"] == "attribute_exists(PK)" for u in table.updates)
     assert table.updates[0]["ExpressionAttributeValues"] == {
         ":val": ["a@example.com", "b@example.com"]
     }
@@ -53,9 +57,9 @@ def test_sharing_a_meeting_shares_its_frames(monkeypatch) -> None:
 def test_unsharing_a_meeting_removes_its_frames_sharing(monkeypatch) -> None:
     table = KeyframeTable(KEYS)
     monkeypatch.setattr(index, "ddbTable", table)
-    index.share_keyframes("m 1", None)
-    assert all(u["UpdateExpression"] == "REMOVE SharedWith" for u in table.updates)
-    assert all("ExpressionAttributeValues" not in u for u in table.updates)
+    index._give_item(KEYS[0], [])
+    assert table.updates[0]["UpdateExpression"] == "REMOVE SharedWith"
+    assert "ExpressionAttributeValues" not in table.updates[0]
 
 
 def test_a_meeting_without_frames_touches_nothing(monkeypatch) -> None:
@@ -63,5 +67,4 @@ def test_a_meeting_without_frames_touches_nothing(monkeypatch) -> None:
     monkeypatch.setattr(index, "ddbTable", table)
     monkeypatch.setattr(index, "_batch_delete_prefix", lambda bucket, prefix: 0)
     assert index.delete_keyframes("m-2") == 0
-    assert index.share_keyframes("m-2", ["a@example.com"]) == 0
     assert table.deleted == [] and table.updates == []

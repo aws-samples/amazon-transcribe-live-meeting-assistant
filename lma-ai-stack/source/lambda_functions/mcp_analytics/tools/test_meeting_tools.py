@@ -421,8 +421,21 @@ def test_sharing_adds_to_and_unsharing_removes_from_the_share_list(calls_table, 
     event = lambdas.calls[0][1]
     assert event["info"] == {"fieldName": "shareMeetings"}
     assert event["arguments"]["input"]["MeetingRecipients"] == f"{SHARED},new@example.com"
+    # Saved on condition of the list it read.
+    assert event["arguments"]["input"]["Calls"][0]["ExpectedSharedWith"] == [SHARED]
     meeting_actions.change_sharing(caller(), "m1", [SHARED], share=False)
     assert lambdas.calls[1][1]["arguments"]["input"]["MeetingRecipients"] == ""
+
+
+def test_a_share_refused_because_the_list_changed_says_so(calls_table, lambdas):
+    calls_table.put(meeting_row(SharedWith=[SHARED]))
+    lambdas.answers["controls-fn"] = {
+        "Calls": [],
+        "Result": "The sharing list changed; reopen to see the current list",
+        "ErrorType": "SharingListChanged",
+    }
+    with pytest.raises(ValueError, match="sharing list changed"):
+        meeting_actions.change_sharing(caller(), "m1", ["new@example.com"], share=True)
 
 
 def test_sharing_is_for_the_owner_and_admins_and_takes_addresses_only(calls_table, lambdas):

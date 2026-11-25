@@ -147,8 +147,10 @@ def change_sharing(caller: Caller, meeting_id: Any, users: Any, share: bool) -> 
     meeting = require_meeting(meeting_id, caller)
     call_id = meeting.get("CallId") or str(meeting_id).strip()
     require_meeting_manager(meeting, caller, "change who it is shared with")
-    # The write replaces the whole list (shareMeetings takes every recipient), so a
-    # change made on the meeting page between this read and that write is not kept.
+    # The write replaces the whole list (shareMeetings takes every recipient), on
+    # condition that the list is still the one read here (ExpectedSharedWith): a
+    # change made meanwhile, on the meeting page or by Meeting Sharing, is kept and
+    # this one refused with a message to read the list again.
     current = shared_with_entries(meeting.get("SharedWith"))
     if share:
         wanted = current + [address for address in addresses if address not in current]
@@ -158,7 +160,7 @@ def change_sharing(caller: Caller, meeting_id: Any, users: Any, share: bool) -> 
         "shareMeetings",
         caller,
         {
-            "Calls": [{"CallId": call_id, **list_keys(meeting)}],
+            "Calls": [{"CallId": call_id, **list_keys(meeting), "ExpectedSharedWith": current}],
             "MeetingRecipients": ",".join(wanted),
         },
     )

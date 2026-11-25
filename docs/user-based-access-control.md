@@ -310,11 +310,36 @@ then on; the shares already made stay until the owner removes them. The
 setting is read for every change, and if it cannot be read the change is
 retried rather than made.
 
-A share or removal is written on condition that the meeting's sharing list is
-still the one it was planned from, so a change the owner saves in the share
-dialog just before it is kept and the plan is made again. The dialog's own save
-is not conditional: a dialog opened before an automatic share and saved after it
-removes that share, which then counts as the owner unsharing by hand. A record whose
+Every share, from the share dialog or from Meeting Sharing, is saved on
+condition that the meeting's sharing list is still the one it was made from:
+
+- A Meeting Sharing change that finds the owner has saved a different list in
+  the share dialog meanwhile keeps the owner's list and is planned again from
+  it.
+- A share dialog save that finds the list changed after the dialog was opened
+  (for example, Meeting Sharing has just shared the meeting with someone added
+  to the participant list) changes nothing, for any of the selected meetings.
+  More than 50 selected meetings are saved 50 at a time; if a later group is
+  refused, the dialog says how many meetings were shared before it.
+  The dialog says that the sharing list changed and shows the current list,
+  keeping the addresses you were adding, so you can make your change again on
+  top of it. The MCP `share_meeting` tool saves the same way, and answers
+  "The sharing list changed; reopen to see the current list" in that case.
+
+Saving a share happens in two steps. First, the meeting record and its row in
+the meetings list are given the new sharing list in one write. The same write
+records on the meeting that its items still need the new list (`SharingFanout`).
+Second, every transcript line (final and partial), key frame and chat
+attachment of the meeting is given the list, anyone no longer shared with is
+told, and that record is removed. Until it is removed the share counts as
+unfinished: if the second step fails or runs out of time, the next attempt,
+made from the meetings table's stream, continues from where the last one
+stopped. A share made while another is still being applied takes over, and
+every item ends with the newer list. The share dialog waits up to about 20
+seconds for the second step and shows its success message once the list is
+saved. On a meeting with a very long transcript, the remaining lines are given
+the list in the background within moments; this happens whether or not
+Meeting Sharing is on. A record whose
 sharing still fails after three retries, or an hour, is described in the queue
 the AI stack names in its `MeetingSharingFailuresQueueName` output. A meeting
 still in progress is planned again with its next write, but an ended meeting is
