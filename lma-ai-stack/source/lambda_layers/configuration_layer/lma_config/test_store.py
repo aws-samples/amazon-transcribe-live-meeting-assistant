@@ -30,6 +30,7 @@ did.
 
 from __future__ import annotations
 
+import copy
 from typing import Any, Dict, List, Optional
 
 import pytest
@@ -48,6 +49,54 @@ from lma_config.sections import CacheTier
 from lma_config.store import ConfigurationStore, deep_merge
 
 TABLE = "lma-configuration"
+
+
+#: The profile log's append, as ``ConfigurationStore`` sends it in a transaction.
+PROFILE_LOG_APPEND = (
+    "SET #events = list_append(if_not_exists(#events, :empty), :new), #updated = :now"
+)
+
+
+def apply_transaction(fake: Any, transact_items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """``transact_write_items`` over one of these fakes: every write, or none.
+
+    Each ``Put``/``Delete``/``Update`` goes to the fake's own method, so its
+    conditions hold; the profile log's append is applied here. A refused
+    condition restores every item and raises as DynamoDB does, with the
+    refused operation's reason in ``CancellationReasons``.
+    """
+    fake.requests.append({"op": "transact_write_items", "TransactItems": transact_items})
+    saved = copy.deepcopy(fake.items)
+    for position, operation in enumerate(transact_items):
+        ((kind, request),) = operation.items()
+        try:
+            if kind == "Put":
+                fake.put_item(**request)
+            elif kind == "Delete":
+                fake.delete_item(**request)
+            elif request.get("UpdateExpression") == PROFILE_LOG_APPEND:
+                key = request["Key"][codec.KEY_ATTRIBUTE]["S"]
+                item = fake.items.setdefault(key, {codec.KEY_ATTRIBUTE: {"S": key}})
+                values = request["ExpressionAttributeValues"]
+                held = item.get("ProfileEvents", {"L": []})["L"]
+                item["ProfileEvents"] = {"L": held + values[":new"]["L"]}
+                item["UpdatedAt"] = values[":now"]
+            else:
+                fake.update_item(**request)
+        except ClientError as error:
+            fake.items = saved
+            reasons = [{"Code": "None"} for _ in transact_items]
+            reasons[position] = {"Code": "ConditionalCheckFailed"}
+            raise ClientError(
+                {
+                    "Error": {"Code": "TransactionCanceledException", "Message": "canceled"},
+                    "CancellationReasons": reasons,
+                },
+                "TransactWriteItems",
+            ) from error
+    return {}
+
+
 DEFAULT_BODY = {
     "summary_prompt_templates": {
         "1#SUMMARY": "shipped summary prompt",
@@ -85,6 +134,9 @@ class FakeDynamo:
                 raise self._refused()
         self.items[key] = item
         return {}
+
+    def transact_write_items(self, **request: Any) -> Dict[str, Any]:
+        return apply_transaction(self, request["TransactItems"])
 
     @staticmethod
     def _refused() -> ClientError:

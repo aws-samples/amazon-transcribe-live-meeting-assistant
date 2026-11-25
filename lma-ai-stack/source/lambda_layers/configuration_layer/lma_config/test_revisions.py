@@ -55,6 +55,7 @@ from lma_config.revisions import (
     revision_object_key,
 )
 from lma_config.store import ConfigurationStore
+from lma_config.test_store import apply_transaction
 
 TABLE = "lma-configuration"
 BUCKET = "lma-configuration-revisions"
@@ -87,6 +88,9 @@ class FakeDynamo:
         #: Called with the request before an update is applied, so a test can
         #: land a concurrent change between a read and the write that follows.
         self.before_update: Optional[Callable[[Dict[str, Any]], None]] = None
+
+    def transact_write_items(self, **request: Any) -> Dict[str, Any]:
+        return apply_transaction(self, request["TransactItems"])
 
     def get_item(self, **request: Any) -> Dict[str, Any]:
         self.requests.append({"op": "get_item", **request})

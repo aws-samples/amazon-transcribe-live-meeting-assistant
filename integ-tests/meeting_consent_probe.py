@@ -196,8 +196,8 @@ class ConsentSettingsOverride:
             f"configuration: the {self.TEMPORARY_PROFILE!r} profile an earlier run left active "
             f"is replaced by {previous!r} again before this test changes anything"
         )
-        self.store.activate_profile(previous)
-        self.store.delete_profile(self.TEMPORARY_PROFILE)
+        self.store.activate_profile(previous, updated_by=self.updated_by)
+        self.store.delete_profile(self.TEMPORARY_PROFILE, updated_by=self.updated_by)
 
     def save(self) -> None:
         active = self.store.active_profile_name(consistent_read=True)
@@ -214,14 +214,14 @@ class ConsentSettingsOverride:
             # of the test. A copy an interrupted run left behind is replaced.
             self.previously_active = active or "default"
             if self.store.read_profile(self.TEMPORARY_PROFILE, consistent_read=True).exists:
-                self.store.delete_profile(self.TEMPORARY_PROFILE)
+                self.store.delete_profile(self.TEMPORARY_PROFILE, updated_by=self.updated_by)
             self.store.create_profile(
                 self.TEMPORARY_PROFILE,
                 updated_by=self.updated_by,
                 copy_from=self.previously_active,
                 description="created and removed by the integration tests",
             )
-            self.store.activate_profile(self.TEMPORARY_PROFILE)
+            self.store.activate_profile(self.TEMPORARY_PROFILE, updated_by=self.updated_by)
             self.created_profile = True
             active = self.TEMPORARY_PROFILE
         record = self.store.read_profile(active, consistent_read=True)
@@ -263,8 +263,10 @@ class ConsentSettingsOverride:
 
     def restore(self, attempts: int = 5) -> None:
         if getattr(self, "created_profile", False):
-            self.store.activate_profile(getattr(self, "previously_active", "default"))
-            self.store.delete_profile(self.TEMPORARY_PROFILE)
+            self.store.activate_profile(
+                getattr(self, "previously_active", "default"), updated_by=self.updated_by
+            )
+            self.store.delete_profile(self.TEMPORARY_PROFILE, updated_by=self.updated_by)
             self.created_profile = False
             self.applied = False
             return

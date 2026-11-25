@@ -77,6 +77,7 @@ from .keys import (
     CONFIG_PREFIX,
     DEFAULT_KEY,
     DEFAULT_PROFILE_NAME,
+    PROFILE_LOG_KEY,
     is_profile_key,
     profile_key,
     validate_profile_name,
@@ -117,6 +118,15 @@ _CONDITIONAL_CHECK_FAILED = "ConditionalCheckFailedException"
 
 #: The author recorded for what the deploy-time seeder writes.
 _SEEDER = "cloudformation"
+
+_TRANSACTION_CANCELED = "TransactionCanceledException"
+
+#: What the profile log records. See ``ConfigurationStore.profile_events``.
+PROFILE_ACTIVATED = "activate"
+PROFILE_DELETED = "delete"
+_PROFILE_EVENTS_ATTRIBUTE = "ProfileEvents"
+#: The profile log keeps this many of its newest entries.
+MAX_PROFILE_EVENTS = 100
 
 #: ``ProfileFormat`` of a profile that stores every section in full -- a copy of
 #: the configuration rather than a delta over the baseline. Every profile this
@@ -409,6 +419,35 @@ class ResolvedSection:
 
 
 @dataclass(frozen=True)
+class ProfileEvent:
+    """One entry of the profile log: a profile activated or deleted, by whom, when."""
+
+    action: str
+    profile: str
+    by: str
+    at: str
+    #: For an activation, the profile that was active before it ("default" for
+    #: the baseline). Empty for a deletion.
+    previous: str = ""
+
+    def to_plain(self) -> Dict[str, Any]:
+        plain = {"Action": self.action, "Profile": self.profile, "By": self.by, "At": self.at}
+        if self.previous:
+            plain["Previous"] = self.previous
+        return plain
+
+    @classmethod
+    def from_plain(cls, plain: Mapping[str, Any]) -> "ProfileEvent":
+        return cls(
+            action=str(plain.get("Action") or ""),
+            profile=str(plain.get("Profile") or ""),
+            by=str(plain.get("By") or ""),
+            at=str(plain.get("At") or ""),
+            previous=str(plain.get("Previous") or ""),
+        )
+
+
+@dataclass(frozen=True)
 class ProfileSummary:
     """One profile as a list of profiles shows it, read without its body."""
 
@@ -422,6 +461,11 @@ class ProfileSummary:
     origin: str
     published_revision: Optional[int]
     full_copy: bool
+    #: For the active profile, who made it the active one and when, from the
+    #: active-profile pointer. Empty for the others, and for a pointer written
+    #: before this was recorded.
+    activated_by: str = ""
+    activated_at: str = ""
 
 
 class ConfigurationStore:
@@ -1130,30 +1174,28 @@ class ConfigurationStore:
         )
         return True
 
-    def set_active_profile(self, name: str, *, only_if_absent: bool = False) -> bool:
+    def set_active_profile(
+        self, name: str, *, only_if_absent: bool = False, updated_by: str = _SEEDER
+    ) -> bool:
         """Point the active-profile sentinel at ``name``.
+
+        This is the write the seeder makes when a deployment has no pointer
+        yet, so it is not entered in the profile log: nobody chose a profile.
+        The pointer still records ``updated_by`` and the time. An Admin's
+        activation goes through ``activate_profile``, which is logged.
 
         Args:
             name: Profile name, validated like any other.
             only_if_absent: Leave an existing pointer alone. The seeder uses
                 this so a stack update does not move an operator's choice.
+            updated_by: Recorded on the pointer as ``UpdatedBy``.
 
         Returns:
             Whether the pointer was written.
         """
         if name != DEFAULT_PROFILE_NAME:
             validate_profile_name(name)
-        return self._write_pointer(name, only_if_absent=only_if_absent)
-
-    def _write_pointer(self, name: str, *, only_if_absent: bool = False) -> bool:
-        metadata = {
-            codec.KEY_ATTRIBUTE: ACTIVE_POINTER_KEY,
-            "ActiveProfile": name,
-            "UpdatedAt": self._now(),
-            "Managed": True,
-        }
-        item = {key: codec.marshal_value(value) for key, value in metadata.items()}
-        request: Dict[str, Any] = {"TableName": self._table_name, "Item": item}
+        request = self._pointer_put(name, updated_by)
         if only_if_absent:
             request["ConditionExpression"] = "attribute_not_exists(#key)"
             request["ExpressionAttributeNames"] = {"#key": codec.KEY_ATTRIBUTE}
@@ -1169,6 +1211,108 @@ class ConfigurationStore:
         self.invalidate()
         return True
 
+    def _pointer_put(self, name: str, updated_by: str) -> Dict[str, Any]:
+        metadata = {
+            codec.KEY_ATTRIBUTE: ACTIVE_POINTER_KEY,
+            "ActiveProfile": name,
+            "UpdatedAt": self._now(),
+            "UpdatedBy": updated_by,
+            "Managed": True,
+        }
+        item = {key: codec.marshal_value(value) for key, value in metadata.items()}
+        return {"TableName": self._table_name, "Item": item}
+
+    # ── the profile log ────────────────────────────────────────────────────
+
+    def _log_append(self, event: ProfileEvent) -> Dict[str, Any]:
+        """The ``Update`` that adds ``event`` to the profile log, for a transaction.
+
+        ``list_append`` loses no concurrent append, as for the revision index.
+        """
+        return {
+            "TableName": self._table_name,
+            "Key": {codec.KEY_ATTRIBUTE: {"S": PROFILE_LOG_KEY}},
+            "UpdateExpression": (
+                "SET #events = list_append(if_not_exists(#events, :empty), :new), #updated = :now"
+            ),
+            "ExpressionAttributeNames": {
+                "#events": _PROFILE_EVENTS_ATTRIBUTE,
+                "#updated": "UpdatedAt",
+            },
+            "ExpressionAttributeValues": {
+                ":empty": {"L": []},
+                ":new": codec.marshal_value([event.to_plain()]),
+                ":now": {"S": event.at},
+            },
+        }
+
+    def _write_logged(self, operation: Dict[str, Any], event: ProfileEvent) -> bool:
+        """Make ``operation`` and log ``event`` in one transaction: both or neither.
+
+        ``operation`` is one ``TransactItems`` entry (``{"Put": ...}`` or
+        ``{"Delete": ...}``). Returns False when its condition failed, so
+        nothing was written; any other failure is raised.
+        """
+        try:
+            self._client.transact_write_items(
+                TransactItems=[operation, {"Update": self._log_append(event)}]
+            )
+        except ClientError as error:
+            if error.response.get("Error", {}).get("Code") != _TRANSACTION_CANCELED:
+                raise
+            reasons = error.response.get("CancellationReasons") or []
+            if reasons and (reasons[0] or {}).get("Code") == "ConditionalCheckFailed":
+                return False
+            raise
+        self.invalidate()
+        self._trim_profile_log()
+        return True
+
+    def _read_profile_log(self) -> List[Dict[str, Any]]:
+        response = self._client.get_item(
+            TableName=self._table_name,
+            Key={codec.KEY_ATTRIBUTE: {"S": PROFILE_LOG_KEY}},
+            ConsistentRead=True,
+        )
+        item = codec.unmarshal_item(response.get("Item") or {})
+        events = item.get(_PROFILE_EVENTS_ATTRIBUTE) or []
+        return [event for event in events if isinstance(event, Mapping)]
+
+    def _trim_profile_log(self) -> None:
+        """Keep the newest ``MAX_PROFILE_EVENTS`` entries.
+
+        Conditional on the list's length, so an entry appended meanwhile makes
+        the trim give way rather than vanish; the next append trims again. A
+        failure is logged and does not undo what was already written.
+        """
+        try:
+            events = self._read_profile_log()
+            if len(events) <= MAX_PROFILE_EVENTS:
+                return
+            self._client.update_item(
+                TableName=self._table_name,
+                Key={codec.KEY_ATTRIBUTE: {"S": PROFILE_LOG_KEY}},
+                UpdateExpression="SET #events = :kept",
+                ConditionExpression="size(#events) = :count",
+                ExpressionAttributeNames={"#events": _PROFILE_EVENTS_ATTRIBUTE},
+                ExpressionAttributeValues={
+                    ":kept": codec.marshal_value(events[-MAX_PROFILE_EVENTS:]),
+                    ":count": {"N": str(len(events))},
+                },
+            )
+        except ClientError as error:
+            if error.response.get("Error", {}).get("Code") != _CONDITIONAL_CHECK_FAILED:
+                LOGGER.warning("could not trim the configuration profile log: %s", error)
+
+    def profile_events(self) -> List[ProfileEvent]:
+        """The profile log, newest first: every activation and deletion of a profile.
+
+        Kept in ``ConfigRevIndex#__profiles``, at most ``MAX_PROFILE_EVENTS``
+        entries. The pointer the seeder writes when a deployment has none is
+        not an entry (see ``set_active_profile``).
+        """
+        return [ProfileEvent.from_plain(plain) for plain in reversed(self._read_profile_log())]
+
     # ── named profiles ─────────────────────────────────────────────────────
 
     def list_profiles(self) -> List[ProfileSummary]:
@@ -1178,6 +1322,7 @@ class ConfigurationStore:
         dozen items at most, and the projection leaves out the bodies.
         """
         active = self.active_profile_name(consistent_read=True)
+        pointer = self.read_record(ACTIVE_POINTER_KEY, consistent_read=True).metadata
         names = [codec.KEY_ATTRIBUTE, *codec.METADATA_ATTRIBUTES[1:]]
         request: Dict[str, Any] = {
             "TableName": self._table_name,
@@ -1203,12 +1348,16 @@ class ConfigurationStore:
                 else:
                     continue
                 record = ConfigurationRecord(key=key, body={}, metadata=item)
+                is_active = name == (active or DEFAULT_PROFILE_NAME)
+                # The pointer's author and time are this profile's activation
+                # only while the pointer names it.
+                named = is_active and str(pointer.get("ActiveProfile") or "") == name
                 profiles.append(
                     ProfileSummary(
                         name=name,
                         managed=bool(item.get("Managed")),
                         # With no usable pointer, the baseline is what applies.
-                        active=name == (active or DEFAULT_PROFILE_NAME),
+                        active=is_active,
                         description=str(item.get("Description") or ""),
                         version=record.version,
                         updated_at=record.updated_at,
@@ -1216,6 +1365,8 @@ class ConfigurationStore:
                         origin=record.profile_origin,
                         published_revision=record.published_revision,
                         full_copy=item.get("ProfileFormat") == FULL_COPY,
+                        activated_by=str(pointer.get("UpdatedBy") or "") if named else "",
+                        activated_at=str(pointer.get("UpdatedAt") or "") if named else "",
                     )
                 )
             if not page.get("LastEvaluatedKey"):
@@ -1276,8 +1427,11 @@ class ConfigurationStore:
             raise ProfileExists(f"a configuration profile named {name!r} already exists")
         return SaveOutcome(version=1, revision=self.read_profile(name).published_revision)
 
-    def delete_profile(self, name: str) -> None:
+    def delete_profile(self, name: str, *, updated_by: str) -> None:
         """Delete a Custom profile. Its retained revisions stay, as history.
+
+        The deletion and its entry in the profile log, naming ``updated_by``,
+        are written in one transaction.
 
         Raises:
             ReservedProfileName: ``name`` is the baseline's.
@@ -1295,20 +1449,24 @@ class ConfigurationStore:
                 f"the configuration profile {name!r} is the active one; activate another "
                 "profile before deleting it"
             )
-        try:
-            self._client.delete_item(
-                TableName=self._table_name,
-                Key={codec.KEY_ATTRIBUTE: {"S": profile_key(name)}},
-                **self._condition_for(current),
+        if not self._write_logged(
+            self._delete_of(name, current),
+            ProfileEvent(action=PROFILE_DELETED, profile=name, by=updated_by, at=self._now()),
+        ):
+            raise ConcurrentModification(
+                f"the configuration profile {name!r} changed while it was being "
+                "deleted; reload the page and try again"
             )
-        except ClientError as error:
-            if error.response.get("Error", {}).get("Code") == _CONDITIONAL_CHECK_FAILED:
-                raise ConcurrentModification(
-                    f"the configuration profile {name!r} changed while it was being "
-                    "deleted; reload the page and try again"
-                ) from error
-            raise
-        self.invalidate()
+
+    def _delete_of(self, name: str, current: ConfigurationRecord) -> Dict[str, Any]:
+        """The ``Delete`` of a profile, conditional on the record read, for a transaction."""
+        return {
+            "Delete": {
+                "TableName": self._table_name,
+                "Key": {codec.KEY_ATTRIBUTE: {"S": profile_key(name)}},
+                **self._condition_for(current),
+            }
+        }
 
     def editable_active_profile(self) -> str:
         """The active profile's name, when an edit may be saved into it.
@@ -1331,8 +1489,12 @@ class ConfigurationStore:
         _refuse_managed(active, self.read_record(profile_key(active), consistent_read=True))
         return active
 
-    def activate_profile(self, name: str) -> None:
+    def activate_profile(self, name: str, *, updated_by: str) -> None:
         """Make ``name`` the profile in force: a stored profile, or ``default``.
+
+        The pointer records ``updated_by`` and the time as ``UpdatedBy`` and
+        ``UpdatedAt``, and the activation is entered in the profile log in the
+        same transaction.
 
         Raises:
             ProfileNotFound: no profile is stored under ``name``.
@@ -1341,7 +1503,16 @@ class ConfigurationStore:
             validate_profile_name(name)
         if not self.read_profile(name, consistent_read=True).exists:
             raise ProfileNotFound(f"there is no configuration profile named {name!r}")
-        self._write_pointer(name)
+        previous = self.active_profile_name(consistent_read=True) or DEFAULT_PROFILE_NAME
+        put = self._pointer_put(name, updated_by)
+        event = ProfileEvent(
+            action=PROFILE_ACTIVATED,
+            profile=name,
+            by=updated_by,
+            at=str(put["Item"]["UpdatedAt"]["S"]),
+            previous=previous,
+        )
+        self._write_logged({"Put": put}, event)
 
     def write_managed_profile(self, name: str, body: Mapping[str, Any], *, description: str) -> str:
         """Write a profile the deployment manages, as the seeder does for each shipped preset.
@@ -1400,12 +1571,13 @@ class ConfigurationStore:
             return False
         if self.active_profile_name(consistent_read=True) == name:
             return False
-        self._client.delete_item(
-            TableName=self._table_name,
-            Key={codec.KEY_ATTRIBUTE: {"S": profile_key(name)}},
-            **self._condition_for(current),
-        )
-        self.invalidate()
+        if not self._write_logged(
+            self._delete_of(name, current),
+            ProfileEvent(action=PROFILE_DELETED, profile=name, by=_SEEDER, at=self._now()),
+        ):
+            raise ConcurrentModification(
+                f"the Managed profile {name!r} changed while it was being retired"
+            )
         return True
 
     def _as_stored(self, current: ConfigurationRecord, body: Mapping[str, Any]) -> Dict[str, Any]:

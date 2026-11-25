@@ -3645,8 +3645,11 @@ Resources:
               - s3:ListBucket
             Resource: !GetAtt ConfigurationBucket.Arn
           # The revision index items, appended to on every save and rewritten
-          # when pruning or labelling; and a profile's revision counters, set in
-          # place when its history starts, without rewriting the profile.
+          # when pruning or labelling; the profile log (ConfigRevIndex#__profiles),
+          # appended to in the same transaction as each activation or deletion
+          # of a profile and trimmed to its newest entries; and a profile's
+          # revision counters, set in place when its history starts, without
+          # rewriting the profile.
           - Effect: Allow
             Action:
               - dynamodb:GetItem

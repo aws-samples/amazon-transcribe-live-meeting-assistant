@@ -2145,7 +2145,9 @@ Resources:
               # active-profile pointer, each conditional like any other save.
               # DeleteItem deletes a Custom profile, conditional on the version
               # read; Scan lists the profiles (a hash-key-only table of a few
-              # dozen items).
+              # dozen items). An activation or a deletion is one transaction
+              # with its profile log entry, which ConfigurationRevisionWriteAccess
+              # allows.
               - Effect: Allow
                 Action:
                   - dynamodb:GetItem

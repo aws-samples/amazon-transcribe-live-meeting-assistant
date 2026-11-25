@@ -41,6 +41,15 @@ export const listProfilesQuery = `
         UpdatedBy
         Origin
         FullCopy
+        ActivatedBy
+        ActivatedAt
+      }
+      Events {
+        Action
+        Profile
+        By
+        At
+        Previous
       }
     }
   }
@@ -103,8 +112,22 @@ export const parseProfiles = (answer) =>
       updatedAt: entry.UpdatedAt || null,
       updatedBy: entry.UpdatedBy || null,
       origin: entry.Origin || null,
+      activatedBy: entry.ActivatedBy || null,
+      activatedAt: entry.ActivatedAt || null,
     }))
     .sort((a, b) => (a.name !== DEFAULT_PROFILE) - (b.name !== DEFAULT_PROFILE) || a.name.localeCompare(b.name));
+
+/** The profile log as the page lists it: who activated or deleted which profile, newest first. */
+export const parseProfileEvents = (answer) =>
+  (answer?.Events || [])
+    .filter((entry) => entry && entry.Action && entry.Profile)
+    .map((entry) => ({
+      action: entry.Action,
+      profile: entry.Profile,
+      by: entry.By || null,
+      at: entry.At || null,
+      previous: entry.Previous || null,
+    }));
 
 export const updateConfigurationMutation = `
   mutation UpdateConfiguration($input: UpdateConfigurationInput!) {

@@ -47,6 +47,7 @@ store holds is distinguished by a prefix on that one key:
 | `Config#__active` | A pointer naming the profile in force. |
 | `Schema` | Reserved, and not written. The section schemas ship inside the configuration layer instead, so a save is always checked against the schema its readers were released with; see [Section schemas and validation](#section-schemas-and-validation). |
 | `ConfigRevIndex#<name>` | The revision index of a profile: one small entry per retained revision. See [Revisions and audit](#revisions-and-audit). |
+| `ConfigRevIndex#__profiles` | The profile log: who activated or deleted which profile, and when. No profile's index can take this key, because a profile name may not start with `__`. See [Who activated or deleted a profile](#who-activated-or-deleted-a-profile). |
 
 Two details in that layout are load-bearing rather than cosmetic.
 
@@ -158,7 +159,8 @@ The `listConfigurationProfiles` query and the `createConfigurationProfile`,
 `deleteConfigurationProfile` and `activateConfigurationProfile` mutations, all
 for the Admin group, serve them; `getConfiguration(Profile)` reads any of them,
 the baseline included, and reports whether it is Managed and whether it is
-active.
+active. Every activation and deletion records who made it and when; see
+[Who activated or deleted a profile](#who-activated-or-deleted-a-profile).
 
 ## The accessor, and the caching policy
 
@@ -634,6 +636,11 @@ and what the deploy-time seeder writes into a profile. The baseline
 `Config#default` has no history of its own. CloudFormation rewrites it from the
 release, so the release is its history.
 
+Activating a profile and deleting one change no body, so they record no
+revision; who did either, and when, is recorded on the active-profile pointer
+and in the profile log. See
+[Who activated or deleted a profile](#who-activated-or-deleted-a-profile).
+
 ### What a revision records
 
 | Field | Meaning |
@@ -766,6 +773,52 @@ since. Readers pick up a restore as they pick up any save, which depends on each
 section's tier (see [Three tiers](#three-tiers-declared-per-section)): at once
 for `immediate`, within 30 seconds for `short`, and within five minutes for
 `standard`.
+
+### Who activated or deleted a profile
+
+Activating a profile and deleting one change no profile's body, so they record
+no revision. They are recorded in two other places instead, with the same
+identity a revision's `CreatedBy` holds: the caller's email address, or their
+Cognito username where the token carries none, taken from the verified token
+and never from the request.
+
+- **The active-profile pointer.** `Config#__active` carries `UpdatedBy` and
+  `UpdatedAt`: who made the active profile the active one, and when. The
+  `listConfigurationProfiles` query reports them on the active profile as
+  `ActivatedBy` and `ActivatedAt`. The pointer the seeder writes when a
+  deployment has none yet names `cloudformation`. A pointer written by an
+  earlier release has no `UpdatedBy`, so the active profile shows no author
+  until the next activation.
+- **The profile log.** One item, `ConfigRevIndex#__profiles`, holds a list of
+  entries, oldest first, each with `Action` (`activate` or `delete`),
+  `Profile`, `By`, `At` and, for an activation, `Previous`, the profile that
+  was active before it (`default` for the baseline). Each activation and each
+  deletion writes its entry in the same DynamoDB transaction as the pointer or
+  the delete, so either both are written or neither is, and a deletion refused
+  because the profile changed meanwhile records nothing. An entry is appended
+  with `list_append`, which loses no concurrent entry. After each write the log
+  is trimmed to its **100** newest entries, by a write conditional on the
+  list's length, which gives way to an entry appended meanwhile; the next write
+  trims again. `listConfigurationProfiles` returns the log newest first as
+  `Events`.
+
+The seeder's own activations and deletions are logged with `By` set to
+`cloudformation`: the default activated and an empty `custom` profile deleted
+on an upgrade (see [Named profiles](#named-profiles)), and a Managed profile
+for a preset a release no longer ships deleted. The first pointer it writes,
+when a deployment has none, is not logged, because no profile was chosen.
+
+In the web UI, the **Configuration Profiles** table on the **View / Edit
+Configuration** page shows "Activated *when* by *who*" beside the active
+profile, and its **Activation and deletion history** footer lists the log,
+newest first.
+
+A deleted profile's revisions stay in its revision history, as before; the
+profile log is where the deletion itself is found. The log sits under the
+revision-index prefix, so it is outside the `Config#` listing and its writes
+are allowed by the same IAM statement as the revision index, and it is kept in
+the table with no TTL. Restoring the table to a point in time restores the log
+with it.
 
 ### Upgrading an existing deployment: history starts at revision 1
 

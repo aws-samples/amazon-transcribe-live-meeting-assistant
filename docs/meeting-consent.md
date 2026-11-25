@@ -167,7 +167,7 @@ the `ConfigurationPreset` stack parameter; see
 | Allow a different choice per meeting | Whether a meeting may be started with another mode, rule or notice | On |
 | Keep evidence screenshots | Whether evidence images stay with the meeting. Off: each image is deleted once its check is stored, and the Virtual Participant stores only images it has checked automatically, so it keeps no participant-list screenshots and none for objections recorded in LMA or said aloud (see [Evidence screenshots](#evidence-screenshots)) | On |
 | Evidence check model | The Amazon Bedrock vision model that checks evidence images; see [Checking evidence with a vision model](#checking-evidence-with-a-vision-model) | Amazon Nova Lite |
-| Streaming clients without a consent step | What the WebSocket transcriber does, in Notify or Opt-in, with a meeting from a client that shows no consent step: **Accept with a warning** (captured as before, with no consent record, and a warning logged) or **Refuse** (not recorded or transcribed, and the client is told why). See [Clients without a consent step](#clients-without-a-consent-step) | Accept with a warning |
+| Streaming clients without a consent step | What the WebSocket transcriber does, in Notify or Opt-in, with a meeting from a client that shows no consent step: **Accept with a warning** (captured as before, with no consent record, and a warning logged) or **Refuse** (not recorded or transcribed, and the client is told why). When the consent settings cannot be read, such a meeting is refused whichever is chosen. See [Clients without a consent step](#clients-without-a-consent-step) | Accept with a warning |
 | Virtual Participant leaves after an objection | Whether a Virtual Participant leaves the meeting after a participant objects, in the chat or aloud, rather than staying in it without recording | Off |
 | Read spoken replies | Whether a Virtual Participant also reads consent replies and objections said aloud and addressed to LMA, sending the meeting audio to the transcription engine while consent is awaited, or reads the chat only; see [Spoken replies](#spoken-replies) | On |
 | Allow consent given in advance | Whether a person on a meeting's participant list can consent before the meeting from its consent link, and manage it on My consents, and whether a Virtual Participant's meeting counts it for an attendee matched to the list. Off: no new one can be given and none is counted in a meeting; each person can still read and withdraw their own. See [Consent given in advance](#consent-given-in-advance) | On |
@@ -197,7 +197,9 @@ The settings are read when they are needed, with no cache, because they decide
 whether a meeting may be captured. If they cannot be read, starting a meeting's
 consent fails rather than falling back to off, and so does reading a meeting
 that has no consent record; a meeting with a record is read without the
-settings, since its record decides its own gate.
+settings, since its record decides its own gate. A streaming client that sends
+no consent step is refused while they cannot be read; see
+[Clients without a consent step](#clients-without-a-consent-step).
 
 ### When video is recorded
 
@@ -1168,6 +1170,19 @@ the setting **Streaming clients without a consent step**:
   that the connection closed, and each reconnect is refused again. Choose this
   only once every client in use shows the consent step, and not while the
   Stream Audio embed or an older browser extension build is in use.
+
+When the transcriber cannot read the consent settings at a meeting's start, it
+does not know the mode or this setting, so it refuses a meeting from a client
+that sent no consent step, whatever the setting holds and whatever the mode is,
+including Off. The refusal is the one **Refuse** gives: the meeting is not
+created, recorded or transcribed, the client is sent a `CONSENT_STATE` frame
+with the code `CONSENT_REQUIRED` and a message saying that the consent settings
+could not be read, and the connection is closed. The transcriber logs the
+refusal, with the meeting's CallId, as a `[CONSENT]` warning after the warning
+that the settings could not be read; no metric counts it. Starting the meeting
+again once the settings can be read captures it as the setting says. A client
+that sent a consent step is treated as before: its step is recorded in the mode
+it was shown for, and capture waits for the record.
 
 ## Consent given in advance
 

@@ -52,6 +52,7 @@ from lma_config.store import ConfigurationStore  # noqa: E402
 from lma_config.test_revisions import BUCKET as HISTORY_BUCKET  # noqa: E402
 from lma_config.test_revisions import FakeDynamo as HistoryDynamo  # noqa: E402
 from lma_config.test_revisions import FakeS3  # noqa: E402
+from lma_config.test_store import apply_transaction  # noqa: E402
 
 
 class FakeDynamo:
@@ -104,6 +105,9 @@ class FakeDynamo:
     def delete_item(self, **request: Any) -> Dict[str, Any]:
         self.items.pop(request["Key"][codec.KEY_ATTRIBUTE]["S"], None)
         return {}
+
+    def transact_write_items(self, **request: Any) -> Dict[str, Any]:
+        return apply_transaction(self, request["TransactItems"])
 
     def body(self, key: str) -> Dict[str, Any]:
         return codec.decode_body(self.items[key][codec.BODY_ATTRIBUTE]["B"])
@@ -852,7 +856,7 @@ def test_a_custom_profile_keeps_its_engine_when_the_shipped_default_changes(seed
     store, dynamo = build_store()
     store.write_default(_baseline_choosing_the_microvm_engine(seeder))
     store.create_profile("team", updated_by="admin@example.com")
-    store.activate_profile("team")
+    store.activate_profile("team", updated_by="admin@example.com")
 
     seeder.seed(store, domain="default")
 
@@ -1720,6 +1724,11 @@ def test_a_profile_nobody_changed_is_removed_and_the_default_activated(seeder) -
     assert "Config#custom" not in dynamo.items
     assert store.active_profile_name(consistent_read=True) is None
     assert [p.name for p in store.list_profiles() if p.active] == ["default"]
+    # The deployment is who the profile log names for what it did.
+    assert [(e.action, e.profile, e.by) for e in store.profile_events()] == [
+        ("delete", "custom", "cloudformation"),
+        ("activate", "default", "cloudformation"),
+    ]
 
 
 def test_a_new_deployment_runs_on_the_default_profile(seeder) -> None:
@@ -1864,12 +1873,15 @@ def test_a_managed_profile_no_longer_shipped_is_retired_unless_active(seeder) ->
     baseline = store.read_profile("default").body
     for name in ("earlier-preset", "earlier-active-preset"):
         store.write_managed_profile(name, dict(baseline), description=name)
-    store.activate_profile("earlier-active-preset")
+    store.activate_profile("earlier-active-preset", updated_by="admin@example.com")
     outcome = seeder.write_managed_profiles(store, baseline, {})
     assert "earlier-preset=retired" in outcome
     assert "earlier-active-preset=kept-active" in outcome
     assert "Config#earlier-preset" not in dynamo.items
     assert dynamo.metadata("Config#earlier-active-preset").get("Managed")
+    assert ("delete", "earlier-preset", "cloudformation") in [
+        (e.action, e.profile, e.by) for e in store.profile_events()
+    ]
 
 
 def test_a_custom_profile_holding_a_presets_name_is_left_alone(seeder) -> None:
@@ -2076,7 +2088,7 @@ def _with_a_profile_from_the_previous_release(seeder, name: str = "team", prompt
             updated_by="admin@example.com",
             expected_version=None,
         )
-    store.activate_profile(name)
+    store.activate_profile(name, updated_by="admin@example.com")
     seeder.seed(store, domain="default")
     return store, dynamo
 

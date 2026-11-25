@@ -398,6 +398,28 @@ def test_a_profile_is_activated_and_another_deleted(profiles) -> None:
     assert not profiles.read_profile("custom").exists
 
 
+def test_activating_and_deleting_name_the_verified_caller(profiles) -> None:
+    call("createConfigurationProfile", input={"Name": "trial"})
+    call("activateConfigurationProfile", input={"Name": "trial"})
+    call("deleteConfigurationProfile", input={"Name": "custom"})
+    listed = call("listConfigurationProfiles")
+    active = [p for p in listed["Profiles"] if p["Active"]]
+    assert [(p["Name"], p["ActivatedBy"]) for p in active] == [("trial", "admin@example.com")]
+    assert active[0]["ActivatedAt"]
+    assert [(e["Action"], e["Profile"], e["By"], e["Previous"]) for e in listed["Events"]] == [
+        ("delete", "custom", "admin@example.com", None),
+        ("activate", "trial", "admin@example.com", "custom"),
+    ]
+    assert all(e["At"] for e in listed["Events"])
+
+
+def test_the_deployments_first_pointer_is_attributed_to_it_and_not_logged(profiles) -> None:
+    listed = call("listConfigurationProfiles")
+    assert listed["Events"] == []
+    by_name = {p["Name"]: p["ActivatedBy"] for p in listed["Profiles"]}
+    assert by_name == {"default": None, "custom": "cloudformation"}
+
+
 def test_the_baseline_can_be_read_and_activated_but_not_saved(profiles) -> None:
     document = call("getConfiguration", Profile="default")
     assert document["Managed"] is True

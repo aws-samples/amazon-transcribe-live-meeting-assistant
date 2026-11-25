@@ -5,7 +5,17 @@
  */
 import React, { useMemo } from 'react';
 import PropTypes from 'prop-types';
-import { Badge, Box, Button, Header, Pagination, SpaceBetween, Table, TextFilter } from '@cloudscape-design/components';
+import {
+  Badge,
+  Box,
+  Button,
+  ExpandableSection,
+  Header,
+  Pagination,
+  SpaceBetween,
+  Table,
+  TextFilter,
+} from '@cloudscape-design/components';
 import { useCollection } from '@cloudscape-design/collection-hooks';
 
 import { DEFAULT_PROFILE } from './configuration-api';
@@ -16,6 +26,50 @@ export const profileText = (entry) => (entry.name === DEFAULT_PROFILE ? 'default
 const whenText = (iso) => {
   const parsed = iso ? new Date(iso) : null;
   return parsed && !Number.isNaN(parsed.getTime()) ? parsed.toLocaleString() : iso || '—';
+};
+
+// One entry of the profile log, as a sentence.
+export const profileEventText = (event) => {
+  const who = event.by || 'Someone';
+  const what =
+    event.action === 'delete'
+      ? `${who} deleted ${event.profile}`
+      : `${who} activated ${event.profile}${event.previous ? ` (replacing ${event.previous})` : ''}`;
+  return `${whenText(event.at)}: ${what}`;
+};
+
+/**
+ * The profile log below the table: every activation and deletion of a
+ * profile, newest first, with who did it and when.
+ */
+const ProfileActivity = ({ events }) => (
+  <ExpandableSection headerText={`Activation and deletion history (${events.length})`} variant="footer">
+    {events.length ? (
+      <ul aria-label="Activation and deletion history">
+        {events.map((event) => (
+          <li key={`${event.at}-${event.action}-${event.profile}-${event.by}`}>
+            <Box variant="small">{profileEventText(event)}</Box>
+          </li>
+        ))}
+      </ul>
+    ) : (
+      <Box variant="small" color="text-body-secondary">
+        No profile has been activated or deleted since this history began.
+      </Box>
+    )}
+  </ExpandableSection>
+);
+
+const PROFILE_EVENT = PropTypes.shape({
+  action: PropTypes.string.isRequired,
+  profile: PropTypes.string.isRequired,
+  by: PropTypes.string,
+  at: PropTypes.string,
+  previous: PropTypes.string,
+});
+
+ProfileActivity.propTypes = {
+  events: PropTypes.arrayOf(PROFILE_EVENT).isRequired,
 };
 
 const BADGE_TITLES = {
@@ -57,6 +111,11 @@ const profileColumns = (openProfile, onOpen) => [
             <span title={BADGE_TITLES.active}>
               <Badge color="green">Active</Badge>
             </span>
+          )}
+          {entry.active && entry.activatedBy && (
+            <Box variant="small" color="text-body-secondary">
+              {`Activated ${whenText(entry.activatedAt)} by ${entry.activatedBy}`}
+            </Box>
           )}
           {open && (
             <Box variant="small" color="text-status-info">
@@ -101,6 +160,7 @@ const profileColumns = (openProfile, onOpen) => [
  */
 const ProfilesTable = ({
   profiles,
+  events = [],
   loading = false,
   busy = false,
   openProfile = null,
@@ -162,6 +222,7 @@ const ProfilesTable = ({
         />
       }
       pagination={<Pagination {...paginationProps} />}
+      footer={<ProfileActivity events={events} />}
       header={
         <Header
           counter={loading ? undefined : `(${profiles.length})`}
@@ -220,8 +281,12 @@ ProfilesTable.propTypes = {
       description: PropTypes.string,
       updatedAt: PropTypes.string,
       updatedBy: PropTypes.string,
+      activatedAt: PropTypes.string,
+      activatedBy: PropTypes.string,
     }),
   ).isRequired,
+  // The profile log, newest first.
+  events: PropTypes.arrayOf(PROFILE_EVENT),
   loading: PropTypes.bool,
   busy: PropTypes.bool,
   // The profile open in the editor below the table.
