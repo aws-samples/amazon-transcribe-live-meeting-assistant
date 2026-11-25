@@ -152,7 +152,7 @@ def delete_test_user(stack: Stack, email: str) -> None:
     if out.returncode != 0:
         raise RuntimeError(
             f"ux_test_session.py teardown for {email} exited {out.returncode}: "
-            f"{(out.stderr or out.stdout).strip()[-500:]}"
+            f"{(out.stderr.strip() or out.stdout.strip())[-500:]}"
         )
 
 
