@@ -8,7 +8,12 @@ import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import useCallsContext from '../../contexts/calls';
 
-import mapCallsAttributes, { adoptMeetingCopy, agendaChanged, preparationChanged } from '../common/map-call-attributes';
+import mapCallsAttributes, {
+  adoptMeetingCopy,
+  agendaChanged,
+  preparationChanged,
+  switchesChanged,
+} from '../common/map-call-attributes';
 import { IN_PROGRESS_STATUS } from '../common/get-recording-status';
 
 import '@cloudscape-design/global-styles/index.css';
@@ -93,9 +98,12 @@ const CallDetails = () => {
         // ...unless this copy is older than the one on screen.
         !(callDetails?.updatedAt && call.updatedAt && callDetails.updatedAt < call.updatedAt);
       // An agenda write leaves UpdatedAt alone too, and is the one write that
-      // carries the agenda.
+      // carries the agenda; so do the preparation writes and the switches
+      // (live guidance, the whiteboards assistant).
       const changed = timestampAdvanced || speakerNamesChanged || summaryChanged || statusChanged;
-      if (changed || agendaChanged(call, callDetails) || preparationChanged(call, callDetails)) {
+      const untimedChange =
+        agendaChanged(call, callDetails) || preparationChanged(call, callDetails) || switchesChanged(call, callDetails);
+      if (changed || untimedChange) {
         logger.debug('Updating call', callDetails);
         // The list's copy has no agenda, capture context or retention fields
         // unless an update carried them; the page keeps its own (adoptMeetingCopy).

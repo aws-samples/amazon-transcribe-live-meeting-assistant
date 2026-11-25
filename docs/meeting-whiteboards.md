@@ -99,7 +99,10 @@ or who last edited it, and when.
   on, **Update now** updates the whiteboards from the transcript at once rather
   than at the next run, at most once every 30 seconds. If the update takes
   longer than the page waits, the page says so, and its changes appear as soon
-  as it finishes.
+  as it finishes. The switch can still be changed once the meeting has ended:
+  the assistant then no longer updates the whiteboards by itself, and the tab
+  says so, but while the switch is on **Update now** updates them from the
+  transcript.
 
 Every change reaches every open meeting page through the `onMeetingWhiteboard`
 subscription, without a reload. Once the meeting's transcript is deleted, the
