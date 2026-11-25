@@ -28,6 +28,7 @@ import StatusTimeline from './StatusTimeline';
 import VNCViewer from './VNCViewer';
 import DiagnoseButton from '../troubleshooting/DiagnoseButton';
 import LaunchSettings from './LaunchSettings';
+import MeetingParticipants from '../call-panel/MeetingParticipants';
 import EditScheduledVirtualParticipant from './EditScheduledVirtualParticipant';
 import { canEditScheduled, editWindowOpen } from './scheduled-edit';
 import { canManageVirtualParticipant } from './vp-access';
@@ -87,6 +88,10 @@ const getVirtualParticipant = `
         Kind
         Priority
         Source
+      }
+      participants {
+        name
+        email
       }
       consentMode
       consentRule
@@ -1096,6 +1101,15 @@ const VirtualParticipantDetails = () => {
             </Button>
           ) : null
         }
+      />
+      {/* The participant list it was started or scheduled with, named by the
+          Virtual Participant until it has created its meeting. The meeting
+          page changes the list once there is one; before that, Edit does. */}
+      <MeetingParticipants
+        participants={vpDetails.participants}
+        callId={vpDetails.CallId || ''}
+        virtualParticipantId={vpDetails.CallId ? '' : vpDetails.id}
+        canManage={!!isAdmin || (!!user?.username && vpDetails.Owner === user.username)}
       />
       {canEditScheduled(vpDetails, { username: user?.username, isAdmin }) && (
         <EditScheduledVirtualParticipant

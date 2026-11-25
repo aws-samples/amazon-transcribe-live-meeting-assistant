@@ -43,6 +43,7 @@ GATEWAY_WITHOUT = (
     "shareWith",
     "summaryProfile",
     "guidance",
+    "participants",
 )
 
 

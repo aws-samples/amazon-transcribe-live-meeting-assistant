@@ -217,6 +217,32 @@ describe('the Virtual Participant forms', () => {
     expect(vpPreparationProblem(vpPreparationForm(VP))).toBeNull();
     expect(vpPreparationProblem({ ...vpPreparationForm(VP), labelsText: 'Bad=1' })).toContain('label key');
     expect(vpPreparationProblem({ ...vpPreparationForm(VP), meetingContext: 'x'.repeat(20001) })).toContain('20000');
+    expect(vpPreparationProblem({ ...vpPreparationForm(VP), participantsText: 'Ana <ana@example>' })).toContain(
+      'no valid email address',
+    );
+  });
+
+  it('send the participant list at creation only when one is given', () => {
+    const form = { ...vpPreparationForm(VP), participantsText: 'Ana Lima <ana@example.com>\nbo@example.org' };
+    expect(vpPreparationInput(form)).toEqual({
+      ...VP,
+      participants: [
+        { name: 'Ana Lima', email: 'ana@example.com' },
+        { name: '', email: 'bo@example.org' },
+      ],
+    });
+    expect(vpPreparationInput({ ...form, participantsText: '  ' })).toEqual(VP);
+  });
+
+  it('send the participant list in an edit only when it changed, and empty to remove it', () => {
+    const scheduled = { ...VP, participants: [{ name: 'Ana Lima', email: 'ana@example.com' }] };
+    const form = vpPreparationForm(scheduled);
+    expect(form.participantsText).toBe('Ana Lima <ana@example.com>');
+    expect(vpPreparationChanges(form, scheduled)).toEqual({});
+    expect(vpPreparationChanges({ ...form, participantsText: '' }, scheduled)).toEqual({ participants: [] });
+    expect(vpPreparationChanges({ ...form, participantsText: 'Ana <ana@example.com>' }, scheduled)).toEqual({
+      participants: [{ name: 'Ana', email: 'ana@example.com' }],
+    });
   });
 });
 

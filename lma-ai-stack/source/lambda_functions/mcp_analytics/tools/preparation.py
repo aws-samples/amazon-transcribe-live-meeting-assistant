@@ -112,6 +112,29 @@ def labels_input(value: Any) -> List[Dict[str, str]]:
     return _checked(rules.normalize_labels, pairs)
 
 
+def participants_input(value: Any) -> List[Dict[str, str]]:
+    """A participant list, checked as the resolver checks it; ``[]`` clears it.
+
+    Each entry is ``{name, email}`` (the name optional), or an email address on
+    its own, as a calendar invite's attendee list gives them.
+    """
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError("participants must be a list of {name, email} objects or email addresses")
+    entries = [{"email": entry} if isinstance(entry, str) else entry for entry in value]
+    return _checked(rules.normalize_participants, entries)
+
+
+def participants_output(value: Any) -> List[Dict[str, str]]:
+    """The stored participant list as the MCP tools name it."""
+    return [
+        {"name": str(entry.get("name") or ""), "email": entry["email"]}
+        for entry in value or []
+        if isinstance(entry, Mapping) and isinstance(entry.get("email"), str)
+    ]
+
+
 def labels_output(value: Any) -> Dict[str, str]:
     """The stored ``[{Key, Value}]`` as ``{key: value}``."""
     out: Dict[str, str] = {}

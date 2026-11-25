@@ -1,6 +1,7 @@
 ## First function of the createVirtualParticipant and
 ## updateScheduledVirtualParticipant pipelines: checks the meeting preparation
-## inputs (labels, audience, meetingContext, checklist, summaryProfile) with the meeting
+## inputs (labels, audience, meetingContext, checklist, summaryProfile) and the
+## participant list (participants) with the meeting
 ## preparation resolver Lambda, which applies the limits the meeting's own
 ## mutations apply, and returns them normalized for the next function to store.
 ##
@@ -11,7 +12,7 @@
 ## edit can tell an input sent empty (remove it) from one left out (keep it).
 #set( $input = $ctx.args.input )
 #set( $present = [] )
-#foreach( $name in ["labels", "audience", "meetingContext", "checklist", "summaryProfile"] )
+#foreach( $name in ["labels", "audience", "meetingContext", "checklist", "summaryProfile", "participants"] )
   #if( $input.containsKey($name) )
     $util.qr( $present.add($name) )
   #end
@@ -31,7 +32,8 @@
         "audience": $util.toJson($input.audience),
         "meetingContext": $util.toJson($input.meetingContext),
         "checklist": $util.toJson($input.checklist),
-        "summaryProfile": $util.toJson($input.summaryProfile)
+        "summaryProfile": $util.toJson($input.summaryProfile),
+        "participants": $util.toJson($input.participants)
       }
     }
   }

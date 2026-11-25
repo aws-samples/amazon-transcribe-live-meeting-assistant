@@ -19,6 +19,7 @@ LMA ships with a built-in **User Management** page that lets administrators crea
 - [Security model](#security-model)
 - [Guard rails](#guard-rails)
 - [Email domain restrictions](#email-domain-restrictions)
+- [Participant accounts for a meeting](#participant-accounts-for-a-meeting)
 - [Troubleshooting](#troubleshooting)
 
 ---
@@ -136,6 +137,8 @@ Authorization for user management is enforced at **three independent layers**:
 2. **Lambda resolver** — `UserManagementFunction` re-checks the caller's `cognito:groups` claim from the signed JWT that AppSync passes through. This is belt-and-braces protection in case a resolver is ever wired to a field without the directive.
 3. **Web UI** — the User Management navigation link and page are hidden from non-admin users. Direct navigation shows an access-denied message.
 
+The same Lambda function also answers `getMeetingParticipantAccounts` and `createParticipantAccounts`, which name `Admin` and `User` in their directives and apply the meeting-owner checks described in [Participant accounts for a meeting](#participant-accounts-for-a-meeting). Each operation's roles are listed in the function itself and checked against the [role matrix](user-based-access-control.md#roles) by its unit tests.
+
 The Lambda's IAM role grants only the specific `cognito-idp` actions required to manage users, and is scoped to the LMA user pool ARN:
 
 ```
@@ -165,6 +168,20 @@ If a rule is violated, the API returns a clear error and the UI shows it in the 
 
 If you set the `AllowedSignUpEmailDomain` CloudFormation parameter at deployment time (for example, `example.com` or a comma-separated list such as `example.com,partner.com`), then new users created via **User Management** must have an email address in one of those domains. The restriction is enforced server-side in the Lambda in addition to Cognito's sign-up trigger. Leave the parameter empty to allow any email domain.
 
+## Participant accounts for a meeting
+
+Besides this page, there is one other way an account is created: from a meeting's [participant list](virtual-participant.md#participant-list). The meeting's owner, or an Admin, can choose **Create accounts for participants without one** on the meeting page or the Virtual Participant's page. This is its own operation (`createParticipantAccounts`), separate from **Create user**, with its own rules:
+
+- **Admins and Users may call it, for one meeting at a time.** A User may do so only for a meeting they own, not for one shared with them. An Admin may do so for any meeting. A Participant may not.
+- **Only people on that meeting's list.** Every address in the request must be on the meeting's participant list (compared ignoring case); a request naming anyone else is refused as a whole.
+- **Only the Participant role.** Each new account is added to the `Participant` group and nothing else. An address that already has an account is reported as existing and its account is not changed. Accounts with the User or Admin role, and changes of role, are made only on this page, by an Admin.
+- **Email domain restrictions apply.** When `AllowedSignUpEmailDomain` is set, an address outside those domains is reported as not allowed and no account is created for it, exactly as for **Create user** (see [Email domain restrictions](#email-domain-restrictions)).
+- **Limits.** One request creates at most 25 accounts; choose the button again for the rest. A User may create at most 25 accounts this way per day (UTC), counted across all their meetings; the answer says how many remain. Admins have no daily limit.
+
+Cognito sends each new account the same invitation email as **Create user**. With the user pool's default email configuration (`COGNITO_DEFAULT`), Cognito sends only a small number of emails per day for the whole user pool (50 at the time of writing; see [Email settings for Amazon Cognito user pools](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-email.html)). Every invitation, password reset and verification email counts against it, so creating accounts for a large meeting can use it up. A deployment that needs to invite more people should configure the user pool to send email through Amazon SES.
+
+To answer the meeting page's account status (`getMeetingParticipantAccounts`), the same Lambda function reads the meeting's owner and participant list (`dynamodb:GetItem` on the meeting records and the Virtual Participant table) and looks up each address in the user pool. The daily count is an item in the meeting table under the user's `usr#` key, which expires after two days.
+
 ## Troubleshooting
 
 **"Unauthorized" or "Not Authorized" error when opening the page**
@@ -178,6 +195,9 @@ If you set the `AllowedSignUpEmailDomain` CloudFormation parameter at deployment
 
 **A user's new role has not taken effect**
 : A role change applies at the user's next sign-in or token refresh, at most an hour later. Ask them to sign out and sign in again to apply it at once.
+
+**"Create accounts for participants without one" reports "limit reached"**
+: Either one request reached its 25 accounts (choose the button again) or you have created 25 participant accounts today (an Admin can create the rest, or try again the next day, UTC).
 
 **"Email domain 'X' is not allowed"**
 : The `AllowedSignUpEmailDomain` CloudFormation parameter restricts new user emails to specific domains. Update the parameter on your stack and redeploy, or choose an email in an allowed domain.

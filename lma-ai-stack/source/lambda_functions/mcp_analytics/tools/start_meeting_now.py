@@ -58,7 +58,7 @@ def execute(
             and carried onto the meeting record when the meeting starts.
         preparation: The meeting preparation inputs, already checked
             (vp_preparation.vp_inputs): labels, audience, meetingContext,
-            checklist and meetingSharedWith.
+            checklist, meetingSharedWith and participants.
 
     Returns:
         Dict with virtual participant details and status

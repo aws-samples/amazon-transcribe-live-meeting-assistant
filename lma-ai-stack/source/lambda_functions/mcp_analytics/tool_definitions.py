@@ -102,6 +102,25 @@ SHARE_WITH = {
         "Participant creates it (at most 50); the Virtual Participant itself is not shared"
     ),
 }
+PARTICIPANTS = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "description": "The person's name, at most 200 characters (optional)",
+            },
+            "email": {"type": "string", "description": "The person's email address"},
+        },
+        "required": ["email"],
+    },
+    "description": (
+        "The participant list: the people expected at the meeting, for example a calendar "
+        "invite's attendees, each {name, email} (at most 100; an address is listed once). "
+        "Listing someone does not share the meeting with them"
+    ),
+}
 AGENDA = {
     "type": "string",
     "description": "The agenda, one item per line (at most 10000 characters)",
@@ -507,7 +526,8 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
         "description": (
             "Change a Virtual Participant that is waiting for its scheduled launch: its "
             "scheduled time, meeting name, agenda, labels, audience, context, checklist, "
-            "summary profile, live guidance, or who the meeting is shared with once it starts. "
+            "summary profile, live guidance, participant list, or who the meeting is shared "
+            "with once it starts. "
             "Each argument given replaces "
             "that setting; an empty value removes it. Refused within 5 minutes of the start, "
             "and a new time must be at least 5 minutes away. Only its owner or an Admin may "
@@ -527,6 +547,7 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
                 "summaryProfile": SUMMARY_PROFILE,
                 "guidance": GUIDANCE,
                 "shareWith": SHARE_WITH,
+                "participants": PARTICIPANTS,
             },
             "required": ["virtualParticipantId"],
         },

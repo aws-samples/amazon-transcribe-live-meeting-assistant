@@ -306,6 +306,14 @@ OTHER_FIELDS = [
     ("Mutation", "updateCallAudience"),
     ("Mutation", "updateCallSummaryProfile"),
     ("Mutation", "updateCallGuidance"),
+    # The participant list of one meeting: the same Lambda resolver, on the
+    # narrower owner-or-Admin rule, restated in the write's DynamoDB condition.
+    ("Mutation", "updateCallParticipants"),
+    # Account status of, and Participant accounts for, the people on one
+    # meeting's list: the user management Lambda checks the caller owns the
+    # meeting (or is an Admin) and that each address is on its list.
+    ("Query", "getMeetingParticipantAccounts"),
+    ("Mutation", "createParticipantAccounts"),
     # A digest of one meeting: a Lambda resolver applying the same rule in
     # `caller_may_edit`.
     ("Mutation", "requestMeetingDigest"),

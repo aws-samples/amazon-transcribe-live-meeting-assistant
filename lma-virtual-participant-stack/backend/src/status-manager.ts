@@ -677,7 +677,8 @@ export class VirtualParticipantStatusManager {
             checklist { ItemId Text Kind Priority Source }
             summaryProfile
             meetingSharedWith
-            guidanceEnabled`;
+            guidanceEnabled
+            participants { name email }`;
 
   /** The agenda and meeting preparation from the startup read, once it has been made. */
   private meetingInputs: { agenda: VpAgenda | null; preparation: VpPreparation | null } | null = null;
@@ -698,7 +699,8 @@ export class VirtualParticipantStatusManager {
             `characters, ${preparation.checklist.length} checklist items, summary profile ` +
             `${preparation.summaryProfile ?? 'default'}, shared with ` +
             `${preparation.meetingSharedWith.length} people at creation, live guidance ` +
-            `${preparation.guidanceEnabled ?? "the deployment's setting"})`
+            `${preparation.guidanceEnabled ?? "the deployment's setting"}, ` +
+            `${preparation.participants?.length ?? 0} people on the participant list)`
         : `VP ${this.participantId} has no meeting preparation`,
     );
     return { agenda, preparation };

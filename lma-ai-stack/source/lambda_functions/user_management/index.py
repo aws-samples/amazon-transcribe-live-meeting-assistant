@@ -4,7 +4,10 @@
 """AppSync Lambda resolver for user management operations.
 
 Handles the admin-only `listUsers`, `createUser`, `setUserRole` and
-`deleteUser` fields. Cognito is the single source of truth. Users have one of
+`deleteUser` fields, and the two participant list operations a meeting's owner
+may also call, `getMeetingParticipantAccounts` and `createParticipantAccounts`
+(see "Participant accounts for a meeting" below for their own checks). Cognito
+is the single source of truth. Users have one of
 three roles (appsync/role-matrix.json, effectiveRole):
   - Admin:       member of the "Admin" Cognito group
   - Participant: member of the "Participant" Cognito group and not of "Admin"
@@ -35,6 +38,7 @@ import logging
 import os
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
@@ -56,6 +60,9 @@ VALID_ROLES = (ADMIN_ROLE, USER_ROLE, PARTICIPANT_ROLE)
 # The table that holds each user's meeting notification preferences
 # (PK "usr#<username>", SK "notification-prefs"), deleted with the user.
 EVENT_SOURCING_TABLE = os.environ.get("EVENT_SOURCING_TABLE", "")
+# The Virtual Participant table, read for the owner and participant list of a
+# Virtual Participant that has not created its meeting yet.
+VIRTUAL_PARTICIPANT_TABLE = os.environ.get("VIRTUAL_PARTICIPANT_TABLE", "")
 # The Cognito stack's table of last sign-in times (key "UserSub"); empty when the
 # Cognito stack has none.
 USER_SIGN_IN_TABLE = os.environ.get("USER_SIGN_IN_TABLE", "")
@@ -437,6 +444,343 @@ def _delete_notification_preferences(username):
 
 
 # ---------------------------------------------------------------------------
+# Participant accounts for a meeting
+# ---------------------------------------------------------------------------
+#
+# getMeetingParticipantAccounts and createParticipantAccounts are callable by a
+# User as well as an Admin, for one meeting at a time, named by its CallId or,
+# before a Virtual Participant has created it, by the Virtual Participant's id.
+# Their own checks, in order:
+#   1. A User must own the meeting (its Owner); an Admin may name any. A meeting
+#      that does not exist is refused to a User in the same words as one they do
+#      not own.
+#   2. Only addresses on that meeting's participant list are looked up or
+#      created; a request naming any other address is refused whole.
+#   3. Only accounts that do not exist are created, and only ever in the
+#      Participant group. An existing account is never changed.
+#   4. The answer about an account is "none" or its role, nothing else.
+#   5. A User creates at most PARTICIPANT_ACCOUNTS_PER_DAY accounts a UTC day
+#      (counted in the event-sourcing table under usr#<username>); every caller
+#      at most PARTICIPANT_ACCOUNTS_PER_REQUEST in one request.
+#   6. AllowedSignUpEmailDomain applies as it does to createUser.
+
+NO_ACCOUNT = "none"
+PARTICIPANT_ACCOUNTS_PER_DAY = int(os.environ.get("PARTICIPANT_ACCOUNTS_PER_DAY", "25"))
+PARTICIPANT_ACCOUNTS_PER_REQUEST = 25
+LOOKUP_WORKERS = 8
+# The daily counts are kept for two days, then the table's time to live removes them.
+DAILY_COUNT_TTL_SECONDS = 2 * 86400
+
+
+def _meeting_ref(args):
+    """(kind, id) for the meeting a request names: exactly one of the two ids."""
+    call_id = (args.get("CallId") or "").strip()
+    vp_id = (args.get("VirtualParticipantId") or "").strip()
+    if bool(call_id) == bool(vp_id):
+        raise ValidationError(
+            "Name the meeting with exactly one of CallId and VirtualParticipantId"
+        )
+    return ("call", call_id) if call_id else ("vp", vp_id)
+
+
+def _plain_participants(value):
+    """The stored participant list as [{"name", "email"}], whatever DynamoDB shape it has."""
+    if not isinstance(value, dict) or "L" not in value:
+        return []
+    participants = []
+    for entry in value["L"]:
+        fields = (entry or {}).get("M") or {}
+        email = (fields.get("email") or {}).get("S")
+        if isinstance(email, str) and email.strip():
+            participants.append(
+                {"name": (fields.get("name") or {}).get("S") or "", "email": email.strip()}
+            )
+    return participants
+
+
+def _read_meeting_for_participants(kind, ref_id):
+    """The owner and participant list of the meeting, or None when there is none."""
+    dynamodb = boto3.client("dynamodb")
+    if kind == "call":
+        if not EVENT_SOURCING_TABLE:
+            raise ValidationError("Meeting records are not available")
+        item = dynamodb.get_item(
+            TableName=EVENT_SOURCING_TABLE,
+            Key={"PK": {"S": f"c#{ref_id}"}, "SK": {"S": f"c#{ref_id}"}},
+            ProjectionExpression="#o, Participants",
+            ExpressionAttributeNames={"#o": "Owner"},
+        ).get("Item")
+        participants_attr = "Participants"
+    else:
+        if not VIRTUAL_PARTICIPANT_TABLE:
+            raise ValidationError("Virtual Participant records are not available")
+        item = dynamodb.get_item(
+            TableName=VIRTUAL_PARTICIPANT_TABLE,
+            Key={"id": {"S": ref_id}},
+            ProjectionExpression="#o, participants",
+            ExpressionAttributeNames={"#o": "Owner"},
+        ).get("Item")
+        participants_attr = "participants"
+    if not item:
+        return None
+    return {
+        "owner": (item.get("Owner") or {}).get("S") or "",
+        "participants": _plain_participants(item.get(participants_attr)),
+    }
+
+
+def _meeting_for_caller(caller, args):
+    """The meeting the request names, once the caller is known to own it or to be an Admin."""
+    kind, ref_id = _meeting_ref(args)
+    meeting = _read_meeting_for_participants(kind, ref_id)
+    if caller["is_admin"]:
+        if meeting is None:
+            raise ValidationError("There is no such meeting")
+        return meeting
+    username = (caller["username"] or "").casefold()
+    if meeting is None or not username or meeting["owner"].casefold() != username:
+        raise ForbiddenError("only the meeting's owner or an Admin may do this")
+    return meeting
+
+
+def _find_account(email):
+    """The username of the account with this email address, or None.
+
+    Accounts made in LMA have the address as their username, which the user pool
+    compares ignoring case; an account whose username differs is found by its
+    email attribute, as given and in lower case.
+    """
+    try:
+        user = cognito.admin_get_user(UserPoolId=USER_POOL_ID, Username=email)
+        return user.get("Username") or email
+    except cognito.exceptions.UserNotFoundException:
+        pass
+    if '"' in email or "\\" in email:
+        return None
+    for candidate in dict.fromkeys((email, email.lower())):
+        found = cognito.list_users(
+            UserPoolId=USER_POOL_ID, Filter=f'email = "{candidate}"', Limit=2
+        ).get("Users", [])
+        if found:
+            return found[0].get("Username")
+    return None
+
+
+def _account_of(email):
+    """ "none" or the role of the account with this address."""
+    username = _find_account(email)
+    if username is None:
+        return NO_ACCOUNT
+    return effective_role(_group_names(username))
+
+
+def _accounts_of(emails):
+    """Each address's account answer, looked up a few at a time."""
+    with ThreadPoolExecutor(max_workers=LOOKUP_WORKERS) as pool:
+        return dict(zip(emails, pool.map(_account_of, emails)))
+
+
+def get_meeting_participant_accounts(event, args):
+    """Each person on the meeting's list, as the list names them, with their account answer."""
+    meeting = _meeting_for_caller(_get_caller_identity(event), args)
+    participants = meeting["participants"]
+    accounts = _accounts_of([p["email"] for p in participants])
+    return [
+        {"name": p["name"], "email": p["email"], "account": accounts[p["email"]]}
+        for p in participants
+    ]
+
+
+def _domain_allowed(email):
+    try:
+        _validate_email(email)
+    except ValidationError:
+        return False
+    return True
+
+
+def _daily_count_key(username, now):
+    return {
+        "PK": {"S": f"usr#{username}"},
+        "SK": {"S": f"participant-accounts#{time.strftime('%Y-%m-%d', time.gmtime(now))}"},
+    }
+
+
+def _reserve_daily_slot(username, now):
+    """Count one more account against the caller's day; False when the day is used up."""
+    try:
+        boto3.client("dynamodb").update_item(
+            TableName=EVENT_SOURCING_TABLE,
+            Key=_daily_count_key(username, now),
+            UpdateExpression="ADD CreatedCount :one SET ExpiresAfter = :ttl",
+            ConditionExpression="attribute_not_exists(CreatedCount) OR CreatedCount < :limit",
+            ExpressionAttributeValues={
+                ":one": {"N": "1"},
+                ":limit": {"N": str(PARTICIPANT_ACCOUNTS_PER_DAY)},
+                ":ttl": {"N": str(int(now) + DAILY_COUNT_TTL_SECONDS)},
+            },
+        )
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            return False
+        raise
+    return True
+
+
+def _release_daily_slot(username, now):
+    """Give back a slot reserved for an account that was not created. Best effort."""
+    try:
+        boto3.client("dynamodb").update_item(
+            TableName=EVENT_SOURCING_TABLE,
+            Key=_daily_count_key(username, now),
+            UpdateExpression="ADD CreatedCount :minus",
+            ExpressionAttributeValues={":minus": {"N": "-1"}},
+        )
+    except (ClientError, BotoCoreError):
+        logger.warning("Could not give back a daily participant account slot", exc_info=True)
+
+
+def _remaining_today(username, now):
+    try:
+        item = (
+            boto3.client("dynamodb")
+            .get_item(
+                TableName=EVENT_SOURCING_TABLE,
+                Key=_daily_count_key(username, now),
+                ConsistentRead=True,
+            )
+            .get("Item")
+            or {}
+        )
+    except (ClientError, BotoCoreError):
+        return None
+    used = int((item.get("CreatedCount") or {}).get("N") or 0)
+    return max(PARTICIPANT_ACCOUNTS_PER_DAY - used, 0)
+
+
+def _create_participant_account(email):
+    """Create the account in the Participant group; "created" or "exists".
+
+    The account is removed again if the group cannot be set, so an address is
+    never left with an account in another role.
+    """
+    try:
+        cognito.admin_create_user(
+            UserPoolId=USER_POOL_ID,
+            Username=email,
+            UserAttributes=[
+                {"Name": "email", "Value": email},
+                {"Name": "email_verified", "Value": "true"},
+            ],
+            DesiredDeliveryMediums=["EMAIL"],
+        )
+    except cognito.exceptions.UsernameExistsException:
+        return "exists"
+    try:
+        cognito.admin_add_user_to_group(
+            UserPoolId=USER_POOL_ID, Username=email, GroupName=PARTICIPANT_GROUP
+        )
+    except ClientError:
+        logger.exception("Could not add a new participant account to its group; removing it")
+        try:
+            cognito.admin_delete_user(UserPoolId=USER_POOL_ID, Username=email)
+        except ClientError:
+            logger.exception("Removing the new participant account also failed")
+        raise
+    return "created"
+
+
+def create_participant_accounts(event, args):
+    """Participant accounts for the listed people without one (see the rules above)."""
+    caller = _get_caller_identity(event)
+    payload = args.get("input") or {}
+    meeting = _meeting_for_caller(caller, payload)
+    listed = {p["email"].casefold(): p["email"] for p in meeting["participants"]}
+
+    requested = payload.get("emails")
+    if requested is None:
+        wanted = list(listed.values())
+    else:
+        if not isinstance(requested, list):
+            raise ValidationError("emails must be a list of addresses")
+        not_listed = [
+            e for e in requested if not isinstance(e, str) or e.strip().casefold() not in listed
+        ]
+        if not_listed:
+            raise ValidationError(
+                "Accounts can be created only for people on the meeting's participant list"
+            )
+        wanted = list(dict.fromkeys(listed[e.strip().casefold()] for e in requested))
+
+    accounts = _accounts_of(wanted)
+    limited = not caller["is_admin"]
+    now = time.time()
+    results = []
+    attempts = 0
+    for email in wanted:
+        if accounts[email] != NO_ACCOUNT:
+            results.append({"email": email, "outcome": "exists", "message": None})
+            continue
+        if not _domain_allowed(email):
+            results.append(
+                {
+                    "email": email,
+                    "outcome": "domain_not_allowed",
+                    "message": "This deployment creates accounts only for its allowed email domains",
+                }
+            )
+            continue
+        if attempts >= PARTICIPANT_ACCOUNTS_PER_REQUEST:
+            results.append(
+                {
+                    "email": email,
+                    "outcome": "limit_reached",
+                    "message": f"At most {PARTICIPANT_ACCOUNTS_PER_REQUEST} accounts are created "
+                    "at a time; run it again for the rest",
+                }
+            )
+            continue
+        if limited and not _reserve_daily_slot(caller["username"], now):
+            results.append(
+                {
+                    "email": email,
+                    "outcome": "limit_reached",
+                    "message": f"You can create at most {PARTICIPANT_ACCOUNTS_PER_DAY} participant "
+                    "accounts a day",
+                }
+            )
+            continue
+        attempts += 1
+        try:
+            outcome = _create_participant_account(email)
+        except ClientError as exc:
+            logger.warning("Could not create a participant account: %s", exc)
+            outcome = "failed"
+        if outcome != "created" and limited:
+            _release_daily_slot(caller["username"], now)
+        results.append(
+            {
+                "email": email,
+                "outcome": outcome,
+                "message": "The account could not be created" if outcome == "failed" else None,
+            }
+        )
+
+    created = sum(1 for r in results if r["outcome"] == "created")
+    logger.info(
+        "%s created %d participant accounts (%d asked for)",
+        caller["username"],
+        created,
+        len(wanted),
+    )
+    return {
+        "results": results,
+        "created": created,
+        "remainingToday": _remaining_today(caller["username"], now) if limited else None,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Dispatcher
 # ---------------------------------------------------------------------------
 
@@ -451,6 +795,8 @@ OPERATIONS = {
     "createUser": (create_user, (ADMIN_ROLE,)),
     "setUserRole": (set_user_role, (ADMIN_ROLE,)),
     "deleteUser": (delete_user, (ADMIN_ROLE,)),
+    "getMeetingParticipantAccounts": (get_meeting_participant_accounts, (ADMIN_ROLE, USER_ROLE)),
+    "createParticipantAccounts": (create_participant_accounts, (ADMIN_ROLE, USER_ROLE)),
 }
 
 
@@ -473,6 +819,9 @@ def handler(event, _context):
 
     try:
         return op(event, event.get("arguments") or {})
+    except ForbiddenError as exc:
+        # An operation's own check (a meeting the caller does not own).
+        raise Exception(f"Unauthorized: {exc}") from exc
     except ValidationError as exc:
         # Surface a clean error message to the caller
         raise Exception(str(exc)) from exc

@@ -101,6 +101,21 @@ describe('mergeCallUpdate', () => {
     expect(mergeCallUpdate(on, { CallId: 'c1', GuidanceEnabled: false }).GuidanceEnabled).toBe(false);
   });
 
+  it('keeps the participant list through an update that does not select it, and takes a cleared one', () => {
+    const listed = {
+      CallId: 'c1',
+      Participants: [{ name: 'Ana', email: 'ana@example.com' }],
+      ParticipantsUpdatedBy: 'owner@example.com',
+      ParticipantsUpdatedAt: '2026-11-25T10:00:00Z',
+    };
+    const kept = mergeCallUpdate(listed, { CallId: 'c1', Status: 'STARTED' });
+    expect(kept.Participants).toEqual(listed.Participants);
+    expect(kept.ParticipantsUpdatedAt).toBe('2026-11-25T10:00:00Z');
+    const cleared = mergeCallUpdate(listed, { CallId: 'c1', Participants: [], ParticipantsUpdatedAt: 'later' });
+    expect(cleared.Participants).toEqual([]);
+    expect(cleared.ParticipantsUpdatedAt).toBe('later');
+  });
+
   it('takes a capture field the update does carry', () => {
     const merged = mergeCallUpdate(recorded, { CallId: 'c1', TranscriptionEngine: 'TRANSCRIBE' });
     expect(merged.TranscriptionEngine).toBe('TRANSCRIBE');

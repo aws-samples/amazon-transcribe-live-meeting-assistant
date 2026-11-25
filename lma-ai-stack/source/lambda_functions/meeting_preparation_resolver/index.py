@@ -20,6 +20,9 @@ the same four inputs before they store them on the Virtual Participant's row:
 ``updateCallAudience``           Sets or clears the audience.
 ``updateCallSummaryProfile``     Sets or clears the summary profile; a name the
                                  configuration does not hold is refused.
+``updateCallParticipants``       Replaces the participant list (names and email
+                                 addresses). Only the meeting's owner, an Admin
+                                 or a backend role may: see owner_access_condition.
 ``listSummaryProfiles``          The query: the profiles a meeting may name.
 ``validateMeetingPreparation``   Not in the schema: the first function of the
                                  createVirtualParticipant and
@@ -254,13 +257,32 @@ def access_condition(
     raise ForbiddenError("Unauthorized: you may not change this meeting")
 
 
-def load(caller: Mapping[str, Any], call_id: str) -> Tuple[Dict[str, Any], Tuple[str, Dict, Dict]]:
+def owner_access_condition(
+    caller: Mapping[str, Any], meeting: Mapping[str, Any]
+) -> Tuple[str, Dict, Dict]:
+    """The narrower right to change who the meeting lists as its participants:
+    its owner, an Admin or a backend role, never a user it is shared with."""
+    if caller["is_backend"] or caller["is_admin"]:
+        return "", {}, {}
+    username = caller["username"]
+    if username and meeting.get("Owner") == username:
+        return (
+            "#accessOwner = :accessCaller",
+            {"#accessOwner": "Owner"},
+            {":accessCaller": {"S": username}},
+        )
+    raise ForbiddenError("Unauthorized: only the meeting's owner or an Admin may change this")
+
+
+def load(
+    caller: Mapping[str, Any], call_id: str, rule: Callable = access_condition
+) -> Tuple[Dict[str, Any], Tuple[str, Dict, Dict]]:
     meeting = read_meeting(call_id)
     if meeting is None:
         if caller["is_backend"]:
             raise BadRequestError(f"There is no meeting {call_id}")
         raise ForbiddenError("Unauthorized: you may not change this meeting")
-    return meeting, access_condition(caller, meeting)
+    return meeting, rule(caller, meeting)
 
 
 def attribution(caller: Mapping[str, Any], data: Mapping[str, Any]) -> str:
@@ -324,13 +346,17 @@ def _conflict(error: ClientError) -> bool:
 
 
 def write_once(
-    caller: Mapping[str, Any], call_id: str, sets: Mapping[str, Any], removes=()
+    caller: Mapping[str, Any],
+    call_id: str,
+    sets: Mapping[str, Any],
+    removes=(),
+    rule: Callable = access_condition,
 ) -> Dict:
     """A write that does not depend on what the row held: one attempt.
 
     A failed condition here means the caller's access went in between.
     """
-    _meeting, access = load(caller, call_id)
+    _meeting, access = load(caller, call_id, rule)
     try:
         return write(call_id, access, sets, removes)
     except ClientError as error:
@@ -497,6 +523,24 @@ def update_audience(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict:
     )
 
 
+def update_participants(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict:
+    """Replace the participant list, on the owner rule; ``[]`` once cleared.
+
+    Records who changed it and when, as the meeting context does.
+    """
+    participants = _checked(rules.normalize_participants, data.get("Participants"))
+    return write_once(
+        caller,
+        _call_id(data),
+        {
+            "Participants": participants,
+            "ParticipantsUpdatedBy": attribution(caller, data),
+            "ParticipantsUpdatedAt": now_iso(),
+        },
+        rule=owner_access_condition,
+    )
+
+
 def update_guidance(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict:
     """Live guidance on or off for the meeting (docs/live-guidance.md)."""
     enabled = data.get("GuidanceEnabled")
@@ -555,9 +599,9 @@ def update_checklist_item(caller: Mapping[str, Any], data: Mapping[str, Any]) ->
 
 # ── the Virtual Participant pipelines ───────────────────────────────────────
 
-#: The four inputs as createVirtualParticipant and updateScheduledVirtualParticipant
+#: The inputs as createVirtualParticipant and updateScheduledVirtualParticipant
 #: name them, which are also their names on the Virtual Participant's row.
-VP_FIELDS = ("labels", "audience", "meetingContext", "checklist", "summaryProfile")
+VP_FIELDS = ("labels", "audience", "meetingContext", "checklist", "summaryProfile", "participants")
 
 
 def validate_meeting_preparation(arguments: Mapping[str, Any]) -> Dict[str, Any]:
@@ -585,6 +629,8 @@ def validate_meeting_preparation(arguments: Mapping[str, Any]) -> Dict[str, Any]
             out["checklist"] = checklist or None
         if "summaryProfile" in present:
             out["summaryProfile"] = checked_profile(data.get("summaryProfile"))
+        if "participants" in present:
+            out["participants"] = rules.normalize_participants(data.get("participants")) or None
     except rules.PreparationError as error:
         raise BadRequestError(str(error)) from error
     return out
@@ -598,6 +644,7 @@ MUTATIONS = {
     "updateCallAudience": update_audience,
     "updateCallSummaryProfile": update_summary_profile,
     "updateCallGuidance": update_guidance,
+    "updateCallParticipants": update_participants,
 }
 
 

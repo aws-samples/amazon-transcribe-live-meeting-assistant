@@ -298,6 +298,7 @@ def test_both_mcp_endpoints_offer_the_agenda_argument(resources: dict, tool: str
         "shareWith",
         "summaryProfile",
         "guidance",
+        "participants",
     }
     assert set(gateway["Properties"]) == set(api_key["properties"]) - preparation
 

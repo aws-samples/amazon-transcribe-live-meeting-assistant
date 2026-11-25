@@ -7,7 +7,8 @@
 /**
  * The meeting preparation a Virtual Participant carries onto the meeting it
  * records: labels, audience, meeting context, checklist, summary profile and
- * whether live guidance is on (docs/live-guidance.md).
+ * whether live guidance is on (docs/live-guidance.md) -- and its participant
+ * list, the people expected at the meeting (docs/virtual-participant.md).
  *
  * Given when the VP is started or scheduled and stored on its own row, checked
  * there by the meeting preparation resolver. The VP reads them from that row
@@ -41,6 +42,13 @@ export interface VpPreparation {
   meetingSharedWith: string[];
   /** Live guidance on or off for the meeting; null for the deployment's setting. */
   guidanceEnabled?: boolean | null;
+  /** The people expected at the meeting (the row's participants). */
+  participants?: MeetingParticipant[];
+}
+
+export interface MeetingParticipant {
+  name: string;
+  email: string;
 }
 
 /** The bounds the meeting preparation resolver holds the row to. */
@@ -70,6 +78,27 @@ export function meetingPlatformName(platform: unknown): string | null {
 
 /** The most people a meeting is shared with at creation, as the resolver allows. */
 export const MAX_MEETING_SHARED_WITH = 50;
+
+/** The most people a participant list holds, as the meeting preparation resolver allows. */
+export const MAX_PARTICIPANTS = 100;
+
+/**
+ * The row's participant list, checked and normalized by the meeting preparation
+ * resolver when it was stored; an entry without an email address is left out,
+ * and an address is kept once, compared ignoring case.
+ */
+function participantEntries(value: unknown): MeetingParticipant[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const participants: MeetingParticipant[] = [];
+  for (const entry of value as any[]) {
+    const email = isString(entry?.email) ? entry.email.trim() : '';
+    if (!email || seen.has(email.toLowerCase())) continue;
+    seen.add(email.toLowerCase());
+    participants.push({ name: isString(entry?.name) ? entry.name : '', email });
+  }
+  return participants.slice(0, MAX_PARTICIPANTS);
+}
 
 /**
  * The entries of the row's meetingSharedWith, stored comma-separated by the
@@ -102,6 +131,7 @@ export function preparationFromVpRow(
         summaryProfile?: unknown;
         meetingSharedWith?: unknown;
         guidanceEnabled?: unknown;
+        participants?: unknown;
       }
     | null
     | undefined,
@@ -127,6 +157,7 @@ export function preparationFromVpRow(
       ? row.summaryProfile
       : null;
   const guidanceEnabled = typeof row?.guidanceEnabled === 'boolean' ? row.guidanceEnabled : null;
+  const participants = participantEntries(row?.participants);
   if (
     !labels.length &&
     !audience &&
@@ -134,7 +165,8 @@ export function preparationFromVpRow(
     !checklist.length &&
     !summaryProfile &&
     !meetingSharedWith.length &&
-    guidanceEnabled === null
+    guidanceEnabled === null &&
+    !participants.length
   ) {
     return null;
   }
@@ -146,6 +178,7 @@ export function preparationFromVpRow(
     summaryProfile,
     meetingSharedWith,
     guidanceEnabled,
+    participants,
   };
 }
 
@@ -188,5 +221,11 @@ export function preparationStartFields(
   // Only a VP started or scheduled with meetingSharedWith creates its meeting
   // shared; sharing the VP itself (its SharedWith) does not share the meeting.
   if (preparation.meetingSharedWith.length) fields.SharedWith = preparation.meetingSharedWith.join(',');
+  // Listing someone does not share the meeting with them.
+  if (preparation.participants?.length) {
+    fields.Participants = preparation.participants;
+    fields.ParticipantsUpdatedBy = by;
+    fields.ParticipantsUpdatedAt = at;
+  }
   return fields;
 }
