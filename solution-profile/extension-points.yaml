@@ -34,10 +34,10 @@ extension_points:
     title: Start from a shipped configuration preset
     category: configuration
     description: >-
-      Six presets set consent, retention, privacy, assistant and summary settings
+      Seven presets set consent, retention, privacy, assistant and summary settings
       together for a common posture: Standard, Internal meetings with notice, two
       regulated presets that do not retain the transcript, Team-hosted (external
-      meetings) and Customer account. Choose one at deploy time with
+      meetings), Customer account, and Minimised content (summary only). Choose one at deploy time with
       ConfigurationPreset, or apply it later as unsaved changes an Admin reviews; a
       deployment-specific starting configuration can also be supplied with
       CustomConfigPath.

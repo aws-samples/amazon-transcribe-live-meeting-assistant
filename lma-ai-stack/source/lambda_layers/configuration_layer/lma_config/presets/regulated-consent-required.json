@@ -57,7 +57,8 @@
         "webSearchEnabled": true,
         "mcpServersEnabled": true,
         "guidance": { "defaultEnabled": false },
-        "whiteboards": { "defaultEnabled": false }
+        "whiteboards": { "defaultEnabled": false },
+        "omitSensitivePersonalInformation": false
       }
     },
     "meeting_processing": {
