@@ -1633,7 +1633,7 @@ also holds the reply classifier described above.
 - [Configuration Guide](configuration-guide.md) — the Meeting Consent section,
   and the [configuration presets](configuration-guide.md#configuration-presets)
   that set it
-- [Transcript Deletion After the Summary](transcript-deletion.md)
+- [Transcript and Recording Deletion After the Summary](transcript-deletion.md)
 - [Privacy and Data Handling Controls](privacy-and-data-handling.md) — the
   consent options together with retention and deletion
 - [Virtual Participant](virtual-participant.md)

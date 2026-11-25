@@ -76,8 +76,9 @@ import ConsentPauseAlert from './ConsentPauseAlert';
 import TranscriptionPauseAlert from './TranscriptionPauseAlert';
 import MeetingNotificationsInline from '../meeting-notifications/MeetingNotificationsInline';
 import CaptureContextPanel, { CONSENT_SETTING_ID } from './CaptureContextPanel';
-import { consentEnforced } from '../common/meeting-context';
+import { consentEnforced, hasRecordings } from '../common/meeting-context';
 import TranscriptDeletionNotice from './TranscriptDeletionNotice';
+import RecordingDeletionNotice from './RecordingDeletionNotice';
 import useMeetingConsent from '../../hooks/use-meeting-consent';
 import CallCostPanel from './CallCostPanel';
 import MeetingHeader from './MeetingHeader';
@@ -1764,6 +1765,12 @@ const CallTranscriptContainer = ({
         <TranscriptDeletionNotice
           deletedAt={item.transcriptDeletedAt}
           scheduledFor={item.transcriptDeletionScheduledFor}
+        />
+        <RecordingDeletionNotice
+          deletedAt={item.recordingsDeletedAt}
+          scheduledFor={item.recordingDeletionScheduledFor}
+          filesDeleted={item.recordingFilesDeleted ?? null}
+          hasRecordings={hasRecordings(item)}
         />
         <CallInProgressTranscript
           item={item}

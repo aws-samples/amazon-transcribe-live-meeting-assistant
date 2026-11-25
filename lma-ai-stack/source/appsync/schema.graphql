@@ -167,6 +167,14 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	TranscriptDeletedAt: AWSDateTime
 	TranscriptSegmentsDeleted: Int
 	TranscriptFilesDeleted: Int
+	# The same for the meeting's audio and video recordings, while the Retention
+	# section deletes recordings after the summary: when they are due to be
+	# deleted, when they were (the first time), and how many recording files
+	# were removed in all. The recording links are removed with the files, and
+	# a recording stored afterwards is deleted when it arrives.
+	RecordingDeletionScheduledFor: AWSDateTime
+	RecordingsDeletedAt: AWSDateTime
+	RecordingFilesDeleted: Int
 	# How the meeting was captured and transcribed, written when it starts (and
 	# again if the engine changes, see updateCaptureContext). Absent on a meeting
 	# started before these fields existed. See

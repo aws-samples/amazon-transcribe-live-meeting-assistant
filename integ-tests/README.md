@@ -260,7 +260,7 @@ The meetings are deleted afterwards unless `LMA_TEST_KEEP_MEETING=1`.
 ## Transcript deletion after the summary
 
 `test_transcript_deletion.py` checks that a meeting's transcript is deleted once
-it is summarized (see [Transcript Deletion After the Summary](../docs/transcript-deletion.md)).
+it is summarized (see [Transcript and Recording Deletion After the Summary](../docs/transcript-deletion.md)).
 It is opt-in: while it runs, it sets the deployment's Retention › "Delete the
 transcript after the summary" to Immediately, so **every meeting that ends on
 the stack in that time has its transcript deleted**. It streams one meeting,
@@ -272,6 +272,28 @@ teardown.
 ```bash
 AWS_PROFILE=default LMA_TEST_USER_SECRET_ID=lma/integ-tests/cognito-user LMA_TEST_TRANSCRIPT_DELETION=1 \
     .venv/bin/python -m pytest integ-tests/test_transcript_deletion.py --stack-name lma-integtest1 -s
+```
+
+## Recording deletion after the summary
+
+`test_recording_deletion.py` checks that a meeting's audio and video recordings
+are deleted once it is summarized, and that its key frames are kept (see the
+same page). It is opt-in: while it runs, it sets the deployment's Retention ›
+"Delete the recordings after the summary" to Immediately, so **every meeting
+summarized on the stack in that time has its recordings deleted**, and turns
+Meeting Recording's audio and screen video on if they are off. It streams one
+meeting with audio and a slideshow as screen video, as
+`test_desktop_video.py` does (so it needs ffmpeg, the packages in
+`requirements-video.txt` and `EnableVideoRecording=true`), waits for its
+summary, and checks that no version of its recordings is left in the bucket,
+including one stored after the deletion ran, that the meeting record links to
+none and records the deletion, and that the key frames, their images, the
+summary and (while its own setting is off) the transcript are kept. Both
+settings are saved first and put back in the module's teardown.
+
+```bash
+AWS_PROFILE=default LMA_TEST_USER_SECRET_ID=lma/integ-tests/cognito-user LMA_TEST_RECORDING_DELETION=1 \
+    .venv/bin/python -m pytest integ-tests/test_recording_deletion.py --stack-name lma-integtest1 -s
 ```
 
 ## A meeting archive (Download > Everything)

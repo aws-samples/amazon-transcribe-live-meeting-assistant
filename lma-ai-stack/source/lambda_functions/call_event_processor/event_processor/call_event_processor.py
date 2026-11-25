@@ -1427,6 +1427,28 @@ async def recording_session_field(
     return {} if status is None else {field: started_session}
 
 
+def tell_deletion_a_recording_was_added(message: Dict[str, Any]) -> None:
+    """Tell the transcript deletion function a recording link was stored on the meeting.
+
+    A meeting whose recordings were deleted under the Retention settings has
+    any recording stored afterwards deleted too: the transcriber stores a
+    session's recording after its END, so it can arrive after the summary, and
+    a rejoined meeting's later session adds more. The function returns at once
+    for a meeting whose recordings have not been deleted. Not wrapped in a
+    try, as the END's invoke is not: a failure to queue it fails the record,
+    which is redelivered, rather than leaving a recording that should not be
+    kept. Writing the link again on the redelivery appends it a second time,
+    which every reader of the link lists allows for.
+    """
+    if not TRANSCRIPT_DELETION_FUNCTION_ARN:
+        return
+    LAMBDA_HOOK_CLIENT.invoke(
+        FunctionName=TRANSCRIPT_DELETION_FUNCTION_ARN,
+        InvocationType="Event",
+        Payload=json.dumps({"CallId": message.get("CallId"), "Trigger": "recording-added"}),
+    )
+
+
 async def execute_add_s3_recording_mutation(
     message: Dict[str, Any],
     appsync_session: AppsyncAsyncClientSession,
@@ -2762,6 +2784,7 @@ async def execute_process_event_api_mutation(
             return_value["errors"].append(response)
         else:
             return_value["successes"].append(response)
+            tell_deletion_a_recording_was_added(message)
 
     elif event_type == "ADD_S3_VIDEO_RECORDING_URL":
         # ADD S3 VIDEO RECORDING URL
@@ -2773,6 +2796,7 @@ async def execute_process_event_api_mutation(
             return_value["errors"].append(response)
         else:
             return_value["successes"].append(response)
+            tell_deletion_a_recording_was_added(message)
 
     elif event_type == "UPDATE_CAPTURE_CONTEXT":
         LOGGER.debug("Update capture context")
