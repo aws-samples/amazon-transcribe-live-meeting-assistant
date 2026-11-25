@@ -100,6 +100,8 @@ def _managed_profile(stack: Stack):
 
 
 def test_the_minimised_content_preset_is_a_managed_profile_with_its_values(stack: Stack) -> None:
+    # _lma_config() puts the configuration layer on sys.path; import from it after.
+    _lma_config()
     from lma_config.presets import preset_by_id  # pylint: disable=import-outside-toplevel
 
     record = _managed_profile(stack)

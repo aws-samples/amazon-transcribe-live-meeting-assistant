@@ -46,7 +46,8 @@ SUMMARY_SENSITIVE_INFORMATION_RULE = (
 )
 
 #: The meeting assistant and summary settings at their shipped defaults, which
-#: the four presets other than the two hosting presets set.
+#: the four presets other than the two hosting presets set, and Minimised content
+#: with the sensitive personal information switch on.
 ASSISTANT_DEFAULTS = {
     "meeting_assist": {
         "inMeetingRequestTools": "current_meeting_only",
