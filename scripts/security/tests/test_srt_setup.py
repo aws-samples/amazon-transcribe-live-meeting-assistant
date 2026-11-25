@@ -86,7 +86,10 @@ def test_the_scanner_venv_uses_the_python_version_ci_runs() -> None:
 
 
 def test_srt_python_overrides_the_path_lookup() -> None:
-    assert srt_setup.scanner_python({"SRT_PYTHON": "/opt/py/bin/python3.13", "PATH": ""}) == "/opt/py/bin/python3.13"
+    assert (
+        srt_setup.scanner_python({"SRT_PYTHON": "/opt/py/bin/python3.13", "PATH": ""})
+        == "/opt/py/bin/python3.13"
+    )
 
 
 def test_the_scanner_python_is_found_on_path(tmp_path: Path) -> None:
