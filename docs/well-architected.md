@@ -66,11 +66,7 @@ The Live Meeting Assistant (LMA) demonstrates strong alignment with AWS Well-Arc
   - Implement log filtering and masking for any essential INFO-level logs that must be retained
   - Regularly audit CloudWatch log groups to ensure no meeting content or PII is being captured at production log levels
 - **CloudFront Security Enhancement**:
-  - Add a `ResponseHeadersPolicy` to the CloudFront distribution with security headers:
-    - `Content-Security-Policy`: Restrict resource loading to trusted origins
-    - `X-Frame-Options`: DENY or SAMEORIGIN to prevent clickjacking
-    - `Strict-Transport-Security`: Enforce HTTPS with max-age and includeSubDomains
-    - `X-Content-Type-Options`: nosniff
+  - The distribution's response headers policy sends a Content-Security-Policy that names the origins the web UI uses, with Strict-Transport-Security, X-Content-Type-Options, X-Frame-Options, Referrer-Policy, Permissions-Policy and Cross-Origin-Resource-Policy; see [Response headers](infrastructure-and-security.md#response-headers). Keep the policy in step with any origin a customised UI adds
   - Create a custom domain with a custom ACM certificate for the CloudFront distribution
   - Enforce TLS 1.2 or greater protocol in the CloudFront security policy
 - **Additional WAF Protection**:

@@ -798,5 +798,46 @@ class TestLegacyKeyPreparationArguments(unittest.TestCase):
         self.assertNotIn("isError", result)
 
 
+SECURITY_HEADERS = {
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+    "X-Content-Type-Options": "nosniff",
+    "Cross-Origin-Resource-Policy": "same-origin",
+}
+
+
+class TestResponseHeaders(unittest.TestCase):
+    """Every response carries the endpoint's security headers."""
+
+    def assert_security_headers(self, response):
+        for name, value in SECURITY_HEADERS.items():
+            self.assertEqual(response["headers"].get(name), value, name)
+        self.assertEqual(response["headers"]["Content-Type"], "application/json")
+
+    def test_response_builders_set_security_headers(self):
+        for response in (
+            index.jsonrpc_response(1, {}),
+            index.jsonrpc_error(1, -32601, "Method not found"),
+            index.success_response({"ok": True}),
+            index.error_response(400, "bad input"),
+        ):
+            self.assert_security_headers(response)
+
+    def test_handler_responses_set_security_headers(self):
+        self.assert_security_headers(
+            index.lambda_handler(api_gw_event({"jsonrpc": "2.0", "id": 1, "method": "ping"}), None)
+        )
+        notification = {"jsonrpc": "2.0", "method": "notifications/initialized"}
+        self.assert_security_headers(index.lambda_handler(api_gw_event(notification), None))
+        no_caller = api_gw_event({"jsonrpc": "2.0", "id": 1, "method": "ping"}, user_id=None)
+        refused = index.lambda_handler(no_caller, None)
+        self.assertEqual(refused["statusCode"], 403)
+        self.assert_security_headers(refused)
+
+    def test_responses_do_not_share_one_headers_dict(self):
+        first = index.jsonrpc_response(1, {})
+        first["headers"]["X-Test"] = "1"
+        self.assertNotIn("X-Test", index.jsonrpc_response(2, {})["headers"])
+
+
 if __name__ == "__main__":
     unittest.main()
