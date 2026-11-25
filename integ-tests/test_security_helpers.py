@@ -131,12 +131,25 @@ def test_nothing_is_written_when_nothing_was_recorded(tmp_path: Path) -> None:
     assert not list(tmp_path.iterdir())
 
 
-def test_the_failure_message_is_bounded() -> None:
+def test_the_failure_message_is_bounded(monkeypatch) -> None:
     report = Report()
     for n in range(50):
         report.record("A", f"op{n}", "r", "refused", "answered")
+    monkeypatch.delenv("CI", raising=False)
     message = security_report.describe_failures(report.failures(), limit=5)
     assert message.count("\n") == 5 and "45 more" in message
+
+
+def test_in_ci_the_failure_message_gives_counts_only(monkeypatch) -> None:
+    report = Report()
+    report.record("A", "Query.secretOperation", "sec-other", "refused", "answered", "HTTP 200 detail")
+    report.record("B", "getCall", "sec-other", "not visible", "visible")
+    monkeypatch.setenv("CI", "true")
+    message = security_report.describe_failures(report.failures())
+    assert message.startswith("2 access checks failed (A: 1, B: 1)")
+    assert "secretOperation" not in message and "detail" not in message and "getCall" not in message
+    monkeypatch.delenv("CI")
+    assert "Query.secretOperation" in security_report.describe_failures(report.failures())
 
 
 def test_the_default_report_directory_is_ignored_by_git() -> None:

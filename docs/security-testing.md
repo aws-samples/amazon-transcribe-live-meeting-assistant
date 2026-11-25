@@ -119,7 +119,10 @@ them):
   (`pass`, `fail` or `not-run`) and `detail`.
 
 A test fails on any check it recorded that did not pass, and its assertion
-message lists those checks. A `not-run` is not a pass: it means the condition
+message lists those checks. In CI (`CI` set, as in the scheduled run) the message
+gives only the number of failed checks per suite, because the job log, the JUnit
+report and the Slack summary are kept and shared; rerun `make stacktest-rbac`
+to read the details. A `not-run` is not a pass: it means the condition
 the check needs was absent on the stack.
 
 Treat a failure as real until it is shown to be a test problem. The report holds

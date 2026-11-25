@@ -476,34 +476,39 @@ def test_a_meeting_is_changed_shared_and_deleted_only_as_each_rule_allows(deploy
     label_write("sec-shared", "written-by-shared")
     label_write("sec-owner", "written-by-owner")
 
+    # Sharing and deleting, as the shared and the unrelated User. The owner's own
+    # share and delete can take up to SHARE_WAIT_SECONDS / DELETE_WAIT_SECONDS to
+    # show in the stored meeting, so all four attempts are made first and the
+    # meeting is then watched for that long: a change that lands late is caught.
+    # The waiting overlaps the expiry check's, which started earlier.
+    before = meeting.shared_with()
+    answers = {}
     for label in ("sec-shared", "sec-other"):
         recipient = accounts[label].username
-        before = meeting.shared_with()
-        status, body = probe.as_user(
+        answers[("shareMeetings", label)] = probe.as_user(
             deployment, accounts[label], probe.SHARE,
             {"calls": meeting.calls_input(), "to": f"{recipient},{accounts['sec-other'].username}"},
         )
-        time.sleep(3)
-        after = meeting.shared_with()
-        REPORT.record(
-            probe.SUITE_MEETING,
-            "shareMeetings",
-            label,
-            "not applied",
-            "not applied" if after == before else "applied",
-            f"HTTP {status} {probe.error_text(body)}",
-        )
-
     for label in ("sec-shared", "sec-other"):
-        status, body = probe.as_user(deployment, accounts[label], probe.DELETE, {"calls": meeting.calls_input()})
-        time.sleep(5)
+        answers[("deleteMeetings", label)] = probe.as_user(
+            deployment, accounts[label], probe.DELETE, {"calls": meeting.calls_input()}
+        )
+    changed = probe.wait_until(
+        lambda: meeting.row() is None or meeting.shared_with() != before,
+        max(probe.SHARE_WAIT_SECONDS, probe.DELETE_WAIT_SECONDS),
+        interval=5,
+    )
+    deleted = meeting.row() is None
+    reshared = not deleted and meeting.shared_with() != before
+    for (operation, label), (status, body) in answers.items():
+        applied = deleted if operation == "deleteMeetings" else reshared
         REPORT.record(
             probe.SUITE_MEETING,
-            "deleteMeetings",
+            operation,
             label,
             "not applied",
-            "not applied" if meeting.row() else "applied",
-            f"HTTP {status} {probe.error_text(body)}",
+            "applied" if applied else "not applied",
+            f"HTTP {status} {probe.error_text(body)}" + ("; the meeting changed during the wait" if changed else ""),
         )
 
     status, body = probe.as_user(deployment, accounts["sec-owner"], probe.DELETE, {"calls": meeting.calls_input()})

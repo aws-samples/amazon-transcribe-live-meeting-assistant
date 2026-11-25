@@ -820,8 +820,8 @@ stacktest-zap: ## OWASP ZAP scan of the GraphQL API, web UI and MCP endpoint (Us
 ifeq ($(SECTEST_STACK),)
 	$(error Set STACK to the deployed stack to scan. Usage: make stacktest-zap STACK=<name> [REGION=<region>] [ZAP_ACTIVE=1])
 endif
-	@if ! $(PYTHON) -c "import lma_sdk, pycognito, graphql" 2>/dev/null; then \
-		echo -e "$(RED)ERROR: dependencies missing. Run 'make setup-cli-dev' and '$(PIP) install -r integ-tests/requirements.txt'.$(NC)"; \
+	@if ! $(PYTHON) -c "import boto3, pycognito, graphql" 2>/dev/null; then \
+		echo -e "$(RED)ERROR: dependencies missing. Run '$(PIP) install -r scripts/security/requirements-zap-job.txt'.$(NC)"; \
 		exit 1; \
 	fi
 	$(SECTEST_REGION_ENV) $(PYTHON) scripts/security/zap_scan.py --stack-name "$(SECTEST_STACK)" \

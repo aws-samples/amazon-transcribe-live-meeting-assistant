@@ -13,7 +13,10 @@ root (or ``$LMA_SECURITY_REPORT_DIR``):
 * ``report.md``: the counts per suite, then every check that did not pass.
 
 ``scratch/`` is ignored by git. The report names the stack and the calls made,
-so it is a local file: it is not attached to a pull request or a CI job.
+so it is a local file: it is not attached to a pull request or a CI job, and in
+CI (``CI`` set) a failed test's assertion message gives counts only
+(``describe_failures``), because the scheduled run's log, JUnit report and Slack
+summary are kept and shared.
 
 Outcomes: ``pass`` (observed what was expected), ``fail`` (observed something
 else) and ``not-run`` (the condition the check needs is absent on this stack,
@@ -101,7 +104,21 @@ REPORT = Report()
 
 
 def describe_failures(checks: list[Check], limit: int = 40) -> str:
-    """An assertion message: one line per failed check, at most ``limit`` lines."""
+    """An assertion message: one line per failed check, at most ``limit`` lines.
+
+    In CI (``CI`` set) only the number of failed checks per suite: the job log,
+    the JUnit report and the Slack summary of the scheduled run are kept and
+    shared, and what a failed check observed belongs in the local report only.
+    """
+    if os.environ.get("CI"):
+        per_suite: dict[str, int] = {}
+        for check in checks:
+            per_suite[check.suite] = per_suite.get(check.suite, 0) + 1
+        counts = ", ".join(f"{suite}: {n}" for suite, n in per_suite.items())
+        return (
+            f"{len(checks)} access checks failed ({counts}). Details are in the run's local report, "
+            "scratch/api-test-results/report.md; rerun with make stacktest-rbac to read them."
+        )
     lines = [
         f"{c.subject} as {c.caller}: expected {c.expected}, observed {c.observed}"
         + (f" ({c.detail[:160]})" if c.detail else "")

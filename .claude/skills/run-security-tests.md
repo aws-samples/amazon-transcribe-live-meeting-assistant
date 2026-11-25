@@ -58,7 +58,8 @@ CLAUDE.md, *Security Disclosure Hygiene*, applies to every result:
   do not know where), never into a commit, PR, issue, CHANGELOG, code comment or
   `docs/`.
 - Do not attach a report from `scratch/` to anything; it names the stack and
-  what it answered.
+  what it answered. In CI (`CI` set) a failed test's message carries counts
+  only, so the nightly log, JUnit report and Slack post carry no details.
 - A fix is written as the control now in place, in neutral words. A
   `zap-rules.conf` reason states why the rule does not apply to the code as it
   stands.

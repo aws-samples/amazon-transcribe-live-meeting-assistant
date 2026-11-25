@@ -844,7 +844,9 @@ nightly_integ_tests:
   stage: scheduled_integration
   needs:
     - nightly_deploy
-  # ~40 min of wall time is expected; the cap leaves room for a slow Transcribe
+  # 15-23 min of wall time measured over ten nights to 2026-11-25, plus about 8 for
+  # the access checks (test_role_access.py, test_security_access.py, which wait
+  # five minutes for a token to expire); the cap leaves room for a slow Transcribe
   # stream without letting a wedged run hold the schedule all day, and stays
   # below the one-hour credential ceiling. See the note above.
   timeout: 50m

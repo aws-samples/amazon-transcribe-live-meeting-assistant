@@ -79,7 +79,7 @@ def test_each_role_is_refused_or_admitted_at_every_query_and_mutation_as_the_mat
         )
         if refused != expect_refused:
             wrong.append(f"{operation} as {role}: {'refused' if refused else 'not refused'} {errors}")
-    assert not wrong, "\n".join(wrong)
+    assert not wrong, security_report.describe_failures(security_report.REPORT.failures("AppSync role matrix"))
 
 
 def test_the_transcriber_refuses_a_participant_and_admits_a_user(deployment, users) -> None:
