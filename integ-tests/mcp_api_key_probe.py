@@ -58,7 +58,12 @@ def _graphql_url(outputs: dict) -> str:
     raise ProbeError("stack has no VITE_APPSYNC_GRAPHQL_URL in its LocalUITestingEnv output")
 
 
-def _post(url: str, headers: dict, body: dict) -> tuple[int, Any]:
+# Response headers the probe reports; none of them carries a credential.
+SECURITY_HEADERS = ("Strict-Transport-Security", "X-Content-Type-Options", "Cross-Origin-Resource-Policy")
+
+
+def _post(url: str, headers: dict, body: dict, response_headers: dict | None = None) -> tuple[int, Any]:
+    """POST JSON; with ``response_headers``, fill it with the SECURITY_HEADERS the answer carried."""
     request = urllib.request.Request(
         url,
         data=json.dumps(body).encode(),
@@ -69,9 +74,13 @@ def _post(url: str, headers: dict, body: dict) -> tuple[int, Any]:
         with urllib.request.urlopen(request, timeout=60) as response:  # nosec B310 - https stack endpoint
             raw = response.read()
             status = response.status
+            answer_headers = response.headers
     except urllib.error.HTTPError as err:
         raw = err.read()
         status = err.code
+        answer_headers = err.headers
+    if response_headers is not None:
+        response_headers.update({name: answer_headers.get(name) for name in SECURITY_HEADERS})
     try:
         return status, json.loads(raw or b"null")
     except json.JSONDecodeError:
@@ -161,9 +170,15 @@ def run_probe(stack_name: str, region: str | None = None) -> dict:
 
     try:
         calls_start = _now_ms()
-        observed["status_x_api_key"], _ = _post(endpoint, {"x-api-key": key}, TOOLS_LIST)
+        observed["headers_accepted"] = {}
+        observed["headers_refused"] = {}
+        observed["status_x_api_key"], _ = _post(
+            endpoint, {"x-api-key": key}, TOOLS_LIST, observed["headers_accepted"]
+        )
         observed["status_bearer"], _ = _post(endpoint, {"Authorization": f"Bearer {key}"}, TOOLS_LIST)
-        observed["status_unknown_key"], _ = _post(endpoint, {"x-api-key": unknown_key}, TOOLS_LIST)
+        observed["status_unknown_key"], _ = _post(
+            endpoint, {"x-api-key": unknown_key}, TOOLS_LIST, observed["headers_refused"]
+        )
         calls_end = _now_ms()
     finally:
         _graphql(graphql_url, id_token, REVOKE_KEY, {"p": prefix})

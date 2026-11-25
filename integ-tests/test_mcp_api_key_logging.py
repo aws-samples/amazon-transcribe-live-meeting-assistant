@@ -61,6 +61,21 @@ def test_generated_key_is_accepted_and_revoked(observed) -> None:
     assert observed["revoked"], "the generated key is still listed after revokeMCPApiKey"
 
 
+# The MCP endpoint's security headers, on the function's answer to an accepted
+# key and on API Gateway's answer to an unknown one (a gateway response).
+# test_response_headers.py checks the refusal without a Cognito test user.
+SECURITY_HEADERS = {
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+    "X-Content-Type-Options": "nosniff",
+    "Cross-Origin-Resource-Policy": "same-origin",
+}
+
+
+@pytest.mark.parametrize("answer", ["headers_accepted", "headers_refused"])
+def test_endpoint_answers_carry_security_headers(observed, answer) -> None:
+    assert observed[answer] == SECURITY_HEADERS
+
+
 def test_authorizer_log_records_key_prefix(observed) -> None:
     assert observed["authorizer_entries_with_prefix"] >= 2, (
         f"expected authorizer log entries naming the key prefix for both calls, found "

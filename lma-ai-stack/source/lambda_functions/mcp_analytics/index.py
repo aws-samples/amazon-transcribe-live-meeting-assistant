@@ -66,6 +66,16 @@ PARTICIPANT_GROUP = "Participant"
 MCP_ROLES = ("Admin", "User")
 ROLE_REFUSAL_MESSAGE = "This LMA account's role does not include access to the MCP server."
 
+# Headers on every response this function returns. On the MCP API key endpoint
+# the API's gateway responses (MCPApiKeyGatewayResponseDefault4XX/5XX in
+# lma-ai-stack.yaml) carry the same three security headers.
+RESPONSE_HEADERS = {
+    "Content-Type": "application/json",
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+    "X-Content-Type-Options": "nosniff",
+    "Cross-Origin-Resource-Policy": "same-origin",
+}
+
 # The scopes of an MCP API key (tools/access.py). A new key is generated with
 # READ or READ_WRITE. A key stored before keys had scopes is LEGACY: it keeps
 # every tool in MCP_TOOLS, the tools the server offered such keys, and of the
@@ -1020,7 +1030,7 @@ def handle_mcp_jsonrpc(msg, user_id, username, is_admin, scope=READ_SCOPE):
 
     if method == "notifications/initialized":
         # Client acknowledgment — no response needed for notifications
-        return {"statusCode": 200, "headers": {"Content-Type": "application/json"}, "body": ""}
+        return {"statusCode": 200, "headers": dict(RESPONSE_HEADERS), "body": ""}
 
     if method == "tools/list":
         return jsonrpc_response(msg_id, {"tools": tools_for_scope(scope)})
@@ -1077,7 +1087,7 @@ def jsonrpc_response(msg_id, result):
     """Format a JSON-RPC 2.0 success response."""
     return {
         "statusCode": 200,
-        "headers": {"Content-Type": "application/json"},
+        "headers": dict(RESPONSE_HEADERS),
         "body": json.dumps({"jsonrpc": "2.0", "id": msg_id, "result": result}),
     }
 
@@ -1086,7 +1096,7 @@ def jsonrpc_error(msg_id, code, message):
     """Format a JSON-RPC 2.0 error response."""
     return {
         "statusCode": 200,
-        "headers": {"Content-Type": "application/json"},
+        "headers": dict(RESPONSE_HEADERS),
         "body": json.dumps(
             {"jsonrpc": "2.0", "id": msg_id, "error": {"code": code, "message": message}}
         ),
@@ -1097,7 +1107,7 @@ def success_response(result: Any) -> Dict[str, Any]:
     """Format successful MCP response"""
     return {
         "statusCode": 200,
-        "headers": {"Content-Type": "application/json"},
+        "headers": dict(RESPONSE_HEADERS),
         "body": json.dumps(
             {"content": [{"type": "text", "text": json.dumps(result, indent=2, default=str)}]}
         ),
@@ -1108,6 +1118,6 @@ def error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Format error MCP response"""
     return {
         "statusCode": status_code,
-        "headers": {"Content-Type": "application/json"},
+        "headers": dict(RESPONSE_HEADERS),
         "body": json.dumps({"error": {"message": message, "code": status_code}}),
     }

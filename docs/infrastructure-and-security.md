@@ -394,11 +394,60 @@ The MCP API Gateway includes the following security controls regardless of WAF e
 | **Execution Logging** | API Gateway execution logs (authorizer decisions, integration telemetry) at INFO level |
 | **Throttling** | Rate limiting at 100 req/sec with burst limit of 50 |
 | **Metrics** | CloudWatch metrics enabled for monitoring |
+| **Response headers** | Every response, from the MCP function or from API Gateway itself (a refused key, throttling), carries `Strict-Transport-Security: max-age=31536000; includeSubDomains`, `X-Content-Type-Options: nosniff` and `Cross-Origin-Resource-Policy: same-origin` |
 
 ## CloudFront CDN
 
 - Configurable **price class**: PriceClass_100 (North America and Europe), PriceClass_200 (adds Asia, Africa, Middle East), or PriceClass_All (all edge locations)
 - Optional **geographic restrictions** via ISO 3166-1 alpha-2 country codes to limit access by region
+
+### Response headers
+
+The web UI's distribution adds these headers to every response, through the
+response headers policy `SecurityHeadersPolicy` in
+`lma-ai-stack/deployment/lma-ai-stack.yaml`:
+
+| Header | Value |
+|--------|-------|
+| `Content-Security-Policy` | The sources the web UI uses, by name (below) |
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` |
+| `X-Content-Type-Options` | `nosniff` |
+| `X-Frame-Options` | `DENY` |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` |
+| `Permissions-Policy` | `camera`, `microphone` and `display-capture` for the web UI's own origin, for Stream Audio/Video; `geolocation`, `payment`, `usb`, `serial`, `hid`, `bluetooth` and `midi` for no origin |
+| `Cross-Origin-Resource-Policy` | `same-origin` |
+| `Server` | `CloudFront` (the policy removes the origin's own `Server` header, and CloudFront sends its own) |
+
+The Content-Security-Policy allows:
+
+| Directive | Sources |
+|-----------|---------|
+| `default-src`, `frame-src`, `form-action`, `frame-ancestors` | `'self'` |
+| `script-src` | `'self'`. Every script is a file on the distribution, and none needs `eval`. |
+| `style-src` | `'self' 'unsafe-inline'`. The stylesheets are files on the distribution; the diagram, math and PDF libraries add style elements and attributes as they render. |
+| `img-src`, `media-src` | `'self'`, `blob:` (and `data:` for pictures), and the deployment's regional S3 endpoint in both URL forms, `https://*.s3.<region>.<suffix>` and `https://s3.<region>.<suffix>`, for presigned links to recordings, video and pictures |
+| `font-src` | `'self' data:` |
+| `worker-src` | `'self' blob:` |
+| `connect-src` | `'self'`; the stack's AppSync GraphQL host (`https://`) and real-time host (`wss://`); `cognito-idp`, `cognito-identity`, `ssm`, `states` and `translate` in the stack's Region; the regional S3 endpoint as above; `https://registry.modelcontextprotocol.io` for the MCP Servers page; `wss://*.cloudfront.net` for the WebSocket transcriber, which has its own CloudFront distribution; and `wss://*.lambda-microvm.<region>.on.aws` for the Virtual Participant's live view when `VPLaunchType=MICROVM` |
+| `object-src`, `base-uri` | `'none'` |
+
+`frame-ancestors 'self'` lets only the web UI's own origin frame its pages.
+
+`Cross-Origin-Opener-Policy` is not sent. The MCP server OAuth sign-in and an
+embedded component opened as a popup (see
+[Embeddable Components](embeddable-components.md)) post their result to the
+window that opened them, and a browser removes that link when the popup loads a
+page that sends the header. Every page of the web UI is the same document, so
+the header cannot be sent on the other pages alone.
+
+If you customise the web UI to load a script, style, font, picture or media
+file from another origin, or to call another service from the browser, add the
+origin to the matching directive in `SecurityHeadersPolicy`. The browser
+refuses anything the policy does not allow, and the refusal appears only in the
+browser's developer console, not in any log in your account. For the same
+reason the policy names the AWS services the browser calls; a change to the UI
+that constructs another AWS SDK client fails
+`lma-ai-stack/test/test_web_ui_response_headers.py` until its service is added.
 
 ## IAM
 

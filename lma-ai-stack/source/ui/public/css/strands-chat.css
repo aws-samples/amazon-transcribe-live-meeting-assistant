@@ -1,0 +1,376 @@
+/*
+ * Copyright (c) 2025 Amazon.com
+ * This file is licensed under the MIT-0 License.
+ * See the LICENSE file in the project root for full license information.
+ */
+
+/* Styles for strands-chat.html, served from this origin so the page needs no inline style. */
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    margin: 0;
+    padding: 0;
+    background-color: #f5f5f5;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+.chat-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: white;
+    overflow: hidden;
+}
+.chat-messages {
+    flex: 1;
+    padding: 20px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+.message {
+    max-width: 80%;
+    padding: 12px 16px;
+    border-radius: 18px;
+    word-wrap: break-word;
+}
+.message.user {
+    background-color: #007bff;
+    color: white;
+    align-self: flex-end;
+    margin-left: auto;
+}
+.message.assistant {
+    background-color: #e9ecef;
+    color: #333;
+    align-self: flex-start;
+}
+.message.error {
+    background-color: #dc3545;
+    color: white;
+    align-self: flex-start;
+}
+/* Markdown formatting styles */
+.message.assistant h1,
+.message.assistant h2,
+.message.assistant h3,
+.message.assistant h4,
+.message.assistant h5,
+.message.assistant h6 {
+    margin-top: 0.5em;
+    margin-bottom: 0.5em;
+}
+.message.assistant p {
+    margin: 0.5em 0;
+}
+.message.assistant ul,
+.message.assistant ol {
+    margin: 0.5em 0;
+    padding-left: 1.5em;
+}
+.message.assistant li {
+    margin: 0.25em 0;
+}
+.message.assistant code {
+    background-color: rgba(0, 0, 0, 0.05);
+    padding: 2px 4px;
+    border-radius: 3px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.9em;
+}
+.message.assistant pre {
+    background-color: rgba(0, 0, 0, 0.05);
+    padding: 8px;
+    border-radius: 4px;
+    overflow-x: auto;
+}
+.message.assistant pre code {
+    background-color: transparent;
+    padding: 0;
+}
+.message.assistant blockquote {
+    border-left: 3px solid #007bff;
+    padding-left: 1em;
+    margin: 0.5em 0;
+    color: #666;
+}
+.message.assistant strong {
+    font-weight: 600;
+}
+.message.assistant em {
+    font-style: italic;
+}
+.message.assistant a {
+    color: #007bff;
+    text-decoration: underline;
+}
+/* Suggestion buttons styling */
+.suggestions-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 0;
+    justify-content: flex-start;
+}
+.suggestions-container:empty {
+    display: none;
+}
+.suggestion-button {
+    padding: 6px 14px;
+    background-color: #8ab4f8;
+    color: #1a1a1a;
+    border: none;
+    border-radius: 16px;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 500;
+    transition: background-color 0.2s;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+.suggestion-button:hover {
+    background-color: #6fa0f6;
+}
+.suggestion-button:active {
+    transform: translateY(1px);
+}
+.more-button {
+    background: none;
+    border: none;
+    color: #007bff;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 300;
+    padding: 5px;
+    text-decoration: none;
+}
+.more-button:hover {
+    color: #0056b3;
+}
+.input-container {
+    padding: 20px;
+    border-top: 1px solid #dee2e6;
+    display: flex;
+    gap: 10px;
+}
+.input-field {
+    flex: 1;
+    padding: 12px 16px;
+    border: 1px solid #ced4da;
+    border-radius: 20px;
+    outline: none;
+    font-size: 14px;
+}
+.send-button {
+    padding: 12px 20px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 20px;
+    cursor: pointer;
+    font-size: 14px;
+}
+.send-button:hover {
+    background-color: #0056b3;
+}
+.send-button:disabled {
+    background-color: #6c757d;
+    cursor: not-allowed;
+}
+.loading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #6c757d;
+    font-style: italic;
+}
+.loading::after {
+    content: '';
+    width: 16px;
+    height: 16px;
+    border: 2px solid #f3f3f3;
+    border-top: 2px solid #007bff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Thinking process container styles */
+.thinking-container {
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 12px;
+    margin: 10px 0;
+    max-width: 80%;
+    align-self: flex-start;
+    overflow: clip;
+}
+
+.thinking-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    background-color: #e9ecef;
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.2s;
+}
+
+.thinking-header:hover {
+    background-color: #dee2e6;
+}
+
+.thinking-current-step {
+    font-size: 14px;
+    color: #495057;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+}
+
+.thinking-toggle {
+    font-size: 12px;
+    color: #6c757d;
+    font-weight: 500;
+}
+
+.thinking-details {
+    padding: 16px;
+    display: none;
+    max-height: 400px;
+    overflow-y: auto;
+    background-color: white;
+}
+
+.thinking-details.expanded {
+    display: block;
+}
+
+.thinking-step {
+    padding: 12px;
+    margin-bottom: 8px;
+    border-left: 3px solid #007bff;
+    background-color: #f8f9fa;
+    border-radius: 4px;
+    font-size: 13px;
+}
+
+.thinking-step.reasoning {
+    border-left-color: #007bff;
+    background-color: #e7f3ff;
+}
+
+.thinking-step.tool-use {
+    border-left-color: #28a745;
+    background-color: #e8f5e9;
+}
+
+.thinking-step.tool-result {
+    border-left-color: #17a2b8;
+    background-color: #e0f7fa;
+}
+
+.thinking-step.tool-result.error {
+    border-left-color: #dc3545;
+    background-color: #ffebee;
+}
+
+.thinking-step.status {
+    border-left-color: #ffc107;
+    background-color: #fff8e1;
+}
+
+.thinking-step-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-weight: 600;
+    font-size: 13px;
+    color: #212529;
+}
+
+.thinking-step-content {
+    font-size: 12px;
+    color: #495057;
+    margin-left: 24px;
+    line-height: 1.5;
+}
+
+.thinking-step-timestamp {
+    font-size: 11px;
+    color: #6c757d;
+    margin-left: 24px;
+    margin-top: 4px;
+}
+
+.tool-params {
+    background-color: #e9ecef;
+    padding: 8px;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    margin-top: 4px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.thinking-spinner {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border: 2px solid #f3f3f3;
+    border-top: 2px solid #007bff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+/* The full-size view of a frame (see openKeyframeOverlay). */
+.lma-keyframe-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.75);
+    cursor: zoom-out;
+}
+.lma-keyframe-overlay img {
+    max-width: 96vw;
+    max-height: 96vh;
+    border-radius: 4px;
+}
+.lma-keyframe-overlay.with-actions {
+    flex-direction: column;
+    gap: 10px;
+}
+.lma-keyframe-overlay.with-actions img {
+    max-height: calc(96vh - 48px);
+}
+.lma-keyframe-overlay button {
+    padding: 6px 14px;
+    border: 0;
+    border-radius: 16px;
+    background: #ffffff;
+    color: #0f141a;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+/* A frame of the shared screen in an answer (see resolveKeyframes). */
+img.lma-keyframe {
+    display: block;
+    max-width: 100%;
+    min-height: 40px;
+    margin: 6px 0;
+    border: 1px solid #e9ebed;
+    border-radius: 6px;
+    background: #f2f3f3;
+    cursor: zoom-in;
+}

@@ -9,14 +9,23 @@ import { resolve } from 'node:path';
 import { JSDOM } from 'jsdom';
 import { describe, expect, it } from 'vitest';
 
-const FRAME = resolve(__dirname, '../../../public/strands-chat.html');
+const PUBLIC = resolve(__dirname, '../../../public');
+const FRAME = resolve(PUBLIC, 'strands-chat.html');
+const FRAME_SCRIPT_TAG = '<script src="js/strands-chat.js"></script>';
+
+// The page with its own script, js/strands-chat.js, placed where the page loads
+// it. The vendored libraries are not loaded (see `markdown` below).
+const frameHtml = () => {
+  const html = readFileSync(FRAME, 'utf8');
+  const script = readFileSync(resolve(PUBLIC, 'js/strands-chat.js'), 'utf8');
+  return html.replace(FRAME_SCRIPT_TAG, () => `<script>${script}</script>`);
+};
 
 // The frame as the meeting page loads it: framed by a parent on its own origin.
-// External scripts are not loaded; the inline script runs as written.
 const loadFrame = ({ markdown = false } = {}) => {
   const posted = [];
   const errors = [];
-  const dom = new JSDOM(readFileSync(FRAME, 'utf8'), {
+  const dom = new JSDOM(frameHtml(), {
     url: 'https://lma.example.com/strands-chat.html',
     runScripts: 'dangerously',
     beforeParse(window) {
@@ -36,6 +45,18 @@ const loadFrame = ({ markdown = false } = {}) => {
 };
 
 describe('strands-chat.html', () => {
+  // The web app's Content-Security-Policy allows scripts and stylesheets from
+  // its own origin only, so the page keeps its code and styles in files.
+  it('loads its script and styles from files, with nothing inline', () => {
+    const html = readFileSync(FRAME, 'utf8');
+    expect(html).toContain(FRAME_SCRIPT_TAG);
+    expect(html).toContain('<link rel="stylesheet" href="css/strands-chat.css">');
+    expect(html).not.toMatch(/<script(?![^>]*\bsrc=)[^>]*>/i);
+    expect(html).not.toMatch(/<style\b/i);
+    expect(html).not.toMatch(/\son[a-z]+\s*=/i);
+    expect(html).not.toMatch(/\sstyle\s*=/i);
+  });
+
   it('asks the page for its chat buttons when it loads', () => {
     const { dom, posted, errors } = loadFrame();
     const requests = posted.filter(({ message }) => message?.type === 'STRANDS_BUTTON_CONFIG_REQUEST');
