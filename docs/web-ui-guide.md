@@ -174,7 +174,7 @@ assistant is a panel beside the tabs, on every tab; see
     header confirms the copy). The summary can also be sent with **Email
     summary (beta)**, which opens your mail client with the summary as the
     body and the addresses on the meeting's
-    [participant list](virtual-participant.md#participant-list) in **To**. The
+    [participant list](virtual-participant.md#participant-list) in **To:**. The
     transcript's entries are disabled, with the reason,
     once the Retention settings have deleted it.
   - **Recordings** — the **Audio** and **Video** recordings, one entry per

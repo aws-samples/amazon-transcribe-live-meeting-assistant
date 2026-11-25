@@ -124,8 +124,6 @@ export const runSummaryAction = async (id, item, consent = null, { participants 
   } else if (id === 'copy') {
     return copyText(summaryDownloadMarkdown(item, consent, options));
   } else if (id === 'email') {
-    // The recipients, the subject and the body are each encoded: addresses and
-    // a meeting name are free text, and getEmailFormattedSummary encodes the body.
     const subject = encodeURIComponent(item.callId ?? '');
     const to = summaryEmailRecipients(item);
     const body = getEmailFormattedSummary(item.callSummaryText);
