@@ -267,8 +267,11 @@ This runs the whole set and writes the snapshot of that run's reports;
 reports and refuses to write anything (exit 1) when its output matches the shape
 of a URL, host name, ARN, account id, pool id, email address or local path, uses
 ZAP alert wording, or contains any string from the raw reports, such as an alert
-name, a finding's text or the stack name. An existing version's snapshot is not
-overwritten unless `REPLACE=1` is given. Read the snapshot before committing it;
+name, a finding's text or the stack name. It also refuses a snapshot that records
+a failed check or test or a ZAP `FAIL` rule until `ALLOW_FAILURES=1` is given,
+which is for after the failure has been reported and handled as
+[Reporting a result](#reporting-a-result) describes. An existing version's
+snapshot is not overwritten unless `REPLACE=1` is given. Read the snapshot before committing it;
 the steps are in the
 [`curate-security-results`](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/blob/develop/.claude/skills/curate-security-results.md)
 skill.
@@ -316,6 +319,9 @@ So that a green run is not read as more than it is:
   entry points tested here; their own code is covered by their unit tests.
 - **Token revocation after sign-out**, **TLS protocol versions** and **rate
   limits** are not tested.
+- **ZAP sends HTTP requests only.** It scans the GraphQL API, the web UI and the
+  MCP endpoint, not the WebSocket transcriber, which the live access tests call
+  instead.
 - **Recording links per meeting.** The web UI signs recording links itself,
   with credentials scoped to the recordings prefixes, as
   [Recording Playback](user-based-access-control.md#recording-playback)

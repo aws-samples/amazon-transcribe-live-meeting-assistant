@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -181,7 +182,7 @@ def test_the_snapshot_holds_the_counts_of_every_part(tmp_path: Path) -> None:
 
 def test_the_written_snapshot_names_no_identifier_from_the_raw_reports(tmp_path: Path) -> None:
     snapshot, forbidden = build(tmp_path)
-    target = cs.write(snapshot, forbidden, tmp_path / "out")
+    target = cs.write(snapshot, forbidden, tmp_path / "out", allow_failures=True)
     assert sorted(p.name for p in target.iterdir()) == ["summary.json", "summary.md"]
     for name in ("summary.md", "summary.json"):
         text = (target / name).read_text()
@@ -277,7 +278,7 @@ def test_the_curator_refuses_a_snapshot_with_an_identifier_and_writes_nothing(
     snapshot, forbidden = build(tmp_path, not_run_detail=detail)
     out = tmp_path / "out"
     with pytest.raises(cs.UnsafeSnapshot) as refused:
-        cs.write(snapshot, forbidden, out)
+        cs.write(snapshot, forbidden, out, allow_failures=True)
     assert not out.exists()
     # The refusal names the kind of problem, never the matched text.
     assert detail not in str(refused.value) and ACCOUNT not in str(refused.value)
@@ -317,17 +318,17 @@ def test_the_guard_accepts_versions_dates_commits_and_repository_paths() -> None
 def test_an_existing_version_is_not_overwritten_unless_asked(tmp_path: Path) -> None:
     snapshot, forbidden = build(tmp_path)
     out = tmp_path / "out"
-    cs.write(snapshot, forbidden, out)
+    cs.write(snapshot, forbidden, out, allow_failures=True)
     with pytest.raises(FileExistsError):
-        cs.write(snapshot, forbidden, out)
-    cs.write(snapshot, forbidden, out, replace=True)
+        cs.write(snapshot, forbidden, out, allow_failures=True)
+    cs.write(snapshot, forbidden, out, replace=True, allow_failures=True)
 
 
 def test_a_version_that_is_not_a_plain_version_string_is_refused(tmp_path: Path) -> None:
     snapshot, forbidden = build(tmp_path)
     snapshot["version"] = "../escape"
     with pytest.raises(cs.UnsafeSnapshot):
-        cs.write(snapshot, forbidden, tmp_path / "out")
+        cs.write(snapshot, forbidden, tmp_path / "out", allow_failures=True)
 
 
 def test_the_cli_refuses_with_exit_status_1(tmp_path: Path, capsys) -> None:
@@ -338,11 +339,61 @@ def test_the_cli_refuses_with_exit_status_1(tmp_path: Path, capsys) -> None:
             "--version", "9.9.9", "--date", "2026-11-25", "--out", str(tmp_path / "out"),
             "--srt-issues", str(s["srt"]), "--suppressions", str(reports["suppressions"]),
             "--static-junit", str(s["static-roles"]), "--access-report", str(s["live-rbac"]),
-            "--zap-summary", str(s["zap"]),
+            "--zap-summary", str(s["zap"]), "--allow-failures",
         ]
     )  # fmt: skip
     assert status == 1 and not (tmp_path / "out").exists()
-    assert HOST not in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert HOST not in err and "refusing" in err
+
+
+def test_a_snapshot_with_failures_is_refused_until_they_are_allowed(tmp_path: Path) -> None:
+    snapshot, forbidden = build(tmp_path)
+    assert cs.failures(snapshot) == ["static role checks", "live access tests"]
+    out = tmp_path / "out"
+    with pytest.raises(cs.UnhandledFailures) as refused:
+        cs.write(snapshot, forbidden, out)
+    assert "static role checks, live access tests" in str(refused.value)
+    assert not out.exists()
+    assert cs.write(snapshot, forbidden, out, allow_failures=True).is_dir()
+
+
+def test_a_zap_fail_rule_counts_as_a_failure(tmp_path: Path) -> None:
+    snapshot, _ = build(tmp_path)
+    snapshot["parts"]["static-roles"] = {"ran": False, "reason": "x"}
+    snapshot["parts"]["live-rbac"] = {"ran": False, "reason": "x"}
+    assert cs.failures(snapshot) == []
+    snapshot["parts"]["zap"]["targets"][0]["rules"]["FAIL"] = 1
+    assert cs.failures(snapshot) == ["ZAP"]
+
+
+def test_a_live_junit_file_from_another_run_is_not_used(tmp_path: Path) -> None:
+    reports = write_reports(tmp_path)
+    junit = tmp_path / "live.xml"
+    junit.write_text('<testsuite><testcase name="a"><skipped message="m"/></testcase></testsuite>')
+    report = reports["sources"]["live-rbac"]
+    old = report.stat().st_mtime - cs.SAME_RUN_SECONDS - 60
+    os.utime(junit, (old, old))
+    snapshot, _ = cs.build(reports["sources"], version="9.9.9", date="2026-11-25", live_junit=junit)
+    assert snapshot["parts"]["live-rbac"]["tests"] is None
+    assert "not recorded (no JUnit file from the same run)" in cs.to_markdown(snapshot)
+
+
+def test_the_scope_list_matches_the_docs_section_it_cites() -> None:
+    doc = (REPO_ROOT / "docs" / "security-testing.md").read_text(encoding="utf-8")
+    section = doc.split("## What these tests do not exercise", 1)[1].split("\n## ", 1)[0]
+    bullets = [line for line in section.splitlines() if line.startswith("- ")]
+    assert len(bullets) == len(cs.NOT_EXERCISED)
+    for marker in (
+        "Subscriptions",
+        "ASR MicroVM",
+        "browser extension",
+        "Token revocation",
+        "Recording links",
+        "ZAP sends HTTP requests only",
+    ):
+        assert marker.lower() in section.lower(), marker
+        assert any(marker.lower() in item.lower() for item in cs.NOT_EXERCISED), marker
 
 
 # ── the committed snapshots ────────────────────────────────────────────────

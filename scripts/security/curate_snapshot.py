@@ -32,7 +32,7 @@ different days.
 Usage::
 
     python3 scripts/security/curate_snapshot.py                # from the newest local reports
-    python3 scripts/security/curate_snapshot.py --stack-version 0.4.1 --commit live=<sha>
+    python3 scripts/security/curate_snapshot.py --stack-version 0.4.1 --commit live-rbac=<sha>
     make security-results STACK=<name> REGION=<region> SNAPSHOT=1   # run everything, then this
 
 See docs/security-testing.md (Release snapshots) and
@@ -82,7 +82,8 @@ ZAP_TALLY = {
 }
 REASON_MAX = 200
 
-#: The tests' own scope limits, as docs/security-testing.md states them.
+#: The tests' own scope limits: keep in step with "What these tests do not exercise"
+#: in docs/security-testing.md (a test holds each item to that section).
 NOT_EXERCISED = (
     "GraphQL subscriptions are held to the role matrix by the schema contract test only; "
     "no live test opens one.",
@@ -248,6 +249,17 @@ def read_skips(junit: Path) -> dict:
     }
 
 
+#: report.json is written when the pytest session ends, the JUnit file just after.
+SAME_RUN_SECONDS = 3600
+
+
+def same_run(report: Path, junit: Path | None) -> bool:
+    """Whether ``junit`` exists and was written by the run that wrote ``report``."""
+    if junit is None or not junit.is_file():
+        return False
+    return abs(junit.stat().st_mtime - report.stat().st_mtime) <= SAME_RUN_SECONDS
+
+
 def read_live(report: Path, forbidden: set[str], junit: Path | None = None) -> dict:
     """Checks per suite, and the reasons checks were not run, from the live tests' ``report.json``.
 
@@ -281,7 +293,7 @@ def read_live(report: Path, forbidden: set[str], junit: Path | None = None) -> d
             {"suite": suite, "reason": reason, "checks": n}
             for (suite, reason), n in sorted(reasons.items())
         ],
-        "tests": read_skips(junit) if junit is not None and junit.is_file() else None,
+        "tests": read_skips(junit) if same_run(report, junit) else None,
     }
 
 
@@ -349,12 +361,21 @@ def repo_version(root: Path = REPO_ROOT) -> str:
 
 
 def head_commit(root: Path = REPO_ROOT) -> str:
+    """``HEAD``, marked ``(with local changes)`` when tracked files differ from it."""
     try:
-        return subprocess.run(  # noqa: S603,S607 - fixed command
+        sha = subprocess.run(  # noqa: S603,S607 - fixed command
             ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, check=True
+        ).stdout.strip()
+        changed = subprocess.run(  # noqa: S603,S607 - fixed command
+            ["git", "status", "--porcelain", "--untracked-files=no"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=True,
         ).stdout.strip()
     except (OSError, subprocess.CalledProcessError):
         return ""
+    return f"{sha} (with local changes)" if changed else sha
 
 
 def build(
@@ -439,8 +460,8 @@ def to_markdown(snapshot: dict) -> str:  # noqa: C901 - one section per part
     lines += ["", f"## {PART_TITLES['srt']}", ""]
     if srt["ran"]:
         lines += [
-            "Findings by priority and status. *Suppressed* findings have a review decision "
-            "recorded in `.srt/suppressions.json`.",
+            "Findings by priority and status. *Suppressed* findings were marked suppressed in "
+            "triage; the lines below the table say how many carry a recorded reason.",
             "",
             "| Priority | Open | Reopened | Suppressed | Resolved |",
             "|---|---|---|---|---|",
@@ -499,7 +520,10 @@ def to_markdown(snapshot: dict) -> str:  # noqa: C901 - one section per part
         ]
         tests = live.get("tests")
         if tests is None:
-            lines += ["", "Tests skipped as a whole: not recorded (the run wrote no JUnit file)."]
+            lines += [
+                "",
+                "Tests skipped as a whole: not recorded (no JUnit file from the same run).",
+            ]
         else:
             lines += [
                 "",
@@ -574,8 +598,47 @@ def _headline(part: str, body: dict) -> str:
     return f"{len(ran)} of {len(body['targets'])} targets scanned; High {high}, Medium {medium}"
 
 
-def write(snapshot: dict, forbidden: set[str], out_root: Path, replace: bool = False) -> Path:
-    """Check both files, then write them to ``<out_root>/<version>/``. Nothing is written on a refusal."""
+class UnhandledFailures(ValueError):
+    """The snapshot records failures, and nobody has said they were handled."""
+
+
+def failures(snapshot: dict) -> list[str]:
+    """The parts whose counts include a failure: a failed check or test, or a ZAP FAIL rule."""
+    p = snapshot["parts"]
+    found = []
+    static = p["static-roles"]
+    if static["ran"] and static["failed"] + static["errors"]:
+        found.append("static role checks")
+    live = p["live-rbac"]
+    if live["ran"] and (live["totals"]["fail"] or (live.get("tests") or {}).get("failed")):
+        found.append("live access tests")
+    zap = p["zap"]
+    if zap["ran"] and any(t["ran"] and t["rules"]["FAIL"] for t in zap["targets"]):
+        found.append("ZAP")
+    return found
+
+
+def write(
+    snapshot: dict,
+    forbidden: set[str],
+    out_root: Path,
+    replace: bool = False,
+    allow_failures: bool = False,
+) -> Path:
+    """Check both files, then write them to ``<out_root>/<version>/``. Nothing is written on a refusal.
+
+    A snapshot with a failure is refused unless ``allow_failures``: report the
+    failure through the channel in CONTRIBUTING.md first, and publish once it is
+    fixed or assessed.
+    """
+    failed = failures(snapshot)
+    if failed and not allow_failures:
+        raise UnhandledFailures(
+            "refusing to write the snapshot: it records failures in "
+            + ", ".join(failed)
+            + "; handle them first (see the curate-security-results skill), then pass "
+            "--allow-failures (ALLOW_FAILURES=1)"
+        )
     version = snapshot["version"]
     if not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z.+-]*", version):
         raise UnsafeSnapshot(
@@ -619,6 +682,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--out", default=str(SNAPSHOT_ROOT))
     parser.add_argument("--replace", action="store_true", help="overwrite this version's snapshot")
+    parser.add_argument(
+        "--allow-failures",
+        action="store_true",
+        help="write a snapshot that records failures (only once they are handled)",
+    )
     args = parser.parse_args(argv)
 
     commits = {}
@@ -646,8 +714,8 @@ def main(argv: list[str] | None = None) -> int:
         live_junit=Path(args.access_junit),
     )
     try:
-        target = write(snapshot, forbidden, Path(args.out), args.replace)
-    except (UnsafeSnapshot, FileExistsError) as err:
+        target = write(snapshot, forbidden, Path(args.out), args.replace, args.allow_failures)
+    except (UnsafeSnapshot, UnhandledFailures, FileExistsError) as err:
         print(err, file=sys.stderr)
         return 1
     print(f"Wrote {target / 'summary.md'} and summary.json. Read both before committing them.")

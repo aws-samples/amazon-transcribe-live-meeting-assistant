@@ -61,9 +61,12 @@ make security-snapshot CURATE_ARGS="--stack-version <v> --commit live-rbac=<sha>
 ```
 
 It reads `.srt/issues.json`, `scratch/security-results/static-roles.xml`,
-`scratch/api-test-results/report.json` and `scratch/zap-reports/latest/summary.json`
-(each overridable: `--srt-issues`, `--static-junit`, `--access-report`,
-`--zap-summary`), and `--skip <part>` records a part as not run. Each part
+`scratch/api-test-results/report.json`, `scratch/security-results/live-rbac.xml`
+and `scratch/zap-reports/latest/summary.json` (each overridable: `--srt-issues`,
+`--static-junit`, `--access-report`, `--access-junit`, `--zap-summary`), and
+`--skip <part>` records a part as not run. The live tests' JUnit file is used
+only when it was written within an hour of `report.json`; otherwise the skipped
+tests read *not recorded*. Each part
 carries its own *measured* date, so parts from different days are visible as
 such. Pass a part's commit only when you know which commit its tests ran from;
 otherwise it reads `not recorded`.
@@ -78,11 +81,14 @@ otherwise it reads `not recorded`.
    measured date and commit must be what you ran. A part from an older run, or
    from a stack built from another commit, is either labelled as such or left
    out with `--skip`.
-3. **A failed access check or a ZAP FAIL is not published as a number alone
-   without being handled.** Report it privately first (CONTRIBUTING.md, *Security
-   issue notifications*); publish the snapshot only once the result is fixed or
-   assessed. Counts carry no detail, but a non-zero failure count next to a
-   release is itself a statement.
+3. **A failure is handled before it is published.** The curator refuses a
+   snapshot with a failed static or live check or test, or a ZAP `FAIL` rule,
+   until `ALLOW_FAILURES=1` (`--allow-failures`) is given. Report the failure
+   privately first (CONTRIBUTING.md, *Security issue notifications*), and pass
+   the flag only once it is fixed or assessed. Counts carry no detail, but a
+   non-zero failure count next to a release is itself a statement. SRT findings
+   still open at High or Critical are not refused, but ask the user whether to
+   triage them before the snapshot is committed.
 4. **Stage by path**: `git add security/test-results/<version>/`. Never add
    anything from `scratch/` or `.srt/issues.json`.
 5. Commit with a neutral subject, e.g. `chore(security): add the <version>

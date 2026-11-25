@@ -834,15 +834,18 @@ endif
 # SNAPSHOT=1 then writes this run's counts-only snapshot to
 # security/test-results/<VERSION>/ (committed; see the curate-security-results
 # skill). REPLACE=1 overwrites an existing snapshot of that version.
+# ALLOW_FAILURES=1 writes one that records failures, once they are handled.
+SNAPSHOT_FLAGS = $(if $(filter 1 true yes,$(REPLACE)),--replace) \
+	$(if $(filter 1 true yes,$(ALLOW_FAILURES)),--allow-failures)
 security-results: ## Run the security tests as a set (Usage: make security-results [STACK=<name> REGION=<region>] [SNAPSHOT=1])
 	$(SECTEST_REGION_ENV) $(PYTHON) scripts/security/security_results.py \
 		$(if $(STACK),--stack-name "$(STACK)") $(if $(REGION),--region "$(REGION)") \
-		$(if $(filter 1 true yes,$(SNAPSHOT)),--snapshot) $(if $(filter 1 true yes,$(REPLACE)),--replace)
+		$(if $(filter 1 true yes,$(SNAPSHOT)),--snapshot $(SNAPSHOT_FLAGS))
 
 # Curate the snapshot from reports already on disk, without running the tests.
 # CURATE_ARGS passes flags through, e.g. --stack-version 0.4.1 --commit live-rbac=<sha>.
 security-snapshot: ## Write security/test-results/<VERSION>/ from existing local reports (Usage: make security-snapshot [CURATE_ARGS=...])
-	$(PYTHON) scripts/security/curate_snapshot.py $(if $(filter 1 true yes,$(REPLACE)),--replace) $(CURATE_ARGS)
+	$(PYTHON) scripts/security/curate_snapshot.py $(SNAPSHOT_FLAGS) $(CURATE_ARGS)
 
 ##@ Product Demo Recording
 # Narrated demo videos of the web UI: see .claude/skills/product-demo.md. The

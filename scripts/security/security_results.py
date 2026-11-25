@@ -230,6 +230,11 @@ def main(argv: list[str] | None = None) -> int:
         "--snapshot", action="store_true", help="then write security/test-results/<VERSION>/"
     )
     parser.add_argument("--replace", action="store_true", help="overwrite that version's snapshot")
+    parser.add_argument(
+        "--allow-failures",
+        action="store_true",
+        help="write a snapshot that records failures (only once they are handled)",
+    )
     args = parser.parse_args(argv)
     out_dir = Path(args.out_dir)
     steps = plan(args.stack_name, args.region, args.python, out_dir)
@@ -269,9 +274,17 @@ def main(argv: list[str] | None = None) -> int:
         )
         try:
             target = curate_snapshot.write(
-                snapshot, forbidden, curate_snapshot.SNAPSHOT_ROOT, args.replace
+                snapshot,
+                forbidden,
+                curate_snapshot.SNAPSHOT_ROOT,
+                args.replace,
+                args.allow_failures,
             )
-        except (curate_snapshot.UnsafeSnapshot, FileExistsError) as err:
+        except (
+            curate_snapshot.UnsafeSnapshot,
+            curate_snapshot.UnhandledFailures,
+            FileExistsError,
+        ) as err:
             print(err, file=sys.stderr)
             return 1
         print(f"Snapshot: {target}/summary.md. Read it line by line before committing it.")
