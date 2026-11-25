@@ -225,7 +225,8 @@ def other_credentials_available(env=None, home=None):
 
 
 def write_placeholder_credentials(env=None, home=None):
-    """Write SRT's placeholder AWS credentials, only on a CI runner with no other source.
+    """Write SRT's placeholder AWS credentials on a CI runner whose environment and
+    ~/.aws/config name no credential source.
 
     Returns the file written, or None. ``srt config`` will not install its
     scanners without ~/.aws/credentials; the scans themselves do not use it.
@@ -303,8 +304,9 @@ def main():
         # no 40-char secret). Outside a CI runner the placeholder is never
         # written, since it would take precedence over the host's own credentials.
         # On a runner it takes precedence over an instance profile while
-        # `srt config` runs, for every process sharing this HOME; the GitLab job
-        # runs in its own container, so that is the job alone.
+        # `srt config` runs, for every process sharing this HOME. The GitLab job
+        # runs in its own container, so that is the job alone; on a GitHub-hosted
+        # runner it is the job's own VM.
         placeholder = write_placeholder_credentials()
         config_file.write_text(json.dumps({
             "AWS_PROFILE": os.getenv("AWS_PROFILE", "default"),
