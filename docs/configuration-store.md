@@ -795,8 +795,12 @@ and never from the request.
   was active before it (`default` for the baseline). Each activation and each
   deletion writes its entry in the same DynamoDB transaction as the pointer or
   the delete, so either both are written or neither is, and a deletion refused
-  because the profile changed meanwhile records nothing. An entry is appended
-  with `list_append`, which loses no concurrent entry. After each write the log
+  because the profile changed meanwhile records nothing. Two such changes at
+  the same moment can conflict on the log item; DynamoDB then refuses one of
+  them with nothing written, and the page asks the Admin to reload and try
+  again. An entry is appended with `list_append`. `Previous` is read just
+  before the activation, so two activations at the same moment may both name
+  the same profile. After each write the log
   is trimmed to its **100** newest entries, by a write conditional on the
   list's length, which gives way to an entry appended meanwhile; the next write
   trims again. `listConfigurationProfiles` returns the log newest first as

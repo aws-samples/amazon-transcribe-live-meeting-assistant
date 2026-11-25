@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 import pytest
+from botocore.exceptions import ClientError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -296,6 +297,23 @@ def test_the_profile_log_keeps_its_newest_entries(store, monkeypatch):
     for who in ("one", "two", "three", "four", "five"):
         store.activate_profile("default", updated_by=who)
     assert [e.by for e in store.profile_events()] == ["five", "four", "three"]
+
+
+def test_a_transaction_conflict_on_the_log_asks_for_a_reload(store, monkeypatch):
+    def conflicting(**_request):
+        raise ClientError(
+            {
+                "Error": {"Code": "TransactionCanceledException", "Message": "canceled"},
+                "CancellationReasons": [{"Code": "None"}, {"Code": "TransactionConflict"}],
+            },
+            "TransactWriteItems",
+        )
+
+    store.create_profile("trial", updated_by="a")
+    monkeypatch.setattr(store.dynamo, "transact_write_items", conflicting)
+    with pytest.raises(ConcurrentModification, match="reload"):
+        store.activate_profile("trial", updated_by="a")
+    assert store.active_profile_name(consistent_read=True) == "custom"
 
 
 def test_the_profile_log_is_not_listed_as_a_profile(store):

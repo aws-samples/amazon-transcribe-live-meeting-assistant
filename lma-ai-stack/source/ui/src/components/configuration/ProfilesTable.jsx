@@ -46,8 +46,9 @@ const ProfileActivity = ({ events }) => (
   <ExpandableSection headerText={`Activation and deletion history (${events.length})`} variant="footer">
     {events.length ? (
       <ul aria-label="Activation and deletion history">
-        {events.map((event) => (
-          <li key={`${event.at}-${event.action}-${event.profile}-${event.by}`}>
+        {events.map((event, position) => (
+          // eslint-disable-next-line react/no-array-index-key -- two entries can be identical to the second
+          <li key={`${position}-${event.at}-${event.action}-${event.profile}`}>
             <Box variant="small">{profileEventText(event)}</Box>
           </li>
         ))}

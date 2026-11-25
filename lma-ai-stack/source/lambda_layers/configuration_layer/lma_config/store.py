@@ -427,7 +427,8 @@ class ProfileEvent:
     by: str
     at: str
     #: For an activation, the profile that was active before it ("default" for
-    #: the baseline). Empty for a deletion.
+    #: the baseline), as read just before the activation: two activations at the
+    #: same moment may both name the same one. Empty for a deletion.
     previous: str = ""
 
     def to_plain(self) -> Dict[str, Any]:
@@ -630,7 +631,11 @@ class ConfigurationStore:
         the prompt templates means no summaries at all.
         """
         record = self.read_record(ACTIVE_POINTER_KEY, consistent_read=consistent_read)
-        active = record.metadata.get("ActiveProfile")
+        return self._active_name(record.metadata)
+
+    def _active_name(self, pointer: Mapping[str, Any]) -> Optional[str]:
+        """``active_profile_name`` for a pointer already read."""
+        active = pointer.get("ActiveProfile")
         if not active:
             return None
         name = str(active)
@@ -1252,6 +1257,11 @@ class ConfigurationStore:
         ``operation`` is one ``TransactItems`` entry (``{"Put": ...}`` or
         ``{"Delete": ...}``). Returns False when its condition failed, so
         nothing was written; any other failure is raised.
+
+        Raises:
+            ConcurrentModification: another write to the same items was in
+                progress, so DynamoDB refused this transaction. Nothing was
+                written, and the change can be made again.
         """
         try:
             self._client.transact_write_items(
@@ -1261,8 +1271,14 @@ class ConfigurationStore:
             if error.response.get("Error", {}).get("Code") != _TRANSACTION_CANCELED:
                 raise
             reasons = error.response.get("CancellationReasons") or []
-            if reasons and (reasons[0] or {}).get("Code") == "ConditionalCheckFailed":
+            codes = [(reason or {}).get("Code") for reason in reasons]
+            if codes and codes[0] == "ConditionalCheckFailed":
                 return False
+            if "TransactionConflict" in codes:
+                raise ConcurrentModification(
+                    "the configuration profiles changed while this change was being made; "
+                    "reload the page and try again"
+                ) from error
             raise
         self.invalidate()
         self._trim_profile_log()
@@ -1321,8 +1337,8 @@ class ConfigurationStore:
         A scan, because the table has a hash key only: the table holds a few
         dozen items at most, and the projection leaves out the bodies.
         """
-        active = self.active_profile_name(consistent_read=True)
         pointer = self.read_record(ACTIVE_POINTER_KEY, consistent_read=True).metadata
+        active = self._active_name(pointer)
         names = [codec.KEY_ATTRIBUTE, *codec.METADATA_ATTRIBUTES[1:]]
         request: Dict[str, Any] = {
             "TableName": self._table_name,
