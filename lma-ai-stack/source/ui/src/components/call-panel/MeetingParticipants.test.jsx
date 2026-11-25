@@ -80,7 +80,7 @@ describe('MeetingParticipants', () => {
     expect(button.disabled || button.getAttribute('aria-disabled') === 'true').toBe(true);
   });
 
-  it('creates the accounts after a confirmation, then shows the outcome and reads the accounts again', async () => {
+  it('creates the accounts after a confirmation and shows the outcome and the allowance left today', async () => {
     let created = false;
     answerWith(
       () => [

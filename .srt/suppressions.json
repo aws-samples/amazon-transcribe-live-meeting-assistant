@@ -97567,7 +97567,7 @@
     "isCustomResource": false,
     "firstDetectedAt": "2026-10-23T18:20:59.602Z",
     "assessmentCount": 1,
-    "suppressionReason": "Reviewed 2026-10-23 against the code (develop). Accepted, consistent with the 10 existing DDB-002 decisions on sister tables: CloudTrail data-plane logging for DynamoDB is left for operators to enable; the table is encrypted with the deployment's customer-managed KMS key and has point-in-time recovery."
+    "suppressionReason": "Reviewed 2026-10-23 against the code (develop). Accepted, consistent with the 10 existing DDB-002 decisions on sister tables: CloudTrail data-plane logging for DynamoDB is left for operators to enable; the table is encrypted with the deployment's customer-managed KMS key, and its point-in-time recovery follows the MeetingDataPointInTimeRecoveryDays stack parameter."
   },
   {
     "source": "security-matrix",

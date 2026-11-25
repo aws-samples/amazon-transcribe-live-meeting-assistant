@@ -771,7 +771,7 @@ The Virtual Participant stores the list on its own record and puts it on the mee
 In the form fields, enter one person per line as `Name <email>` or as an email address on its own; a list pasted from a calendar invite, separated by semicolons, also works. The list is checked the same way wherever it is set:
 
 - each entry needs a well-formed email address (the form that a user account can be created for); the name is optional, trimmed, and at most 200 characters;
-- an address listed twice, compared ignoring case, is kept once, with the first name given for it;
+- an address listed twice, compared ignoring case, is kept once, with the first non-empty name given for it;
 - a meeting lists at most 100 people. A longer list is refused rather than cut short.
 
 With **Meeting Sharing › Share meetings with their listed participants** on, which it is by default and in every configuration preset, listing someone shares the meeting with their address, read-only, from the time the meeting record exists, and taking them off the list removes that share; see [Sharing with the participant list](user-based-access-control.md#sharing-with-the-participant-list). A person with a Participant account then reads it on their **Shared meetings** page, and a User or Admin in their meetings list. With the setting off, listing someone does not share the meeting. Either way the owner can share and unshare by hand with **Share** on the meeting, or the `shareWith` argument of the MCP tools.
