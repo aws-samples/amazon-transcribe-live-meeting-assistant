@@ -376,15 +376,18 @@ def match_listed(
         key = normalize_name(name)
         if key:
             seen.setdefault(key, []).append(str(name))
-    matched: Dict[str, List[tuple]] = {}
+    # Every name shown counts as showing each person who goes by it, whether
+    # or not it matches: two attendees showing two names of one person, or a
+    # name of that person shared with someone else, means neither is that person.
+    shown: Dict[str, set] = {}
+    for key in seen:
+        for address in by_name.get(key) or {}:
+            shown.setdefault(address, set()).add(key)
+    matches: Dict[str, Dict[str, str]] = {}
     for key, names in seen.items():
         holders = by_name.get(key) or {}
         if len(holders) == 1 and len(names) == 1:
             [(address, source)] = holders.items()
-            matched.setdefault(address, []).append((names[0], source))
-    # Two attendees showing two names of one person: neither is that person.
-    return {
-        found[0][0]: {**people[address], "source": found[0][1]}
-        for address, found in matched.items()
-        if len(found) == 1
-    }
+            if shown[address] == {key}:
+                matches[names[0]] = {**people[address], "source": source}
+    return matches

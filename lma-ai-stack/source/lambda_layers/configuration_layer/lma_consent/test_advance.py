@@ -233,6 +233,17 @@ def test_a_name_that_two_listed_people_go_by_in_any_way_matches_nobody():
     assert advance.match_listed(["Bo Chen"], LISTED, accounts) == {}
 
 
+def test_a_name_of_a_person_shared_with_another_still_counts_as_showing_that_person():
+    accounts = {**ACCOUNTS, "ana@example.com": {"display_name": "", "short_names": ["Bobby"]}}
+    # "Bobby" is Ana's and Bo's, so it matches nobody, but it is shown: "Robert
+    # Chen" is not taken to be Bo.
+    assert advance.match_listed(["Bobby", "Robert Chen"], LISTED, accounts) == {}
+
+
+def test_the_same_name_in_two_spellings_is_one_name_shown_twice():
+    assert advance.match_listed(["Bo Chen", "bo  chen"], LISTED, ACCOUNTS) == {}
+
+
 def test_one_person_listed_twice_by_address_is_one_person():
     listed = LISTED + [{"name": "Bo Chen", "email": "BO@example.com"}]
     assert advance.match_listed(["Bo Chen"], listed)["Bo Chen"]["email"] == "bo@example.com"

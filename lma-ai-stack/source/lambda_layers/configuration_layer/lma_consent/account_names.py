@@ -301,7 +301,8 @@ def save_profile(
             client.transact_write_items(TransactItems=items)
         except client.exceptions.TransactionCanceledException as error:
             reasons = getattr(error, "response", {}).get("CancellationReasons") or []
-            if reasons and not any(r.get("Code") == "ConditionalCheckFailed" for r in reasons):
+            retried = ("ConditionalCheckFailed", "TransactionConflict")
+            if reasons and not any(r.get("Code") in retried for r in reasons):
                 # Cancelled for another reason (throttling, for one): not a conflict.
                 raise NamesNotSaved("the names could not be saved; try again") from error
             continue

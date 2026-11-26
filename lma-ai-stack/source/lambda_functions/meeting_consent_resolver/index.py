@@ -971,11 +971,14 @@ def reconcile_advance_consents(  # pylint: disable=too-many-arguments,too-many-p
         # alone could be one the full rule refuses, so this write counts none.
         return []
     looked_up = {consent.normalize_name(name) for name in candidates}
+    # One entry per name as names are compared: an attendee present and on
+    # the record under one name, in two spellings, is one attendee.
+    shown: Dict[str, str] = {}
+    for name in everyone:
+        shown.setdefault(consent.normalize_name(name), name)
     matches = {
         name: person
-        for name, person in advance.match_listed(
-            list(dict.fromkeys(everyone)), listed, accounts
-        ).items()
+        for name, person in advance.match_listed(list(shown.values()), listed, accounts).items()
         if consent.normalize_name(name) in looked_up
     }
     covering_meeting = {
