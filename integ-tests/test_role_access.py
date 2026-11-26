@@ -257,3 +257,46 @@ def test_every_role_reaches_its_own_consents_given_in_advance_only(deployment, u
         invitation = page["data"]["getAdvanceConsentInvitation"]
         assert invitation["Listed"] is False, (role, invitation)
         assert invitation["MeetingName"] is None and invitation["NoticeText"] is None, (role, invitation)
+
+
+SEARCH_ACCOUNTS = "query Probe($text: String!) { searchAccounts(text: $text) { name email } }"
+UPDATE_MY_NAMES = (
+    "mutation Probe($input: UpdateMyAccountNamesInput!) "
+    "{ updateMyAccountNames(input: $input) { DisplayName ShortNames } }"
+)
+SET_USER_NAMES = (
+    "mutation Probe($input: SetUserAccountNamesInput!) { setUserAccountNames(input: $input) { username } }"
+)
+
+
+def test_the_account_search_answers_admins_and_users_and_refuses_participants(deployment, users) -> None:
+    """The participant list's account search: an Admin and a User find the temporary Admin by
+    the start of its address, with its name and address only; a Participant is refused at the
+    field, and fewer than three characters are refused to everyone.
+    test_account_names.py searches by display name and short name."""
+    prefix = users["Admin"].username.split("@", 1)[0]
+    for role in ("Admin", "User"):
+        answer = probe.call(deployment, users[role], SEARCH_ACCOUNTS, {"text": prefix})
+        assert not answer.get("errors"), (role, answer)
+        found = answer["data"]["searchAccounts"]
+        assert users["Admin"].username.casefold() in {a["email"] for a in found}, (role, found)
+        assert len(found) <= 10, (role, found)
+        short = probe.call(deployment, users[role], SEARCH_ACCOUNTS, {"text": "ab"})
+        assert "at least 3" in " ".join(e.get("message", "") for e in short.get("errors") or []), (role, short)
+    refused = probe.call(deployment, users["Participant"], SEARCH_ACCOUNTS, {"text": prefix})
+    assert probe.refused_at_field(refused, "Query.searchAccounts"), refused
+
+
+def test_every_role_sets_its_own_names_and_only_an_admin_sets_another_users(deployment, users) -> None:
+    """updateMyAccountNames acts on the caller's own names, whatever their role (cleared again
+    here); setUserAccountNames is refused at the field to a User and a Participant."""
+    for role, user in users.items():
+        named = probe.call(deployment, user, UPDATE_MY_NAMES, {"input": {"DisplayName": f"Integ {role}"}})
+        assert not named.get("errors"), (role, named)
+        assert named["data"]["updateMyAccountNames"]["DisplayName"] == f"Integ {role}", (role, named)
+        cleared = probe.call(deployment, user, UPDATE_MY_NAMES, {"input": {"DisplayName": "", "ShortNames": []}})
+        assert not cleared.get("errors"), (role, cleared)
+    target = {"input": {"username": users["Admin"].username, "displayName": "Not Theirs"}}
+    for role in ("User", "Participant"):
+        response = probe.call(deployment, users[role], SET_USER_NAMES, target)
+        assert probe.refused_at_field(response, "Mutation.setUserAccountNames"), (role, response)

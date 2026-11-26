@@ -13,7 +13,36 @@ import {
   parseParticipantsText,
   participantsToText,
   sameParticipants,
+  searchableText,
+  withParticipant,
 } from './participant-list';
+
+describe('withParticipant', () => {
+  it('adds a person picked from the accounts at the end of the list as Name <email>', () => {
+    expect(withParticipant('ana@example.com\n', { name: 'Bo Chen', email: 'bo@example.com' })).toBe(
+      'ana@example.com\nBo Chen <bo@example.com>',
+    );
+    expect(withParticipant('', { name: '', email: 'bo@example.com' })).toBe('bo@example.com');
+  });
+
+  it('leaves the list as it is when the address is already on it, whatever its case', () => {
+    const text = 'Bo <BO@example.com>';
+    expect(withParticipant(text, { name: 'Bo Chen', email: 'bo@example.com' })).toBe(text);
+  });
+
+  it('keeps a picked name from breaking the entry it is written into', () => {
+    const text = withParticipant('', { name: 'Bo <x> Chen', email: 'bo@example.com' });
+    expect(parseParticipantsText(text).participants).toEqual([{ name: 'Bo x Chen', email: 'bo@example.com' }]);
+  });
+});
+
+describe('searchableText', () => {
+  it('needs three characters, not counting spacing at either end', () => {
+    expect(searchableText('ro')).toBe(false);
+    expect(searchableText('  ro  ')).toBe(false);
+    expect(searchableText('rob')).toBe(true);
+  });
+});
 
 describe('parseParticipantsText', () => {
   it('reads Name <email>, quoted names, "Name email" and bare addresses', () => {

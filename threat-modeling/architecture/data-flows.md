@@ -277,7 +277,7 @@ sequenceDiagram
 2. With Meeting Sharing on, the meeting controls function reads each write of a meeting record from the meetings table's stream and shares the meeting with the listed addresses, recording them as `AutoSharedWith`.
 3. The owner or an Admin may look up whether each listed address has an account (`getMeetingParticipantAccounts`, counted per day in hashed items under the caller's `usr#` key) and create Participant accounts for those without one; Cognito's CustomMessage trigger adds the meeting's consent link to the invitation.
 4. A listed person signs in from the consent link, and the advance consent resolver stores their consent in the meetings table under their address. Someone not on the list may ask to be added, which reaches the people who can see the list as a meeting notification, or on the Virtual Participant record before the meeting exists.
-5. In the meeting, the Virtual Participant lists who is present; the meeting consent resolver matches attendees to the list by display name and records a consent given in advance on the meeting's consent record, with `MatchBasis: display_name`.
+5. In the meeting, the Virtual Participant lists who is present; the meeting consent resolver matches attendees to the list by display name (the list entry's name, or the display name or a short name of the LMA account holding a listed address) and records a consent given in advance on the meeting's consent record, with `MatchBasis: display_name` and which of the names matched (`MatchedNameSource`).
 
 **Trust boundary crossings**: TB1→TB3 (owner, Participant and consenting person to AppSync), TB3→TB8 (VP notice and covered names posted in the meeting).
 

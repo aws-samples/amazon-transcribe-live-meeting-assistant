@@ -787,6 +787,28 @@ In the form fields, enter one person per line as `Name <email>` or as an email a
 
 With **Meeting Sharing › Share meetings with their listed participants** on, which it is by default and in every configuration preset, listing someone shares the meeting with their address, read-only, from the time the meeting record exists, and taking them off the list removes that share; see [Sharing with the participant list](user-based-access-control.md#sharing-with-the-participant-list). A person with a Participant account then reads it on their **Shared meetings** page, and a User or Admin in their meetings list. With the setting off, listing someone does not share the meeting. Either way the owner can share and unshare by hand with **Share** on the meeting, or the `shareWith` argument of the MCP tools.
 
+### Adding a person who has an LMA account
+
+The editor of the **Participants** section, on the meeting page and the
+Virtual Participant's page, has **Add a person with an LMA account** above the
+list: type at least three characters of the start of the person's display
+name, one of their short names or their email address, and choose them from
+the suggestions, which show each account's display name and address. The
+person is added at the end of the list as `Name <email>` (or the address alone
+when the account has no display name); **Save** saves the list as usual. A
+person already on the list is shown but cannot be chosen again.
+
+The search is the server's (`searchAccounts`), for Admins and Users, never for
+a Participant; the editor that offers it is shown to the meeting's owner and
+Admins. It answers at most 10 accounts, each with its
+display name and address only, matched at the start of a name or address and
+ignoring case and spacing; it offers no way to page through or list the users,
+only enabled accounts with a verified address are found, and a User can search
+at most 200 times a day (UTC). The names an account goes by in meetings, its
+display name and short names, count for matching attendees in every meeting
+that lists its address, alongside the name the list entry gives; see
+[The match is by display name](meeting-consent.md#the-match-is-by-display-name).
+
 ### Who has an LMA account
 
 The **Participants** section of the meeting page, and of a Virtual Participant's page, lists each person with their name and email address. The meeting's owner and Admins also see, for each person, whether they have an LMA account and with which role: **No account**, **Participant**, **User** or **Admin**. The account is matched by email address, ignoring case. The lookup is made by the server (`getMeetingParticipantAccounts`), which answers only that status and nothing else about the account. A user the meeting is shared with sees the list without the status, and cannot change it.

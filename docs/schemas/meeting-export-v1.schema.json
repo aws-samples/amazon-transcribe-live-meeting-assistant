@@ -175,6 +175,7 @@
               "speakerLinkBasis",
               "speakerLinkedAt",
               "matchBasis",
+              "matchedNameSource",
               "givenInAdvance"
             ],
             "properties": {
@@ -224,6 +225,10 @@
               "matchBasis": {
                 "enum": ["display_name", null],
                 "description": "For a pre_meeting event, how the attendee was matched to the meeting's participant list: display_name, their display name in the meeting was that of one listed person. Null for every other event."
+              },
+              "matchedNameSource": {
+                "enum": ["list", "display_name", "short_name", null],
+                "description": "For a pre_meeting event, which of the listed person's names the attendee's display name was: list, the name their participant list entry gives; display_name, their LMA account's display name; short_name, one of their account's short names. Null for every other event."
               },
               "givenInAdvance": {
                 "oneOf": [

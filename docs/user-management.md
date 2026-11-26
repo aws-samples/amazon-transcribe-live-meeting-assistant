@@ -15,6 +15,7 @@ LMA ships with a built-in **User Management** page that lets administrators crea
   - [Inviting a new user to a meeting](#inviting-a-new-user-to-a-meeting)
   - [What the invitation says about consent](#what-the-invitation-says-about-consent)
 - [Changing a user's role](#changing-a-users-role)
+- [Names in meetings](#names-in-meetings)
 - [Deleting users](#deleting-users)
 - [Last sign-in](#last-sign-in)
 - [Last active](#last-active)
@@ -65,8 +66,9 @@ Non-admin users do not see this link in the navigation, and if they navigate dir
 1. On the **User Management** page, choose **Create user**.
 2. Enter the user's **email address** (used as the Cognito username).
 3. Select a **role** — `User`, `Admin` or `Participant`.
-4. Optionally, choose a **Meeting to invite them to** (see [Inviting a new user to a meeting](#inviting-a-new-user-to-a-meeting)).
-5. Choose **Create**.
+4. Optionally, enter the **Display name in meetings** and **Short names** the person goes by (see [Names in meetings](#names-in-meetings)).
+5. Optionally, choose a **Meeting to invite them to** (see [Inviting a new user to a meeting](#inviting-a-new-user-to-a-meeting)).
+6. Choose **Create**.
 
 The new user receives a **Welcome to Live Meeting Assistant!** email from Amazon Cognito that includes their temporary password and a clickable link to the LMA Web UI. On first sign-in they are prompted to set a new password. What else the email says depends on the role, on whether consent given in advance is allowed, and on whether a meeting was chosen; see [What the invitation says about consent](#what-the-invitation-says-about-consent).
 
@@ -102,13 +104,39 @@ The user's Cognito group membership changes at once. Their role changes at their
 
 You cannot change your own role, and the last remaining Admin cannot be moved to another role. For either, **Change role** is unavailable and shows why when you point to it.
 
+## Names in meetings
+
+Each account can go by a **display name** and up to five **short names** in
+meetings. LMA matches a meeting's attendees to its participant list by display
+name, for their consent given in advance, and these names count in every
+meeting whose list has the account's address, so an entry with the address
+alone can still match (see [The match is by display name](meeting-consent.md#the-match-is-by-display-name)).
+
+- The **Names in meetings** column of the users table shows each user's
+  display name with their short names in brackets, or, when they have no
+  display name, the user pool's standard `name` attribute, which stands in for
+  it. The text filter searches it too.
+- **Create user** takes both, optionally.
+- **Edit names**, with one user selected, changes them for any user.
+- Each person also sets their own on **My consents › Your names in meetings**,
+  whatever their role.
+- A Participant account made with **Create accounts for participants without
+  one** goes by the name its list entry gives it.
+
+A display name is at most 100 characters and each short name at most 50; names
+are trimmed, `<`, `>` and control characters are refused, and a short name that
+repeats another, or the display name, ignoring case and spacing, is kept once.
+Short names are typed separated by commas. Clearing both fields removes the
+names. The names are kept in LMA, with the account's consents given in advance,
+not in the user pool, and the user pool's schema is not changed.
+
 ## Deleting users
 
 1. Select one or more rows in the users table.
 2. Choose **Delete**.
 3. Review the confirmation modal and choose **Delete** to proceed.
 
-Deletion removes the user from the Cognito user pool, together with their recorded [last sign-in](#last-sign-in) and [last active](#last-active) times. (A user deleted directly in Cognito, for example in the console, leaves that item in the sign-in table.) It does **not** delete meetings that user owns or has shared.
+Deletion removes the user from the Cognito user pool, together with their recorded [last sign-in](#last-sign-in) and [last active](#last-active) times and their [names in meetings](#names-in-meetings). (A user deleted directly in Cognito, for example in the console, leaves that item in the sign-in table.) It does **not** delete meetings that user owns or has shared.
 
 ## Last sign-in
 

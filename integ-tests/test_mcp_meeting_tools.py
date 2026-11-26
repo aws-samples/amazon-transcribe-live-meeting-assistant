@@ -190,6 +190,7 @@ def test_the_consent_record_is_given_in_lma_s_own_values(observed) -> None:
             "speakerLinkedAt": None,
             # A reply made on the page is not a consent given in advance.
             "matchBasis": None,
+            "matchedNameSource": None,
             "givenInAdvance": None,
         }
     ], consent["events"]

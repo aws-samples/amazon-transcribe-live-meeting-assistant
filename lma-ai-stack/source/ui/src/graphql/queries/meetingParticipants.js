@@ -55,6 +55,21 @@ export const updateVirtualParticipantMeetingParticipants = /* GraphQL */ `
   }
 `;
 
+/**
+ * The participant list editor's account search, for the meeting's owner and
+ * Admins: at most 10 accounts whose display name, short name or email address
+ * starts with the text (at least 3 characters), each with its display name and
+ * address only.
+ */
+export const searchAccounts = /* GraphQL */ `
+  query SearchAccounts($text: String!) {
+    searchAccounts(text: $text) {
+      name
+      email
+    }
+  }
+`;
+
 export const createParticipantAccounts = /* GraphQL */ `
   mutation CreateParticipantAccounts($input: CreateParticipantAccountsInput!) {
     createParticipantAccounts(input: $input) {

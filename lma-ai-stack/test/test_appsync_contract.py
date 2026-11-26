@@ -187,6 +187,7 @@ ADMIN_ONLY_FIELDS = [
     ("Mutation", "createUser"),
     ("Mutation", "setUserRole"),
     ("Mutation", "deleteUser"),
+    ("Mutation", "setUserAccountNames"),
     ("Query", "getLLMPromptTemplate"),
     ("Query", "getNovaSonicConfig"),
     ("Query", "listUsers"),
@@ -314,6 +315,10 @@ OTHER_FIELDS = [
     # meeting (or is an Admin) and that each address is on its list.
     ("Query", "getMeetingParticipantAccounts"),
     ("Mutation", "createParticipantAccounts"),
+    # The participant list's account search: Admin and User; the user
+    # management Lambda answers at most ten accounts, by prefix, with their
+    # display name and address only, and counts a User's searches a day.
+    ("Query", "searchAccounts"),
     # A Participant's read-only view: the Participant group only, and each
     # meeting only when its SharedWith names the caller (participant_meeting_resolver).
     ("Query", "listParticipantMeetings"),
@@ -328,6 +333,7 @@ OTHER_FIELDS = [
     ("Mutation", "giveAdvanceConsent"),
     ("Mutation", "withdrawAdvanceConsent"),
     ("Mutation", "askToBeAddedToMeeting"),
+    ("Mutation", "updateMyAccountNames"),
     # A digest of one meeting: a Lambda resolver applying the same rule in
     # `caller_may_edit`.
     ("Mutation", "requestMeetingDigest"),

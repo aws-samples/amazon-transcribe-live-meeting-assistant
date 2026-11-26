@@ -203,12 +203,40 @@ class FakeCognito:
         }
 
 
+class FakeNamesClient:
+    """The low-level client the account names are kept with (lma_consent.account_names)."""
+
+    class exceptions:  # noqa: N801 - mirrors botocore's client.exceptions
+        class TransactionCanceledException(Exception):
+            pass
+
+    def __init__(self) -> None:
+        self.items: Dict[tuple, Dict[str, Any]] = {}
+
+    @staticmethod
+    def _key(key):
+        return (key["PK"]["S"], key["SK"]["S"])
+
+    def get_item(self, TableName, Key, **_kwargs):  # noqa: N803
+        item = self.items.get(self._key(Key))
+        return {"Item": copy.deepcopy(item)} if item else {}
+
+    def transact_write_items(self, TransactItems):  # noqa: N803
+        for entry in TransactItems:
+            if "Put" in entry:
+                self.items[self._key(entry["Put"]["Item"])] = copy.deepcopy(entry["Put"]["Item"])
+            else:
+                self.items.pop(self._key(entry["Delete"]["Key"]), None)
+
+
 @pytest.fixture
 def aws(monkeypatch):
     dynamo, cognito = FakeDynamo(), FakeCognito()
     for name in (OWNER, ANA, BO):
         cognito.add(name)
+    names = FakeNamesClient()
     monkeypatch.setattr(index, "DYNAMODB", dynamo)
+    monkeypatch.setattr(index, "DYNAMODB_CLIENT", names)
     monkeypatch.setattr(index, "COGNITO", cognito)
     settings: Dict[str, Any] = {}
     monkeypatch.setattr(index, "consent_settings", lambda: rules.effective_settings(settings))
@@ -229,7 +257,13 @@ def aws(monkeypatch):
         "Participants": [{"name": "Ana Silva", "email": "Ana@Example.com"}],
         "Labels": [{"Key": "engagement", "Value": "acme"}],
     }
-    return {"dynamo": dynamo, "cognito": cognito, "settings": settings, "published": published}
+    return {
+        "dynamo": dynamo,
+        "cognito": cognito,
+        "settings": settings,
+        "published": published,
+        "names": names,
+    }
 
 
 def event(field, username, arguments=None, *, ip="203.0.113.7", agent="Browser/1.0"):

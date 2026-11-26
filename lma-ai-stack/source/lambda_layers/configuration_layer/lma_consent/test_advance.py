@@ -178,8 +178,8 @@ LISTED = [
 def test_attendees_are_matched_by_display_name_ignoring_case_and_spacing():
     matches = advance.match_listed(["ana  SILVA", "Bo Chen", "Cy Diaz"], LISTED)
     assert matches == {
-        "ana  SILVA": {"name": "Ana Silva", "email": "ana@example.com"},
-        "Bo Chen": {"name": "Bo Chen", "email": "bo@example.com"},
+        "ana  SILVA": {"name": "Ana Silva", "email": "ana@example.com", "source": "list"},
+        "Bo Chen": {"name": "Bo Chen", "email": "bo@example.com", "source": "list"},
     }
 
 
@@ -194,6 +194,64 @@ def test_a_name_two_attendees_show_matches_nobody():
 
 def test_an_empty_name_matches_nobody():
     assert advance.match_listed(["", "  "], LISTED) == {}
+
+
+ACCOUNTS = {
+    "nameless@example.com": {"display_name": "Dee Evans", "short_names": ["Dee", "DE"]},
+    "bo@example.com": {"display_name": "Robert Chen", "short_names": ["Bobby"]},
+}
+
+
+def test_a_list_entry_with_no_name_matches_by_the_accounts_display_name():
+    matches = advance.match_listed(["dee  EVANS"], LISTED, ACCOUNTS)
+    assert matches == {
+        "dee  EVANS": {"name": "", "email": "nameless@example.com", "source": "display_name"}
+    }
+
+
+def test_an_attendee_is_matched_by_a_short_name_of_the_account():
+    assert advance.match_listed(["Bobby"], LISTED, ACCOUNTS)["Bobby"]["source"] == "short_name"
+    assert advance.match_listed(["dee"], LISTED, ACCOUNTS)["dee"]["email"] == "nameless@example.com"
+
+
+def test_the_list_entrys_name_still_matches_beside_the_account_names():
+    assert advance.match_listed(["Bo Chen"], LISTED, ACCOUNTS)["Bo Chen"]["source"] == "list"
+    matches = advance.match_listed(["robert chen"], LISTED, ACCOUNTS)
+    assert matches["robert chen"]["source"] == "display_name"
+
+
+def test_two_attendees_showing_names_of_one_listed_person_match_nobody():
+    assert advance.match_listed(["Bo Chen", "Bobby", "Ana Silva"], LISTED, ACCOUNTS) == {
+        "Ana Silva": {"name": "Ana Silva", "email": "ana@example.com", "source": "list"}
+    }
+
+
+def test_a_name_that_two_listed_people_go_by_in_any_way_matches_nobody():
+    accounts = {**ACCOUNTS, "ana@example.com": {"display_name": "", "short_names": ["Bobby"]}}
+    assert "Bobby" not in advance.match_listed(["Bobby"], LISTED, accounts)
+    accounts = {"ana@example.com": {"display_name": "Bo Chen", "short_names": []}}
+    assert advance.match_listed(["Bo Chen"], LISTED, accounts) == {}
+
+
+def test_a_name_of_a_person_shared_with_another_still_counts_as_showing_that_person():
+    accounts = {**ACCOUNTS, "ana@example.com": {"display_name": "", "short_names": ["Bobby"]}}
+    # "Bobby" is Ana's and Bo's, so it matches nobody, but it is shown: "Robert
+    # Chen" is not taken to be Bo.
+    assert advance.match_listed(["Bobby", "Robert Chen"], LISTED, accounts) == {}
+
+
+def test_the_same_name_in_two_spellings_is_one_name_shown_twice():
+    assert advance.match_listed(["Bo Chen", "bo  chen"], LISTED, ACCOUNTS) == {}
+
+
+def test_one_person_listed_twice_by_address_is_one_person():
+    listed = LISTED + [{"name": "Bo Chen", "email": "BO@example.com"}]
+    assert advance.match_listed(["Bo Chen"], listed)["Bo Chen"]["email"] == "bo@example.com"
+
+
+def test_account_names_apply_only_to_the_addresses_they_are_given_for():
+    assert advance.match_listed(["Dee Evans"], LISTED) == {}
+    assert advance.match_listed(["Dee Evans"], LISTED[:2], ACCOUNTS) == {}
 
 
 # ── standing consents given with no meeting named, and the deployment scope ──

@@ -14,7 +14,10 @@
 # What belongs here: a function the web UI reaches through an AppSync data
 # source, whose role no policy in the parent stack names. Other functions may
 # invoke one by the ARN this stack outputs. Tables, buckets, keys, layers and the
-# API itself stay in the parent and arrive as parameters.
+# API itself stay in the parent and arrive as parameters. A few resolvers are
+# declared here too, under "Resolvers declared in this stack" at the end, when
+# the parent has no room left for them; the parent orders this stack after its
+# schema, which every resolver needs.
 #
 # Log groups are named /<AI stack name>/resolvers/lambda/<function>: under the AI
 # stack's own prefix, so the troubleshooting agent and `lma logs` find them as
@@ -83,6 +86,11 @@ Parameters:
     Description: >-
       The recordings bucket. The Participant view signs links to the audio
       and video recordings in it.
+  UserManagementDataSourceName:
+    Type: String
+    Description: >-
+      The parent's UserManagement data source, which the account search and
+      an Admin's change of a user's names in meetings resolve through.
   UserPoolId:
     Type: String
     Description: >-
@@ -2755,8 +2763,10 @@ Resources:
           PolicyDocument:
             Version: 2012-10-17
             Statement:
-              # The consents (pmc#), the requests to be added (pmr#) and the
-              # daily count of those requests (usr#): read and written.
+              # The consents and the caller's names in meetings (pmc#), the
+              # names' search entries (acn#), the requests to be added (pmr#)
+              # and the daily count of those requests (usr#): read and written.
+              # The names and their entries are written in one transaction.
               - Effect: Allow
                 Action:
                   - dynamodb:GetItem
@@ -2771,6 +2781,7 @@ Resources:
                       - "pmc#*"
                       - "pmr#*"
                       - "usr#*"
+                      - "acn#*"
               # The meeting rows (c#): read only, for the owner, the
               # participant list and the labels.
               - Effect: Allow
@@ -2831,6 +2842,78 @@ Resources:
       ServiceRoleArn: !GetAtt AppSyncLambdaRole.Arn
       LambdaConfig:
         LambdaFunctionArn: !GetAtt AdvanceConsentResolverFunction.Arn
+
+  ##########################################################################
+  # Resolvers declared in this stack (see the header). Each names the API
+  # and a data source; the parent orders this stack after its schema.
+  ##########################################################################
+
+  # A person's own names in meetings, kept by advance_consent_resolver.
+  UpdateMyAccountNamesAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref AppSyncApiId
+      DataSourceName: !GetAtt AdvanceConsentLambdaDataSource.Name
+      TypeName: Mutation
+      FieldName: updateMyAccountNames
+      RequestMappingTemplateS3Location: ../source/appsync/advanceConsent.request.vtl
+      ResponseMappingTemplate: |
+        #if( $ctx.error )
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  # The participant list's account search and an Admin's change of a user's
+  # names, answered by user_management in the parent.
+  SearchAccountsResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref AppSyncApiId
+      TypeName: Query
+      FieldName: searchAccounts
+      DataSourceName: !Ref UserManagementDataSourceName
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "searchAccounts"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  SetUserAccountNamesResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref AppSyncApiId
+      TypeName: Mutation
+      FieldName: setUserAccountNames
+      DataSourceName: !Ref UserManagementDataSourceName
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "setUserAccountNames"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
 
 Outputs:
   # Read by the meeting assist setup stack, which sets the function's KB_ID to

@@ -783,6 +783,9 @@ def test_list_users_maps_cognito_fields_onto_the_graphql_user_shape(cognito: Fak
                 "status": "CONFIRMED",
                 "enabled": True,
                 "createdAt": "2026-03-04T05:06:07.000Z",
+                "accountName": None,
+                "displayName": None,
+                "shortNames": [],
             }
         ]
     }
@@ -813,6 +816,9 @@ def test_create_user_reads_the_attributes_key_that_admin_get_user_returns(
         "status": "FORCE_CHANGE_PASSWORD",
         "enabled": True,
         "createdAt": "2026-01-02T03:04:05.000Z",
+        "accountName": None,
+        "displayName": None,
+        "shortNames": [],
     }
 
 

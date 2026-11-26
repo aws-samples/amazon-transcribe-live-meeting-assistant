@@ -29,8 +29,18 @@ import {
   createUser,
   deleteUser,
   setUserRole,
+  setUserAccountNames,
   listInvitableMeetings,
 } from '../../graphql/queries/userManagementQueries';
+import {
+  displayNameProblem,
+  namesInput,
+  namesProblem,
+  namesSummary,
+  parseShortNames,
+  shortNamesProblem,
+  shortNamesText,
+} from '../common/account-names';
 import useAppContext from '../../contexts/app';
 import { INVITABLE_MEETING_DAYS, invitableMeetingOptions, meetingRefFromText } from './invite-meeting';
 
@@ -78,6 +88,66 @@ export const lastActiveText = (item, lastSignInAvailable) => {
   return item.lastActiveAt ? new Date(item.lastActiveAt).toLocaleString() : NOT_RECORDED_TEXT;
 };
 
+/**
+ * The display name and short names fields, shared by Create user and Edit
+ * names: the names an account goes by in meetings, by which a meeting's
+ * attendees are matched to its participant list for their consent given in
+ * advance.
+ */
+export const NamesFields = ({ displayName, shortNames, onDisplayName, onShortNames, accountName = '' }) => {
+  const shortProblem = shortNamesProblem(displayName, parseShortNames(shortNames));
+  return (
+    <>
+      <FormField
+        label={
+          <span>
+            Display name in meetings <i>- optional</i>
+          </span>
+        }
+        description="The name the person usually shows in meetings. LMA matches attendees to participant lists by it."
+        constraintText={
+          accountName && !displayName.trim()
+            ? `Without one, the account's name applies: ${accountName}`
+            : 'At most 100 characters.'
+        }
+        errorText={displayNameProblem(displayName) || undefined}
+      >
+        <Input
+          value={displayName}
+          onChange={({ detail }) => onDisplayName(detail.value)}
+          placeholder={accountName || 'For example, Ana Silva'}
+          ariaLabel="Display name in meetings"
+        />
+      </FormField>
+      <FormField
+        label={
+          <span>
+            Short names <i>- optional</i>
+          </span>
+        }
+        description="Other names the person shows in meetings, separated by commas."
+        constraintText="At most 5, each at most 50 characters."
+        errorText={shortProblem || undefined}
+      >
+        <Input
+          value={shortNames}
+          onChange={({ detail }) => onShortNames(detail.value)}
+          placeholder="For example, Ana, A. Silva"
+          ariaLabel="Short names"
+        />
+      </FormField>
+    </>
+  );
+};
+
+NamesFields.propTypes = {
+  displayName: PropTypes.string.isRequired,
+  shortNames: PropTypes.string.isRequired,
+  onDisplayName: PropTypes.func.isRequired,
+  onShortNames: PropTypes.func.isRequired,
+  accountName: PropTypes.string,
+};
+
 const columnDefinitions = (lastSignInAvailable) => [
   {
     id: 'email',
@@ -85,6 +155,11 @@ const columnDefinitions = (lastSignInAvailable) => [
     cell: (item) => item.email || item.username,
     sortingField: 'email',
     isRowHeader: true,
+  },
+  {
+    id: 'names',
+    header: 'Names in meetings',
+    cell: (item) => namesSummary(item.displayName, item.shortNames, item.accountName),
   },
   {
     id: 'role',
@@ -162,6 +237,15 @@ const UserManagementPage = () => {
   const [roleBusy, setRoleBusy] = useState(false);
   const [roleErr, setRoleErr] = useState(null);
 
+  const [newDisplayName, setNewDisplayName] = useState('');
+  const [newShortNames, setNewShortNames] = useState('');
+
+  const [namesOpen, setNamesOpen] = useState(false);
+  const [namesDisplay, setNamesDisplay] = useState('');
+  const [namesShort, setNamesShort] = useState('');
+  const [namesBusy, setNamesBusy] = useState(false);
+  const [namesErr, setNamesErr] = useState(null);
+
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteErr, setDeleteErr] = useState(null);
@@ -197,7 +281,8 @@ const UserManagementPage = () => {
         (u.email || '').toLowerCase().includes(q) ||
         (u.username || '').toLowerCase().includes(q) ||
         (u.role || '').toLowerCase().includes(q) ||
-        (u.status || '').toLowerCase().includes(q),
+        (u.status || '').toLowerCase().includes(q) ||
+        namesSummary(u.displayName, u.shortNames, u.accountName).toLowerCase().includes(q),
     );
   }, [users, filterText]);
 
@@ -224,6 +309,8 @@ const UserManagementPage = () => {
   const handleOpenCreate = () => {
     setNewEmail('');
     setNewRole(ROLE_OPTIONS[0]);
+    setNewDisplayName('');
+    setNewShortNames('');
     setInviteMeeting('');
     setCreateErr(null);
     setCreateOpen(true);
@@ -242,11 +329,25 @@ const UserManagementPage = () => {
       setCreateErr('Please enter a valid email address.');
       return;
     }
+    const names = namesInput(newDisplayName, newShortNames);
+    const problem = namesProblem(names.displayName, names.shortNames);
+    if (problem) {
+      setCreateErr(problem);
+      return;
+    }
+    const hasNames = Boolean(names.displayName || names.shortNames.length);
     setCreateBusy(true);
     try {
       await client.graphql({
         query: createUser,
-        variables: { input: { email, role: newRole.value, ...(meetingRef ? { inviteToMeeting: meetingRef } : {}) } },
+        variables: {
+          input: {
+            email,
+            role: newRole.value,
+            ...(meetingRef ? { inviteToMeeting: meetingRef } : {}),
+            ...(hasNames ? names : {}),
+          },
+        },
       });
       setSuccess(
         meetingRef
@@ -295,6 +396,37 @@ const UserManagementPage = () => {
       setRoleErr(formatError(err));
     } finally {
       setRoleBusy(false);
+    }
+  };
+
+  const namesTarget = selected.length === 1 ? selected[0] : null;
+
+  const handleOpenNames = () => {
+    if (!namesTarget) return;
+    setNamesDisplay(namesTarget.displayName || '');
+    setNamesShort(shortNamesText(namesTarget.shortNames));
+    setNamesErr(null);
+    setNamesOpen(true);
+  };
+
+  const handleSaveNames = async () => {
+    if (!namesTarget) return;
+    const names = namesInput(namesDisplay, namesShort);
+    setNamesBusy(true);
+    setNamesErr(null);
+    try {
+      await client.graphql({
+        query: setUserAccountNames,
+        variables: { input: { username: namesTarget.username, ...names } },
+      });
+      setSuccess(`The names in meetings of ${namesTarget.email || namesTarget.username} are saved.`);
+      setNamesOpen(false);
+      await fetchUsers();
+    } catch (err) {
+      logger.error('setUserAccountNames failed', err);
+      setNamesErr(formatError(err));
+    } finally {
+      setNamesBusy(false);
     }
   };
 
@@ -364,6 +496,13 @@ const UserManagementPage = () => {
                   onClick={handleOpenRole}
                 >
                   Change role
+                </Button>
+                <Button
+                  disabled={!namesTarget}
+                  disabledReason={selected.length > 1 ? 'Select one user' : 'Select a user'}
+                  onClick={handleOpenNames}
+                >
+                  Edit names
                 </Button>
                 <Button disabled={selected.length === 0} onClick={handleOpenDelete}>
                   Delete
@@ -443,6 +582,12 @@ const UserManagementPage = () => {
               onChange={({ detail }) => setNewRole(detail.selectedOption)}
             />
           </FormField>
+          <NamesFields
+            displayName={newDisplayName}
+            shortNames={newShortNames}
+            onDisplayName={setNewDisplayName}
+            onShortNames={setNewShortNames}
+          />
           <FormField
             label={
               <span>
@@ -509,6 +654,46 @@ const UserManagementPage = () => {
               onChange={({ detail }) => setRoleChoice(detail.selectedOption)}
             />
           </FormField>
+        </SpaceBetween>
+      </Modal>
+
+      {/* Edit Names Modal */}
+      <Modal
+        visible={namesOpen}
+        onDismiss={() => setNamesOpen(false)}
+        header="Edit names in meetings"
+        footer={
+          <Box float="right">
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button variant="link" onClick={() => setNamesOpen(false)} disabled={namesBusy}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                onClick={handleSaveNames}
+                loading={namesBusy}
+                disabled={Boolean(namesProblem(namesDisplay, parseShortNames(namesShort)))}
+              >
+                Save
+              </Button>
+            </SpaceBetween>
+          </Box>
+        }
+      >
+        <SpaceBetween size="m">
+          {namesErr && <Alert type="error">{namesErr}</Alert>}
+          <Box variant="p">
+            The names <strong>{namesTarget?.email || namesTarget?.username}</strong> goes by in meetings. LMA matches a
+            meeting&apos;s attendees to its participant list by them, for consent given in advance. The person can also
+            change them on their My consents page.
+          </Box>
+          <NamesFields
+            displayName={namesDisplay}
+            shortNames={namesShort}
+            onDisplayName={setNamesDisplay}
+            onShortNames={setNamesShort}
+            accountName={namesTarget?.accountName || ''}
+          />
         </SpaceBetween>
       </Modal>
 

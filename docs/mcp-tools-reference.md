@@ -486,7 +486,7 @@ images. Every value is LMA's own, as the record stores it:
 | `captureAllowed` | Whether the meeting may be captured now |
 | `noticePostedAt` | When the notice was first posted |
 | `notices` | Each posting of the notice kept on the record: `channel` (`chat`, `voice`, `banner` or `invite`) and `postedAt` |
-| `events` | One entry per consent event, in the order recorded: `participantName`, `decision` (`consent` or `objection`), `source` (`chat`, `voice`, `ui`, `attestation` or `pre_meeting`), `at`, `speakerId`, `speakerLinkBasis`, `speakerLinkedAt`, `matchBasis` and `givenInAdvance`. For a `pre_meeting` event (a consent given in advance, counted for an attendee matched to the participant list by `display_name`, or the objection recorded when it was withdrawn), `givenInAdvance` gives its `scope`, `grantedAt`, `validUntil`, `noticeHash`, `noticeVersion` and `withdrawn`, never the address; both are null on other events |
+| `events` | One entry per consent event, in the order recorded: `participantName`, `decision` (`consent` or `objection`), `source` (`chat`, `voice`, `ui`, `attestation` or `pre_meeting`), `at`, `speakerId`, `speakerLinkBasis`, `speakerLinkedAt`, `matchBasis`, `matchedNameSource` and `givenInAdvance`. For a `pre_meeting` event (a consent given in advance, counted for an attendee matched to the participant list by `display_name`, or the objection recorded when it was withdrawn), `matchedNameSource` says which of the listed person's names matched (`list`, `display_name` or `short_name`) and `givenInAdvance` gives its `scope`, `grantedAt`, `validUntil`, `noticeHash`, `noticeVersion` and `withdrawn`, never the address; both are null on other events |
 | `attestation` | The owner's attestation (`attestedBy`, `method`, `at`), or null |
 | `hasEvidence` | Whether evidence images exist; the images are not returned |
 | `startedAt`, `updatedAt` | When consent was started, and when the record last changed |
@@ -534,10 +534,10 @@ The meeting export's `consent` part is the same record in the same shape; see
   "events": [
     {"participantName": "Dana", "decision": "consent", "source": "chat", "at": "2026-12-01T15:01:02Z",
      "speakerId": null, "speakerLinkBasis": null, "speakerLinkedAt": null,
-     "matchBasis": null, "givenInAdvance": null},
+     "matchBasis": null, "matchedNameSource": null, "givenInAdvance": null},
     {"participantName": "Bo", "decision": "consent", "source": "voice", "at": "2026-12-01T15:01:40Z",
      "speakerId": "remote-spk_1", "speakerLinkBasis": "same_segment", "speakerLinkedAt": "2026-12-01T15:01:41Z",
-     "matchBasis": null, "givenInAdvance": null}
+     "matchBasis": null, "matchedNameSource": null, "givenInAdvance": null}
   ],
   "attestation": null,
   "hasEvidence": true,

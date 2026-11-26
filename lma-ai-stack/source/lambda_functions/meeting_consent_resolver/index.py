@@ -39,9 +39,11 @@ Who may do what:
 Consent given in advance (lma_consent.advance) reaches a meeting here. When a
 backend role -- the Virtual Participant -- lists who is present, each attendee
 with no reply on the record whose display name matches one person on the
-meeting's participant list is looked up among that person's consents given in
-advance, and one that covers the meeting is recorded as their consent, source
-``pre_meeting``, with the match's basis (``display_name``). When such a consent
+meeting's participant list -- the name the list gives them, or a name their
+LMA account goes by (lma_consent.account_names) -- is looked up among that
+person's consents given in advance, and one that covers the meeting is
+recorded as their consent, source ``pre_meeting``, with the match's basis
+(``display_name``) and which of their names matched. When such a consent
 is withdrawn, the advance consent resolver invokes this function directly
 (``advanceConsentWithdrawn``), and a meeting in progress that counted it records
 an objection from that attendee.
@@ -58,7 +60,10 @@ import json
 import logging
 import os
 import re
+import threading
+import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Callable, Dict, List, Literal, Mapping, Optional
@@ -76,7 +81,7 @@ from lma_config import (  # configuration layer
     ConfigurationTableNotConfigured,
     offered_settings,
 )
-from lma_consent import advance  # configuration layer
+from lma_consent import account_names, advance  # configuration layer
 from lma_consent import rules as consent  # configuration layer
 
 # pylint: enable=import-error
@@ -97,6 +102,9 @@ EVIDENCE_PREFIX = os.environ.get("CONSENT_EVIDENCE_PREFIX", "lma-consent-evidenc
 ADMIN_GROUP = os.environ.get("ADMIN_GROUP", "Admin")
 LINK_SECONDS = int(os.environ.get("LINK_SECONDS", "3600"))
 VERIFIER_FUNCTION = os.environ.get("VERIFIER_FUNCTION_NAME", "")
+#: The user pool, read for the account that holds each listed address and the
+#: names it goes by. Unset: only the participant list's names are matched.
+USER_POOL_ID = os.environ.get("USER_POOL_ID", "")
 
 #: Who a backend role's writes are attributed to when it names nobody.
 BACKEND_ATTRIBUTION = "LMA"
@@ -112,6 +120,7 @@ LAMBDA = boto3.client(
     "lambda",
     config=BotoCoreConfig(read_timeout=70, retries={"mode": "standard", "max_attempts": 1}),
 )
+COGNITO = boto3.client("cognito-idp", config=CLIENT_CONFIG)
 SERIALIZER = TypeSerializer()
 DESERIALIZER = TypeDeserializer()
 
@@ -733,6 +742,8 @@ def set_meeting_consent_participants(caller: Mapping[str, Any], data: Mapping[st
     reconciles = caller["is_backend"] and advance_consent_enabled()
     vp_id = created_by(data.get("VirtualParticipantId"), call_id) if reconciles else ""
     applied: Dict[str, List[str]] = {}
+    # Read once however often the write is retried.
+    names_of = memoized(listed_account_names)
 
     def change(record, meeting, access, now):
         if not (access["owner"] or access["admin"] or access["backend"]):
@@ -745,7 +756,9 @@ def set_meeting_consent_participants(caller: Mapping[str, Any], data: Mapping[st
         record["ParticipantsSeen"] = seen[: consent.MAX_PARTICIPANTS_SEEN]
         applied.clear()
         if reconciles and record.get("Mode") in (consent.MODE_NOTIFY, consent.MODE_OPT_IN):
-            events = reconcile_advance_consents(record, meeting, present, vp_id, now, applied)
+            events = reconcile_advance_consents(
+                record, meeting, present, vp_id, now, applied, names_of
+            )
             if events:
                 record["Events"] = consent.compact_events(list(record.get("Events") or []) + events)
         return record
@@ -760,6 +773,101 @@ def set_meeting_consent_participants(caller: Mapping[str, Any], data: Mapping[st
 
 #: The most attendees looked up among consents given in advance in one write.
 MAX_ADVANCE_LOOKUPS = 50
+#: How long the user pool's answer for an address is reused by this function.
+ACCOUNT_CACHE_SECONDS = 300
+ACCOUNT_LOOKUP_WORKERS = 8
+#: The most addresses whose answer is kept at once, so a warm function's cache stays bounded.
+MAX_CACHED_ACCOUNTS = 5000
+#: Characters a user pool filter value cannot hold unescaped.
+FILTER_SPECIAL = ('"', "\\")
+_ACCOUNTS: Dict[str, tuple] = {}
+#: The lookups run on several threads; the cache is read and written under this.
+_ACCOUNTS_LOCK = threading.Lock()
+
+
+def memoized(function: Callable[[List[str]], Any]) -> Callable[[List[str]], Any]:
+    """``function`` answering each list of addresses once."""
+    answers: Dict[tuple, Any] = {}
+
+    def call(emails: List[str]) -> Any:
+        key = tuple(sorted(emails))
+        if key not in answers:
+            answers[key] = function(list(key))
+        return answers[key]
+
+    return call
+
+
+def _attributes(user: Mapping[str, Any]) -> Dict[str, Any]:
+    pairs = user.get("UserAttributes") or user.get("Attributes") or []
+    return {a["Name"]: a.get("Value") for a in pairs}
+
+
+def account_of(email: str) -> Optional[Dict[str, str]]:
+    """The enabled account that holds ``email`` as its verified address, or None.
+
+    Its Cognito ``sub`` and standard ``name``. Accounts made in LMA have the
+    address as their username; another is found by its email attribute. The
+    answer is reused for ACCOUNT_CACHE_SECONDS, so a meeting whose attendees
+    are listed again and again asks the user pool once in that time; an
+    account deleted or disabled meanwhile is seen as such once it expires.
+    """
+    with _ACCOUNTS_LOCK:
+        cached = _ACCOUNTS.get(email)
+    if cached and cached[0] > time.monotonic():
+        return cached[1]
+    user: Optional[Mapping[str, Any]] = None
+    try:
+        user = COGNITO.admin_get_user(UserPoolId=USER_POOL_ID, Username=email)
+    except COGNITO.exceptions.UserNotFoundException:
+        if not any(special in email for special in FILTER_SPECIAL):
+            found = COGNITO.list_users(
+                UserPoolId=USER_POOL_ID, Filter=f'email = "{email}"', Limit=2
+            ).get("Users", [])
+            user = found[0] if len(found) == 1 else None
+    answer = None
+    if user and user.get("Enabled", True):
+        attributes = _attributes(user)
+        verified = str(attributes.get("email_verified")).lower() == "true"
+        if verified and (attributes.get("email") or "").strip().casefold() == email:
+            answer = {"sub": attributes.get("sub") or "", "name": attributes.get("name") or ""}
+    with _ACCOUNTS_LOCK:
+        if len(_ACCOUNTS) >= MAX_CACHED_ACCOUNTS:
+            moment = time.monotonic()
+            for key in [k for k, (expires, _) in list(_ACCOUNTS.items()) if expires <= moment]:
+                _ACCOUNTS.pop(key, None)
+            if len(_ACCOUNTS) >= MAX_CACHED_ACCOUNTS:
+                _ACCOUNTS.clear()
+        _ACCOUNTS[email] = (time.monotonic() + ACCOUNT_CACHE_SECONDS, answer)
+    return answer
+
+
+def listed_account_names(emails: List[str]) -> Optional[Dict[str, Dict[str, Any]]]:
+    """The names each listed address's account goes by, by the address in lower case.
+
+    Only for an address an account holds, and only the names kept for that
+    account (lma_consent.account_names.account_names). Empty when the user
+    pool is not named. None when the accounts or their names cannot be read:
+    matching on the list's names alone could match a name another listed
+    person's account also goes by, so nothing given in advance is counted in
+    that write, and the next listing tries again.
+    """
+    if not USER_POOL_ID or not emails:
+        return {}
+    try:
+        with ThreadPoolExecutor(max_workers=ACCOUNT_LOOKUP_WORKERS) as pool:
+            accounts = dict(zip(emails, pool.map(account_of, emails)))
+        held = [email for email, account in accounts.items() if account]
+        profiles = account_names.read_profiles(DYNAMODB, EVENT_SOURCING_TABLE, held) if held else {}
+    except (ClientError, BotoCoreError, account_names.NamesChanged):
+        LOGGER.warning("the accounts' names could not be read; consent given in advance waits")
+        return None
+    out: Dict[str, Dict[str, Any]] = {}
+    for email in held:
+        names = account_names.account_names(profiles.get(email), accounts[email])
+        if names:
+            out[email] = names
+    return out
 
 
 def advance_consent_enabled() -> bool:
@@ -813,32 +921,72 @@ def consents_of(email: str) -> List[Dict[str, Any]]:
     ]
 
 
-def reconcile_advance_consents(
+def reconcile_advance_consents(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     record: Mapping[str, Any],
     meeting: Mapping[str, Any],
     present: List[str],
     vp_id: str,
     now: str,
     applied: Dict[str, List[str]],
+    names_of: Optional[Callable[[List[str]], Optional[Dict[str, Any]]]] = None,
 ) -> List[Dict[str, Any]]:
     """The consent events to add for attendees covered by a consent given in advance.
 
     Only attendees with no event at all on the record are looked up, so a reply
     made in the meeting is never followed by one from before it, and an
     attendee is recorded once. Each is matched to the participant list by
-    display name (lma_consent.advance.match_listed); a match whose listed
-    address has a consent that covers this meeting now is recorded as that
-    person's consent, with the consent's scope, times and text hash, and the
-    basis of the match. ``applied`` gets each consent's key, so the consent can
-    note this meeting, for a withdrawal to reach it.
+    display name (lma_consent.advance.match_listed), against the names the
+    list gives and those each listed address's account goes by
+    (``names_of``); a match whose listed address has a consent that covers
+    this meeting now is recorded as that person's consent, with the consent's
+    scope, times and text hash, the basis of the match and which of the
+    person's names matched. ``applied`` gets each consent's key, so the consent
+    can note this meeting, for a withdrawal to reach it.
+
+    The match is made over everyone present and everyone already on the
+    record, not only the attendees looked up: a listed person goes by several
+    names, so an attendee showing one of them is not that person when someone
+    present or already recorded shows another. A consent already counted for
+    an attendee is not counted again for another.
     """
-    replied = {
-        consent.normalize_name(event.get("ParticipantName"))
-        for event in record.get("Events") or []
-        if isinstance(event, Mapping)
-    }
+    events_so_far = [e for e in record.get("Events") or [] if isinstance(e, Mapping)]
+    replied = {consent.normalize_name(event.get("ParticipantName")) for event in events_so_far}
     candidates = [name for name in present if consent.normalize_name(name) not in replied]
-    matches = advance.match_listed(candidates, meeting.get("Participants") or [])
+    counted = {
+        str((event.get("PreMeeting") or {}).get("ConsentId"))
+        for event in events_so_far
+        if event.get("Source") == consent.SOURCE_PRE_MEETING
+        and isinstance(event.get("PreMeeting"), Mapping)
+    }
+    everyone = list(present) + [
+        str(event.get("ParticipantName"))
+        for event in events_so_far
+        if isinstance(event.get("ParticipantName"), str)
+    ]
+    listed = meeting.get("Participants") or []
+    accounts: Optional[Dict[str, Any]] = {}
+    if candidates and names_of is not None:
+        emails = {
+            str(p.get("email")).strip().casefold()
+            for p in listed
+            if isinstance(p, Mapping) and isinstance(p.get("email"), str) and p["email"].strip()
+        }
+        accounts = names_of(sorted(emails)[: consent.MAX_PARTICIPANTS])
+    if accounts is None:
+        # The accounts' names could not be read: a match on the list's names
+        # alone could be one the full rule refuses, so this write counts none.
+        return []
+    looked_up = {consent.normalize_name(name) for name in candidates}
+    # One entry per name as names are compared: an attendee present and on
+    # the record under one name, in two spellings, is one attendee.
+    shown: Dict[str, str] = {}
+    for name in everyone:
+        shown.setdefault(consent.normalize_name(name), name)
+    matches = {
+        name: person
+        for name, person in advance.match_listed(list(shown.values()), listed, accounts).items()
+        if consent.normalize_name(name) in looked_up
+    }
     covering_meeting = {
         "CallId": meeting.get("CallId"),
         "VirtualParticipantId": vp_id,
@@ -854,6 +1002,9 @@ def reconcile_advance_consents(
             LOGGER.exception("could not read consents given in advance; the attendee is asked")
             continue
         if not found:
+            continue
+        if counted & ({str(found.get("ConsentId"))} | set(found.get("Supersedes") or [])):
+            # Already counted for another attendee in this meeting.
             continue
         events.append(
             {
@@ -873,6 +1024,7 @@ def reconcile_advance_consents(
                     "NoticeHash": found.get("NoticeHash"),
                     "NoticeVersion": found.get("NoticeVersion"),
                     "MatchBasis": consent.MATCH_DISPLAY_NAME,
+                    "MatchedNameSource": person.get("source") or account_names.SOURCE_LIST,
                     "ListedName": consent.clip(person.get("name"), consent.MAX_NAME_LENGTH),
                 },
             }
@@ -974,6 +1126,7 @@ def advance_consent_withdrawn(data: Mapping[str, Any]) -> Dict[str, Any]:
                         "ConsentId": consent_id,
                         "Withdrawn": True,
                         "MatchBasis": pre.get("MatchBasis"),
+                        "MatchedNameSource": pre.get("MatchedNameSource"),
                     },
                 }
             )
