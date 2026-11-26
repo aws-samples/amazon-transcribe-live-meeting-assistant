@@ -14,7 +14,9 @@ Playwright and its Chromium are installed, in the web UI itself (the top
 navigation's count, and the Notifications drawer opening for a meeting's first
 notification). Each test asserts one property of what it observed.
 
-Runs whenever a Cognito test user is configured, and skips without one.
+Runs whenever a Cognito test user is configured, and skips without one. The two
+refusals to a user the meeting is not shared with skip when the test user is an
+Admin, who reads every meeting.
 Self-cleaning: whatever is left of the meeting is removed by its CallId, and a
 category muted on every meeting for the test is unmuted again.
 """
@@ -56,7 +58,17 @@ def test_a_backend_publishes_and_the_recipients_come_from_the_meeting(observed) 
 # ── who sees them ───────────────────────────────────────────────────────────
 
 
+def _skip_for_an_admin(observed) -> None:
+    """An Admin reads every meeting's notifications, shared with them or not."""
+    if observed.get("test_user_is_admin"):
+        pytest.skip(
+            "the Cognito test user is in the Admin group, which reads every meeting; "
+            "the refusal is checked with a test user in the User group"
+        )
+
+
 def test_a_user_the_meeting_is_not_shared_with_is_refused(observed) -> None:
+    _skip_for_an_admin(observed)
     assert observed["read_before_share"] is None, "read before the share was answered"
 
 
@@ -71,6 +83,7 @@ def test_a_later_share_sees_the_earlier_notifications(observed) -> None:
 
 
 def test_a_removed_share_stops_seeing_them(observed) -> None:
+    _skip_for_an_admin(observed)
     assert observed["read_after_unshare"] is None, "read after the share was removed was answered"
     assert observed["state_after_unshare"] is None, "the user's view was changed after the share was removed"
 

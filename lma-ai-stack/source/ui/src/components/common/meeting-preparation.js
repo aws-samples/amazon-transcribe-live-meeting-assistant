@@ -16,7 +16,11 @@
 import { parseParticipantsText, participantsToText, sameParticipants } from './participant-list';
 
 export const MAX_LABELS = 20;
-export const LABEL_KEY = /^[a-z0-9][a-z0-9._-]{0,62}$/;
+// A label key's first character and the characters after it; labelFilterProblem
+// tests each part of LABEL_KEY on its own, to say which one a filter fails.
+const LABEL_KEY_FIRST = 'a-z0-9';
+const LABEL_KEY_REST = 'a-z0-9._-';
+export const LABEL_KEY = new RegExp(`^[${LABEL_KEY_FIRST}][${LABEL_KEY_REST}]{0,62}$`);
 export const MAX_LABEL_VALUE_CHARS = 256;
 export const MAX_CONTEXT_CHARS = 20000;
 export const MAX_CHECKLIST_ITEMS = 100;
@@ -158,8 +162,8 @@ export const labelFilterProblem = (text) => {
   if (!wanted || !labelKeyProblem(wanted.key)) return null;
   const { key } = wanted;
   if (!key) return LABEL_FILTER_KEY_PROBLEMS.missing;
-  if (!/^[a-z0-9._-]*$/.test(key)) return LABEL_FILTER_KEY_PROBLEMS.characters;
-  if (!/^[a-z0-9]/.test(key)) return LABEL_FILTER_KEY_PROBLEMS.start;
+  if (!new RegExp(`^[${LABEL_KEY_REST}]*$`).test(key)) return LABEL_FILTER_KEY_PROBLEMS.characters;
+  if (!new RegExp(`^[${LABEL_KEY_FIRST}]`).test(key)) return LABEL_FILTER_KEY_PROBLEMS.start;
   return LABEL_FILTER_KEY_PROBLEMS.tooLong;
 };
 

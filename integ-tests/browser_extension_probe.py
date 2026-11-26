@@ -350,12 +350,12 @@ def stream_from_extension(
 
                 panel = context.new_page()
                 panel.on("pageerror", lambda error: result.page_errors.append(str(error)))
-                frames: list[Any] = []
 
                 def on_frame(payload: Any) -> None:
-                    frames.append(payload)
-                    if not result.call_id:
-                        record_start(result, payload)
+                    # Counted as each frame is sent, so a run that fails part-way still reports its audio.
+                    if not isinstance(payload, str):
+                        result.audio_frames += 1
+                    record_start(result, payload)
 
                 def on_socket(ws: Any) -> None:
                     ws.on("framesent", on_frame)
@@ -394,8 +394,6 @@ def stream_from_extension(
                     stop.click()
                     expect(start).to_be_visible(timeout=15_000)
                     meeting.wait_for_timeout(2000)
-
-                result.audio_frames = sum(1 for payload in frames if not isinstance(payload, str))
             finally:
                 context.close()
     finally:

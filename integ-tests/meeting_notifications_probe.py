@@ -13,7 +13,9 @@ see it only once it is shared with them. Then:
 2. reads them as the test user before the meeting is shared with them (refused),
    after it is shared through the meeting controls function as the meeting page
    shares it (both earlier notifications returned), and after the share is
-   removed (refused again);
+   removed (refused again). An Admin reads every meeting, so the observations
+   record whether the test user is one (``test_user_is_admin``), and the two
+   refusals are checked only for a test user who is not;
 3. publishes the guidance again with the same DedupKey (updated, not added);
 4. dismisses and mutes as the test user, and mutes and unmutes a category on
    every meeting (put back as it was);
@@ -539,7 +541,10 @@ def run_probe(stack_name: str, region: str | None = None) -> dict:
     outputs = deployment.outputs
     pool_id = outputs.get("MCPServerUserPoolId") or outputs["CognitoUserPoolTokenIssuerUrl"].rsplit("/", 1)[-1]
     tokens = _mint_tokens(deployment.session.region_name, pool_id, outputs["CognitoUserPoolClientId"], username, password)
-    user = _claims(tokens["id"]).get("cognito:username") or username
+    claims = _claims(tokens["id"])
+    user = claims.get("cognito:username") or username
+    # An Admin reads every meeting, so the refusals to a user a meeting is not shared with cannot be seen.
+    is_admin = "Admin" in (claims.get("cognito:groups") or [])
 
     with _publisher(deployment) as notifications:
         probe = Probe(deployment, tokens["id"], user, notifications)
@@ -549,6 +554,7 @@ def run_probe(stack_name: str, region: str | None = None) -> dict:
             probe.create_meeting()
             own.create_meeting()
             probe.observed["own_call_id"] = own.call_id
+            probe.observed["test_user_is_admin"] = is_admin
             probe.publish_two()
             probe.shared_reads()
             probe.observed["live_shared"] = probe.live("Published to a shared meeting")

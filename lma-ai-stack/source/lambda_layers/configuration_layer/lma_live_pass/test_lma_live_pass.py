@@ -1,12 +1,14 @@
 # Copyright (c) 2025 Amazon.com
 # This file is licensed under the MIT-0 License.
 # See the LICENSE file in the project root for full license information.
-"""The run lease (no AWS): a fake table that evaluates the module's conditions."""
+"""The run lease (no AWS), on a fake table that evaluates the module's conditions,
+and which transcript segments a run reads next (lma_live_pass.segments)."""
 
 from __future__ import annotations
 
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict
 
@@ -16,6 +18,7 @@ from botocore.exceptions import ClientError
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from lma_live_pass import LivePass  # noqa: E402
+from lma_live_pass import segments as live_pass  # noqa: E402
 
 
 def _number(attr: Dict[str, str]) -> float:
@@ -133,3 +136,66 @@ def test_a_run_that_outlived_its_lease_cannot_clear_anothers(lease: LivePass) ->
     assert new is not None
     lease.release("c1", old["LeaseUntil"], ran=True, now=1300)
     assert lease.read("c1")["LeaseUntil"] == new["LeaseUntil"]
+
+
+# ── which segments a run reads ───────────────────────────────────────────────
+
+
+@dataclass
+class _Segment:
+    segment_id: str
+    end: float
+
+
+def _segment(segment_id: str, end: float) -> _Segment:
+    return _Segment(segment_id, end)
+
+
+def test_a_segment_finalized_after_the_last_run_but_ending_before_its_marker_is_new() -> None:
+    """A long utterance on another channel can end before the marker and arrive after it."""
+    segments = [_segment("a", 100), _segment("late", 95), _segment("b", 110), _segment("c", 130)]
+    fresh = live_pass.new_segments(segments, 110, ["a", "b"])
+    assert [s.segment_id for s in fresh] == ["late", "c"]
+
+
+def test_a_segment_before_the_overlap_is_not_read_again() -> None:
+    segments = [_segment("old", 110 - live_pass.OVERLAP_SECONDS - 1), _segment("c", 130)]
+    assert [s.segment_id for s in live_pass.new_segments(segments, 110, [])] == ["c"]
+
+
+def test_a_state_row_without_shown_ids_is_read_by_its_marker_alone() -> None:
+    segments = [_segment("late", 95), _segment("c", 130)]
+    assert [s.segment_id for s in live_pass.new_segments(segments, 110, None)] == ["c"]
+
+
+def test_the_shown_ids_kept_are_those_near_the_marker() -> None:
+    old = 110 - live_pass.OVERLAP_SECONDS - 1
+    segments = [
+        _segment("old", old),
+        _segment("a", 100),
+        _segment("b", 110),
+        _segment("unseen", 120),
+    ]
+    assert live_pass.shown_near(segments, ["old", "a", "b"], 110) == ["a", "b"]
+
+
+def test_after_a_row_without_shown_ids_what_its_marker_covered_is_not_read_again() -> None:
+    """A meeting running during a stack update: its earlier runs read up to the marker."""
+    segments = [_segment("a", 90), _segment("b", 110), _segment("c", 150)]
+    fresh = live_pass.new_segments(segments, 110, None)
+    assert [s.segment_id for s in fresh] == ["c"]
+    recorded = live_pass.shown_after_run(segments, 110, None, fresh)
+    assert recorded == ["a", "b", "c"]
+    # The next run, after a late segment ending inside the overlap, reads only that one.
+    later = [*segments, _segment("late", 100), _segment("d", 200)]
+    assert [s.segment_id for s in live_pass.new_segments(later, 150, recorded)] == ["late", "d"]
+
+
+def test_a_first_run_records_its_segments_near_its_marker() -> None:
+    segments = [_segment("a", 10), _segment("b", 200)]
+    assert live_pass.next_marker(segments, None) == 200
+    assert live_pass.shown_after_run(segments, None, None, segments) == ["b"]
+
+
+def test_the_marker_never_moves_back() -> None:
+    assert live_pass.next_marker([_segment("late", 95)], 110) == 110

@@ -1,0 +1,17 @@
+/*
+ * Copyright (c) 2025 Amazon.com
+ * This file is licensed under the MIT-0 License.
+ * See the LICENSE file in the project root for full license information.
+ */
+
+/* A preview on the Stream Audio/Video page (the screen video, an evidence
+   screenshot), framed in Cloudscape's divider colour for the light and dark modes,
+   as CallPanel.css frames its sections. */
+.stream-audio-preview {
+  max-width: 320px;
+  border: 1px solid #c6c6cd;
+}
+
+.awsui-dark-mode .stream-audio-preview {
+  border-color: #414d5c;
+}

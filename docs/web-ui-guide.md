@@ -721,8 +721,10 @@ properly only in Chromium-based browsers.
 **Download › Everything (.zip)** asks the server to put the meeting's files in one
 ZIP archive. The header shows **Preparing download…** while it is built (a few
 seconds for a short meeting, a few minutes for hours of video), and then a
-**Download** link, valid for an hour. **Key frames (.zip)** and **All attachments
-(.zip)** are built the same way, holding only those files. The archive holds:
+**Download** link, valid for an hour. Shortly before the link lapses the header
+says so instead; choose the download again for a new link.
+**Key frames (.zip)** and **All attachments (.zip)** are built the same way,
+holding only those files. The archive holds:
 
 | Folder or file | What it is |
 |---|---|

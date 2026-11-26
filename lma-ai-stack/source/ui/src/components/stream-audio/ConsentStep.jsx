@@ -21,6 +21,7 @@ import {
 } from '@cloudscape-design/components';
 
 import { CONSENT_METHODS, CONSENT_MODE_OPT_IN } from './consent';
+import './StreamAudio.css';
 
 /**
  * The consent step of a streamed meeting: the notice to read out or post, the
@@ -152,7 +153,7 @@ const ConsentStep = ({
               <img
                 src={evidence.dataUrl}
                 alt="Evidence screenshot to be kept on the meeting"
-                style={{ maxWidth: '320px', border: '1px solid #ccc' }}
+                className="stream-audio-preview"
               />
             </Box>
           )}
