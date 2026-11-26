@@ -3150,6 +3150,7 @@ Resources:
       Parameters:
         LMAStackName: !Ref AWS::StackName
         AISTACK: !Ref AISTACK
+        QueryKnowledgeBaseResolverFunction: !GetAtt AISTACK.Outputs.QueryKnowledgeBaseResolverFunctionName
         COGNITOSTACK: !Ref COGNITOSTACK
         MeetingAssistService: !Ref MeetingAssistService
         BedrockKnowledgeBaseId: !If

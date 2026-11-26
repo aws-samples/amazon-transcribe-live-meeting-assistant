@@ -876,6 +876,11 @@ Outputs:
   CloudFrontDistributionId:
     Description: The ID of the CloudFront distribution for LMA's main web ui
     Value: !Ref WebAppCloudFrontDistribution
+  QueryKnowledgeBaseResolverFunctionName:
+    Description: >-
+      The transcript knowledge base query function (in the Lambda resolvers
+      nested stack), for the meeting assist setup stack
+    Value: !GetAtt LambdaResolversStack.Outputs.QueryKnowledgeBaseResolverFunctionName
   WebAppBucket:
     Description: Name of S3 web app bucket
     Value: !Ref WebAppBucket

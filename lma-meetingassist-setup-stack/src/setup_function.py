@@ -26,6 +26,21 @@ def getStackResource(stackName, logicaResourceId):
     return (physicalResourceId)
 
 
+def queryKnowledgeBaseResolverFunctionName(props):
+    """The transcript knowledge base query function's name.
+
+    The function is in the AI stack's Lambda resolvers nested stack, whose
+    output lma-main.yaml always passes in. The name is empty only when this
+    template is deployed outside lma-main.yaml without the parameter; the
+    function is then looked up in the AI stack by its logical ID.
+    """
+    name = props.get("QueryKnowledgeBaseResolverFunction", "")
+    if name:
+        print(f"QueryKnowledgeBaseResolverFunction={name}")
+        return name
+    return getStackResource(props["AISTACK"], "QueryKnowledgeBaseResolverFunction")
+
+
 def configureStrandsMode(props):
     """Configure AsyncAgentAssistOrchestrator for STRANDS mode"""
     print("Configuring STRANDS mode - updating AsyncAgentAssistOrchestrator with STRANDS Lambda ARN")
@@ -60,8 +75,7 @@ def configureStrandsMode(props):
             print("Updated AsyncAgentAssistOrchestrator with STRANDS Lambda ARN")
 
             # Update QueryKnowledgeBaseResolverFunction with Transcript KB ID
-            queryKnowledgeBaseResolverFunction = getStackResource(
-                props["AISTACK"], "QueryKnowledgeBaseResolverFunction")
+            queryKnowledgeBaseResolverFunction = queryKnowledgeBaseResolverFunctionName(props)
             response = lam.get_function_configuration(
                 FunctionName=queryKnowledgeBaseResolverFunction)
             envVars = response["Environment"]["Variables"]
