@@ -616,6 +616,8 @@ def _erase_advance_consents(email, sub, erased_by):
         )
     except (ImportError, ClientError, BotoCoreError) as exc:
         logger.warning("Could not erase a deleted user's consent records", exc_info=True)
+        # At least what a deletion without erasure leaves: none still in force.
+        _withdraw_advance_consents(email, sub)
         raise ValidationError(
             "The user was deleted, but their consent records could not be erased; erase them "
             "on My consents › All consents (admin)"

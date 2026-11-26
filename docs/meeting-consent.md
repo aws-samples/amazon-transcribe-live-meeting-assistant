@@ -1620,9 +1620,11 @@ dialog that names what is deleted and has to be acknowledged. A consent still in
 force is withdrawn first, so the meetings in progress that counted it stop
 capture as above; then the consent items are removed, and cannot be restored.
 An audit entry is written in the meetings table (`PK = cnsaudit#<YYYY-MM>`)
-with who deleted them, when, the address, the consent ids, how many there were
-and how many were withdrawn first, and nothing of their content: not the text,
-the scope or the dates. Audit entries are not removed by the table's time to
+before anything is removed, with who deleted them, when, the address, the
+consent ids, how many there were and how many were withdrawn first, and nothing
+of their content: not the text, the scope or the dates. Its `Status` is
+`pending` until every item is removed, then `complete`, so an erasure that
+stops part way is still on record. Audit entries are not removed by the table's time to
 live. Deleting a user in User Management with **Also permanently delete their
 consent records** ticked does the same for the consents that account gave,
 after the account is deleted, with the audit entry's reason `account_deleted`.

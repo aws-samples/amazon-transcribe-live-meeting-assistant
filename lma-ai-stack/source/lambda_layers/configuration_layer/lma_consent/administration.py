@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import logging
 import secrets
+import time
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Dict, Iterable, List, Mapping, Optional
@@ -52,6 +53,12 @@ MAX_ERASED = 1000
 MAX_NOTE_LENGTH = 500
 
 LOGGER = logging.getLogger(__name__)
+
+
+class ConsentsUnreadable(Exception):
+    """Some consents could not be read; the answer would be incomplete."""
+
+
 _DES = TypeDeserializer()
 _SER = TypeSerializer()
 
@@ -219,10 +226,6 @@ def erase(  # pylint: disable=too-many-arguments,too-many-locals
                 withdrawn += 1
                 if pass_on is not None:
                     pass_on(written)
-    for consent in targets:
-        client.delete_item(
-            TableName=table, Key={"PK": {"S": consent["PK"]}, "SK": {"S": consent["SK"]}}
-        )
     audit_id = f"{now.strftime('%Y%m%d%H%M%S')}-{secrets.token_hex(6)}"
     removed = [str(c.get("ConsentId")) for c in targets]
     audit = {
@@ -237,7 +240,16 @@ def erase(  # pylint: disable=too-many-arguments,too-many-locals
         "ConsentIds": removed,
         "Count": len(removed),
         "Withdrawn": withdrawn,
+        # "pending" until every item is deleted, so an erasure that stops part
+        # way is on record with the consents it was removing.
+        "Status": "pending",
     }
+    client.put_item(TableName=table, Item={k: _SER.serialize(v) for k, v in audit.items()})
+    for consent in targets:
+        client.delete_item(
+            TableName=table, Key={"PK": {"S": consent["PK"]}, "SK": {"S": consent["SK"]}}
+        )
+    audit["Status"] = "complete"
     client.put_item(TableName=table, Item={k: _SER.serialize(v) for k, v in audit.items()})
     return {
         "Deleted": len(removed),
@@ -265,4 +277,8 @@ def read_items(client: Any, table: str, keys: List[Dict[str, Any]]) -> Dict[tupl
             request = response.get("UnprocessedKeys") or {}
             if not request:
                 break
+            time.sleep(0.05 * 2**_attempt)
+        if request:
+            # A page missing consents would drop them from the list and the export.
+            raise ConsentsUnreadable("some consents could not be read; try again")
     return found

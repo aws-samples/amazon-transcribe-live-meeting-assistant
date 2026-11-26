@@ -173,7 +173,8 @@ def lambda_handler(event, context):
                 table.update_item(
                     Key={"PK": item["PK"], "SK": item["SK"]},
                     UpdateExpression="SET #it = :v",
-                    ConditionExpression="attribute_not_exists(#it)",
+                    # Not on a row deleted since the scan read it.
+                    ConditionExpression="attribute_exists(PK) AND attribute_not_exists(#it)",
                     ExpressionAttributeNames={"#it": "ItemType"},
                     ExpressionAttributeValues={":v": new_item_type},
                 )

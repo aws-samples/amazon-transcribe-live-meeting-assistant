@@ -282,11 +282,31 @@ def test_an_erasure_withdraws_first_removes_the_items_and_audits_without_content
     assert [i["advanceConsentWithdrawn"]["CallId"] for i in admin["invoked"]] == ["Weekly"]
     left = {k for k in admin["dynamo"].events.items if k[0].startswith("pmc#")}
     assert left == {(f"pmc#{BO}", "ac#20261123120000-000000000003")}
-    [audit] = admin["low"].puts
+    pending, audit = admin["low"].puts
+    assert pending["Status"] == "pending" and audit["Status"] == "complete"
+    assert pending["AuditId"] == audit["AuditId"]
     assert audit["PK"].startswith("cnsaudit#") and audit["ErasedBy"] == ADMIN
     assert audit["Email"] == ANA and audit["Count"] == 2 and audit["Withdrawn"] == 1
     assert sorted(audit["ConsentIds"]) == sorted(answer["ConsentIds"])
     assert "I agree." not in json.dumps(audit, default=str) and "NoticeHash" not in audit
+
+
+def test_an_erasure_that_stops_part_way_is_on_record(admin, monkeypatch) -> None:
+    store(admin, ANA, 1)
+    store(admin, ANA, 2)
+    deleted = []
+
+    def delete_once(TableName, Key):  # noqa: N803
+        if deleted:
+            raise base.ClientError({"Error": {"Code": "ThrottlingException"}}, "DeleteItem")
+        deleted.append(Key)
+        admin["dynamo"].events.items.pop((Key["PK"]["S"], Key["SK"]["S"]), None)
+
+    monkeypatch.setattr(admin["low"], "delete_item", delete_once)
+    with pytest.raises(base.ClientError):
+        as_admin("deleteAdvanceConsentRecords", {"input": {"Email": ANA, "AllForPerson": True}})
+    [audit] = admin["low"].puts
+    assert audit["Status"] == "pending" and len(audit["ConsentIds"]) == 2
 
 
 def test_an_erasure_of_named_consents_leaves_the_others(admin) -> None:

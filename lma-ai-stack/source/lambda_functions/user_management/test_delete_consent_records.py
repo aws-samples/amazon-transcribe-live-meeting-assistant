@@ -84,3 +84,5 @@ def test_a_failed_erasure_says_the_user_was_deleted(calls, monkeypatch) -> None:
     monkeypatch.setattr(administration, "erase", failing)
     with pytest.raises(Exception, match="The user was deleted, but their consent records"):
         delete(deleteConsentRecords=True)
+    # At least withdrawn, as without the option.
+    assert calls["withdraw"] == [(USER, f"sub-{USER}")]

@@ -1208,11 +1208,14 @@ def list_all_advance_consents(caller: Mapping[str, Any], arguments: Mapping[str,
             for raw in response.get("Items") or []
             if raw.get("SK", {}).get("S", "").startswith("ac#")
         ]
-        items = administration.read_items(
-            DYNAMODB_CLIENT,
-            EVENT_SOURCING_TABLE,
-            [{"PK": {"S": e["PK"]}, "SK": {"S": e["SK"]}} for e in entries],
-        )
+        try:
+            items = administration.read_items(
+                DYNAMODB_CLIENT,
+                EVENT_SOURCING_TABLE,
+                [{"PK": {"S": e["PK"]}, "SK": {"S": e["SK"]}} for e in entries],
+            )
+        except administration.ConsentsUnreadable as error:
+            raise BadRequest(str(error)) from error
         key = response.get("LastEvaluatedKey")
         for entry in entries:
             item = items.get((entry["PK"], entry["SK"]))
