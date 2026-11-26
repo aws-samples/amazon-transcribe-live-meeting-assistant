@@ -26,6 +26,7 @@ is the role's trust policy, and the pipeline is what exercises it.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from datetime import datetime, timedelta, timezone
@@ -1590,6 +1591,16 @@ def test_the_meeting_export_test_runs_by_default() -> None:
 
     assert not getattr(test_meeting_export, "pytestmark", None)
     assert test_meeting_export.SUMMARY_TIMEOUT_S >= 10 * 60
+
+
+def test_the_large_meeting_export_case_is_opt_in() -> None:
+    """The case that writes more than 6 MB of transcript needs LMA_TEST_LARGE_EXPORT=1."""
+    import test_meeting_export
+
+    case = test_meeting_export.test_a_large_export_is_answered_with_a_link_for_ten_minutes
+    (mark,) = [m for m in case.pytestmark if m.name == "skipif"]
+    assert mark.args == (os.environ.get("LMA_TEST_LARGE_EXPORT") != "1",)
+    assert "LMA_TEST_LARGE_EXPORT=1" in mark.kwargs["reason"]
 
 
 def test_the_meeting_archive_test_is_an_opt_in_optional_feature() -> None:

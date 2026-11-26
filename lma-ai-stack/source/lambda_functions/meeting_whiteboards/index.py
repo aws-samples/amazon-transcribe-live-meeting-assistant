@@ -869,11 +869,19 @@ def delete_whiteboard(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dic
 
 
 def delete_rows(call_id: str, prefix: str) -> int:
-    """Delete the rows of a meeting's whiteboards under one sort-key prefix."""
+    """Delete the rows of a meeting's whiteboards under one sort-key prefix.
+
+    Returns the number of rows that remain because DynamoDB left them
+    unprocessed through every attempt; 0 when every row was deleted. Such rows
+    are logged, not raised: the deletion they follow is already committed, and
+    they are removed at their expiry, or when the meeting's transcript or the
+    meeting is deleted.
+    """
     keys = [
         {"PK": {"S": rules.partition(call_id)}, "SK": {"S": row["SK"]}}
         for row in query_partition(call_id, prefix, ProjectionExpression="PK, SK")
     ]
+    remaining = 0
     for start in range(0, len(keys), 25):
         requests = [{"DeleteRequest": {"Key": key}} for key in keys[start : start + 25]]
         pending: Any = {EVENT_SOURCING_TABLE: requests}
@@ -882,7 +890,17 @@ def delete_rows(call_id: str, prefix: str) -> int:
             pending = response.get("UnprocessedItems") or {}
             if not pending:
                 break
-    return len(keys)
+        remaining += sum(len(items) for items in pending.values())
+    if remaining:
+        LOGGER.warning(
+            "%d of %d whiteboard rows under %s of %s were not deleted; they remain until "
+            "their expiry or the deletion of the meeting's transcript",
+            remaining,
+            len(keys),
+            prefix,
+            call_id,
+        )
+    return remaining
 
 
 def update_call_whiteboards(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict[str, Any]:

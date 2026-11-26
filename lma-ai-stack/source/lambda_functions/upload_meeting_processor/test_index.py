@@ -37,7 +37,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import pytest
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, EndpointConnectionError
 
 BUCKET = "lma-recordings-bucket"
 TABLE = "lma-event-sourcing-table"
@@ -398,23 +398,147 @@ def test_the_transcribing_marker_records_the_job_name_stage_three_resolves(env) 
     assert table.update_for("TRANSCRIBING")["TranscriptionJobName"] == CALL_ID
 
 
-def test_a_failure_leaves_the_job_in_error_with_the_reason(env, monkeypatch) -> None:
+def test_a_retryable_failure_leaves_the_job_in_error_with_the_reason(env, monkeypatch) -> None:
     """The row is the only place an operator can see why an upload stalled."""
     table, _, _ = env
-    monkeypatch.setattr(index, "transcribe_client", FakeTranscribe(transcribe_error("BadRequest")))
+    monkeypatch.setattr(
+        index, "transcribe_client", FakeTranscribe(transcribe_error("ThrottlingException"))
+    )
     with pytest.raises(RuntimeError):
         index.lambda_handler(s3_event(), None)
     assert table.statuses[-1] == "ERROR"
-    assert "BadRequest" in table.update_for("ERROR")["ErrorMessage"]
+    assert "ThrottlingException" in table.update_for("ERROR")["ErrorMessage"]
 
 
 def test_a_long_error_is_truncated_to_the_stored_limit(env, monkeypatch) -> None:
     """DynamoDB item size is finite and a Transcribe reason can be long."""
     table, _, _ = env
     monkeypatch.setattr(index, "transcribe_client", FakeTranscribe(transcribe_error("E" * 4000)))
+    index.lambda_handler(s3_event(), None)
+    assert len(table.update_for("FAILED")["ErrorMessage"]) == 1024
+
+
+# ---------------------------------------------------------------------------
+# A transcription job that cannot be started
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("code", ["AccessDeniedException", "BadRequestException"])
+def test_a_job_that_cannot_be_started_ends_the_meeting_as_failed(env, monkeypatch, code) -> None:
+    """A permission or request error repeats on every retry, so the meeting is
+    ended at once rather than left "In Progress" until the inactivity timeout."""
+    table, kinesis, _ = env
+    monkeypatch.setattr(index, "transcribe_client", FakeTranscribe(transcribe_error(code)))
+    result = index.lambda_handler(s3_event(), None)
+    assert result == {"processed": 1}
+    assert [p["EventType"] for p in kinesis.payloads] == ["START", "END"]
+    assert table.statuses == ["UPLOADED", "FAILED"]
+    assert code in table.update_for("FAILED")["ErrorMessage"]
+
+
+def test_the_end_event_matches_the_one_stage_three_sends_for_a_failed_job(env, monkeypatch) -> None:
+    """Stage 3's END carries the owner and party labels of the START and no
+    UpdatedAt, so the resolver stamps the time it applies it."""
+    _, kinesis, _ = env
+    monkeypatch.setattr(index, "transcribe_client", FakeTranscribe(transcribe_error("BadRequest")))
+    index.lambda_handler(s3_event(), None)
+    end = kinesis.payloads[-1]
+    assert end == {
+        "EventType": "END",
+        "CallId": CALL_ID,
+        "CustomerPhoneNumber": "Other Participant",
+        "SystemPhoneNumber": "System",
+        "AgentId": "bob@example.com",
+        "CreatedAt": FROZEN_NOW.isoformat(),
+    }
+    assert kinesis.calls[-1]["PartitionKey"] == CALL_ID
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "LimitExceededException",
+        "ThrottlingException",
+        "TooManyRequestsException",
+        "InternalFailureException",
+        "ServiceUnavailableException",
+    ],
+)
+def test_throttling_and_quota_errors_are_left_for_the_retry(env, monkeypatch, code) -> None:
+    """The concurrent-job quota and throttling clear by themselves, so Lambda's
+    retry of the notification is given the chance to start the job."""
+    table, kinesis, _ = env
+    monkeypatch.setattr(index, "transcribe_client", FakeTranscribe(transcribe_error(code)))
     with pytest.raises(RuntimeError):
         index.lambda_handler(s3_event(), None)
-    assert len(table.update_for("ERROR")["ErrorMessage"]) == 1024
+    assert [p["EventType"] for p in kinesis.payloads] == ["START"]
+    error = table.update_for("ERROR")
+    assert error["StartEventSentAt"] == FROZEN_NOW.isoformat()
+    assert table.update_for("UPLOADED")["StartAttempts"] == 1
+
+
+def test_a_connection_error_is_left_for_the_retry(env, monkeypatch) -> None:
+    """A botocore connection error is not an answer from Transcribe."""
+    _, kinesis, _ = env
+    error = EndpointConnectionError(endpoint_url="https://transcribe.us-east-1.amazonaws.com")
+    monkeypatch.setattr(index, "transcribe_client", FakeTranscribe(error))
+    with pytest.raises(RuntimeError):
+        index.lambda_handler(s3_event(), None)
+    assert [p["EventType"] for p in kinesis.payloads] == ["START"]
+
+
+def test_a_retry_after_the_start_was_sent_does_not_send_it_again(env, monkeypatch) -> None:
+    """The meeting is recorded as started once, however many attempts it takes."""
+    table = FakeTable(
+        job_row(Status="ERROR", StartAttempts=1, StartEventSentAt="2025-03-04T05:00:00+00:00")
+    )
+    monkeypatch.setattr(index, "job_table", table)
+    _, kinesis, transcribe = env
+    result = index.lambda_handler(s3_event(), None)
+    assert result == {"processed": 1}
+    assert kinesis.payloads == []
+    assert transcribe.params["TranscriptionJobName"] == CALL_ID
+    assert table.statuses == ["UPLOADED", "TRANSCRIBING"]
+    assert table.update_for("UPLOADED")["StartAttempts"] == 2
+
+
+def test_a_retryable_error_on_the_last_attempt_ends_the_meeting(env, monkeypatch) -> None:
+    """No attempt follows the last one, so the meeting is ended as failed then."""
+    table = FakeTable(
+        job_row(
+            Status="ERROR",
+            StartAttempts=index.MAX_START_ATTEMPTS - 1,
+            StartEventSentAt="2025-03-04T05:00:00+00:00",
+        )
+    )
+    monkeypatch.setattr(index, "job_table", table)
+    _, kinesis, _ = env
+    monkeypatch.setattr(
+        index, "transcribe_client", FakeTranscribe(transcribe_error("LimitExceededException"))
+    )
+    result = index.lambda_handler(s3_event(), None)
+    assert result == {"processed": 1}
+    assert [p["EventType"] for p in kinesis.payloads] == ["END"]
+    assert table.statuses[-1] == "FAILED"
+    assert "LimitExceededException" in table.update_for("FAILED")["ErrorMessage"]
+
+
+def test_an_end_that_cannot_be_sent_is_left_for_the_retry(env, monkeypatch) -> None:
+    """The row becomes FAILED only once the meeting is ended; otherwise the retry
+    would skip the row and the meeting would stay "In Progress"."""
+    table, kinesis, _ = env
+    monkeypatch.setattr(index, "transcribe_client", FakeTranscribe(transcribe_error("BadRequest")))
+
+    def put_record(StreamName, PartitionKey, Data):  # noqa: N803
+        if json.loads(Data)["EventType"] == "END":
+            raise ClientError({"Error": {"Code": "InternalFailure"}}, "PutRecord")
+        return FakeKinesis.put_record(kinesis, StreamName, PartitionKey, Data)
+
+    monkeypatch.setattr(kinesis, "put_record", put_record)
+    with pytest.raises(RuntimeError):
+        index.lambda_handler(s3_event(), None)
+    assert "FAILED" not in table.statuses
+    assert table.update_for("ERROR")["StartEventSentAt"] == FROZEN_NOW.isoformat()
 
 
 def test_a_status_write_that_fails_does_not_stop_the_pipeline(env, monkeypatch) -> None:
@@ -602,10 +726,10 @@ def test_a_call_id_that_cannot_name_a_transcribe_job_is_reported(env, monkeypatc
     table = FakeTable(job_row(CallId="not a legal job name"))
     monkeypatch.setattr(index, "job_table", table)
     _, _, transcribe = env
-    with pytest.raises(RuntimeError):
-        index.lambda_handler(s3_event(), None)
+    index.lambda_handler(s3_event(), None)
     assert transcribe.calls == []
-    assert table.statuses[-1] == "ERROR"
+    assert table.statuses[-1] == "FAILED"
+    assert "TranscriptionJobName" in table.update_for("FAILED")["ErrorMessage"]
 
 
 # ---------------------------------------------------------------------------

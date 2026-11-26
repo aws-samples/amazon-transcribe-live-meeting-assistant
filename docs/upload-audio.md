@@ -210,6 +210,15 @@ failure on `updateCallStatus`. If the Transcribe batch job completed but the
 finalizer never ran, verify the EventBridge rule
 `<stack>-UploadMeetingFinalizer` is enabled.
 
+**The meeting ends right after the upload, with no transcript.**  
+The transcription job could not be started. A throttling, quota (such as the
+account's concurrent transcription jobs) or service error is retried twice,
+about a minute and then two minutes later; any other error, or one that is still
+there on the last attempt, ends the meeting at once. The meeting page does not
+show the reason yet. It is in the `UploadMeetingProcessor` Lambda logs, and in
+the `ErrorMessage` of the meeting's `uj#<callId>` item in the event-sourcing
+table, whose `Status` is `FAILED`.
+
 **Transcription job fails with "Unable to access the S3 URI".**  
 Confirm that both the `AllowTranscribeRead` and `AllowTranscribeWrite`
 statements are present in the recordings bucket policy (they are installed by

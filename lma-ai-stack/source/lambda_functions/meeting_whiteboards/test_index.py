@@ -492,6 +492,43 @@ def test_a_meeting_has_at_most_its_whiteboards_and_a_deletion_frees_one(table) -
     create()
 
 
+def test_version_rows_left_unprocessed_are_logged_with_their_count(
+    table, monkeypatch, caplog
+) -> None:
+    """The deletion is committed; the version rows DynamoDB leaves unprocessed
+    through every attempt stay until their expiry, and a log line says how many."""
+    board = create()
+    panels = panels_of(board)
+    panels[0]["Content"] = "later"
+    update(board, panels)
+    prefix = f"v#{board['WhiteboardId']}#"
+    versions = [k for k in table.rows if k[1].startswith(prefix)]
+    assert len(versions) == 2
+    attempts = []
+
+    def throttled(RequestItems):  # noqa: N803
+        attempts.append(RequestItems)
+        return {"UnprocessedItems": RequestItems}
+
+    monkeypatch.setattr(table, "batch_write_item", throttled)
+    with caplog.at_level("WARNING"):
+        gone = call(
+            "deleteMeetingWhiteboard",
+            user(OWNER),
+            input={"CallId": CALL, "WhiteboardId": board["WhiteboardId"]},
+        )
+    assert gone["Deleted"] is True
+    assert len(attempts) == 5
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert any(f"2 of 2 whiteboard rows under {prefix} of {CALL}" in w for w in warnings), warnings
+
+
+def test_deleting_every_version_row_returns_none_remaining(table) -> None:
+    board = create()
+    assert index.delete_rows(CALL, f"v#{board['WhiteboardId']}#") == 0
+    assert not [k for k in table.rows if k[1].startswith(f"v#{board['WhiteboardId']}#")]
+
+
 def test_changes_are_limited_per_minute(table, monkeypatch) -> None:
     monkeypatch.setattr(index, "WRITES_PER_MINUTE", 2)
     create()

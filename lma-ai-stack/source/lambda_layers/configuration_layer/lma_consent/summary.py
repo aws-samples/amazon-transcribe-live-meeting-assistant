@@ -151,7 +151,12 @@ def participant_consent(speaker_id: Any, events: List[Mapping[str, Any]]) -> str
 def meeting_consent_output(
     call_id: str, state: Optional[Mapping[str, Any]], speakers: Any = None
 ) -> Dict[str, Any]:
-    """The consent record for a getMeetingConsent result, or ``{"Consent": <the stored record>}``.
+    """The meeting's consent record in the public shape, built from ``state``.
+
+    ``state`` is either a getMeetingConsent result or ``{"Consent": <the stored
+    record>}``, as the export passes it; ``None`` is read as ``{}``. The value
+    returned is the public record (``meetingId``, ``mode``, ``status``,
+    ``events`` and the rest), not ``state``'s shape.
 
     The get_meeting_consent answer and the export's ``consent`` part. A meeting
     whose consent was never started has mode ``off`` and status

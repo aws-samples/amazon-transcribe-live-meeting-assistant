@@ -143,7 +143,8 @@ subset) is dropped. A whiteboard whose content does not change gets no new
 version.
 
 A run that fails is logged and skipped; the next run, an interval later, reads
-the meeting again.
+the meeting again. A run that fails still counts against **Runs per meeting at
+most**, so a model that keeps failing uses up the meeting's runs.
 
 "What was said since the last run" also includes a segment that ended up to two
 minutes before the last run's latest segment but was finalized after that run,
