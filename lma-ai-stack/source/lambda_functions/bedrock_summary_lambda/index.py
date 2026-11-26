@@ -923,8 +923,10 @@ def format_summary(summary, metadata):
         summary_dict = {"SUMMARY": text}
     summary_dict["MEETING NAME"] = metadata["CallId"]
     summary_dict["MEETING DATE AND TIME"] = metadata["CreatedAt"]
+    # A meeting whose segments reached the table without the call event
+    # processor has no recorded duration; it is stored as 0 seconds.
     summary_dict["MEETING DURATION (SECONDS)"] = int(
-        metadata["TotalConversationDurationMillis"] / 1000
+        float(metadata.get("TotalConversationDurationMillis") or 0) / 1000
     )
     return json.dumps(summary_dict)
 

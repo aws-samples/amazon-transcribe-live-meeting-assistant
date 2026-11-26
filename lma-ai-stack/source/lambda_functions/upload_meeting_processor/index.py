@@ -30,6 +30,12 @@ S3 fires an ObjectCreated:* notification that invokes this Lambda. We:
    name so Stage 3 (EventBridge ``Transcribe Job State Change`` rule) can
    finish the pipeline.
 
+When the job cannot be started, a throttling, quota or service error is left
+for Lambda's retry of the notification (the row records that START was sent, so
+the retry does not send it again). Any other error, or a retryable one on the
+last attempt, ends the meeting: the row becomes ``FAILED`` with the reason and an
+``END`` event follows, as Stage 3 does for a job that fails after it starts.
+
 This Lambda does NOT finalize the meeting. Stage 3 (``upload_meeting_finalizer``)
 consumes the Transcribe completion event, injects per-utterance segments as
 ``ADD_TRANSCRIPT_SEGMENT`` Kinesis events, promotes the media file from
@@ -49,7 +55,13 @@ from datetime import datetime, timezone
 from typing import Any
 
 import boto3
-from botocore.exceptions import ClientError
+from botocore.exceptions import (
+    ClientError,
+    ConnectionClosedError,
+    ConnectTimeoutError,
+    EndpointConnectionError,
+    ReadTimeoutError,
+)
 
 # ---------------------------------------------------------------------------
 # Environment
@@ -80,6 +92,32 @@ TRANSCRIBE_JOB_NAME_RE = re.compile(r"^[a-zA-Z0-9._-]{1,200}$")
 # row as MediaFormat; anything else (or none, on a row written before Stage 1
 # stored it) leaves the parameter out for Transcribe to detect the format.
 SUPPORTED_MEDIA_FORMATS = frozenset({"mp3", "mp4", "wav", "flac", "ogg", "amr", "webm", "m4a"})
+
+# StartTranscriptionJob error codes that can succeed on a later attempt: request
+# throttling, the account's quota of concurrent transcription jobs
+# (LimitExceededException) and service-side failures. Any other error ends the
+# meeting as failed at once, since a retry would only repeat it.
+RETRYABLE_TRANSCRIBE_ERROR_CODES = frozenset(
+    {
+        "LimitExceededException",
+        "ThrottlingException",
+        "TooManyRequestsException",
+        "InternalFailureException",
+        "ServiceUnavailableException",
+    }
+)
+#: The attempts Lambda makes at one S3 notification: the first, and the two
+#: retries of an asynchronous invocation (the function sets no EventInvokeConfig).
+#: A retryable error on the last attempt ends the meeting as failed, since no
+#: further attempt follows.
+MAX_START_ATTEMPTS = 3
+#: The botocore errors, raised without an answer from Transcribe, that a retry can clear.
+TRANSIENT_BOTOCORE_ERRORS = (
+    EndpointConnectionError,
+    ConnectTimeoutError,
+    ReadTimeoutError,
+    ConnectionClosedError,
+)
 
 # ---------------------------------------------------------------------------
 # Logging / clients
@@ -143,6 +181,24 @@ def _mark_job(call_id: str, status: str, extra: dict | None = None) -> None:
             UpdateExpression="SET " + ", ".join(set_parts),
             ExpressionAttributeNames=expression_names,
             ExpressionAttributeValues=expression_values,
+        )
+    except ClientError as err:
+        logger.error("DDB update_item failed for %s: %s", pk, err)
+
+
+def _record_start_sent(call_id: str, sent_at: str) -> None:
+    """Record on the UploadJob row that START was sent, as soon as it is.
+
+    A retry reads it and does not send START again, even when the invocation
+    that sent it ended before it could record anything else. Best-effort, as
+    ``_mark_job`` is: the status is left as it is.
+    """
+    pk = f"uj#{call_id}"
+    try:
+        job_table.update_item(
+            Key={"PK": pk, "SK": pk},
+            UpdateExpression="SET StartEventSentAt = :sent",
+            ExpressionAttributeValues={":sent": sent_at},
         )
     except ClientError as err:
         logger.error("DDB update_item failed for %s: %s", pk, err)
@@ -269,6 +325,55 @@ def _start_transcription_job(job: dict) -> str:
     return call_id
 
 
+def _is_retryable(err: Exception) -> bool:
+    """Whether a failure to start the transcription job can succeed on a retry."""
+    if isinstance(err, ClientError):
+        code = err.response.get("Error", {}).get("Code", "")
+        return code in RETRYABLE_TRANSCRIBE_ERROR_CODES
+    # A connection or timeout error raised by botocore itself; not a parameter or
+    # credentials error, which repeats on every attempt.
+    return isinstance(err, TRANSIENT_BOTOCORE_ERRORS)
+
+
+def _emit_end_event(job: dict) -> None:
+    """Put an ``END`` event on the Call Data Kinesis stream.
+
+    The same event ``upload_meeting_finalizer`` sends when a transcription job
+    fails, with the START event's owner attribution. ``UpdatedAt`` is left out so
+    the resolver stamps the time it applies the event (see the finalizer's
+    ``_emit_end_event``).
+    """
+    call_id = job["CallId"]
+    owner = job.get("Owner") or job.get("AgentId") or "system@lma.aws"
+    end_event = {
+        "EventType": "END",
+        "CallId": call_id,
+        "CustomerPhoneNumber": job.get("FromNumber") or "Other Participant",
+        "SystemPhoneNumber": job.get("ToNumber") or "System",
+        "AgentId": owner,
+        "CreatedAt": datetime.now(timezone.utc).isoformat(),
+    }
+    logger.info("Emitting END to Kinesis: %s", json.dumps(end_event, default=str))
+    kinesis_client.put_record(
+        StreamName=CALL_DATA_STREAM_NAME,
+        PartitionKey=call_id,
+        Data=json.dumps(end_event).encode("utf-8"),
+    )
+
+
+def _fail_meeting(job: dict, err: Exception) -> None:
+    """End the meeting whose transcription job could not be started.
+
+    As the finalizer does for a job that fails after it has started: the UploadJob
+    row becomes ``FAILED`` with the reason, and an END event moves the meeting out
+    of "In Progress". The handler skips a ``FAILED`` row, so a redelivered
+    notification does not start the job afterwards; the END is sent first, so a
+    row is ``FAILED`` only once its meeting has been ended.
+    """
+    _emit_end_event(job)
+    _mark_job(job["CallId"], "FAILED", extra={"ErrorMessage": str(err)[:1024]})
+
+
 # ---------------------------------------------------------------------------
 # Handler
 # ---------------------------------------------------------------------------
@@ -300,6 +405,8 @@ def lambda_handler(event, context):  # noqa: ARG001
             logger.warning("Could not parse callId from key %r — skipping", key)
             continue
 
+        attempt = 1
+        start_sent_at: str | None = None
         try:
             job = _load_upload_job(call_id)
             if not job:
@@ -322,28 +429,24 @@ def lambda_handler(event, context):  # noqa: ARG001
                 )
                 continue
 
+            attempt = int(job.get("StartAttempts") or 0) + 1
             _mark_job(
                 call_id,
                 "UPLOADED",
                 extra={
                     "UploadedObjectSize": int(size) if size else None,
                     "UploadedAt": datetime.now(timezone.utc).isoformat(),
+                    "StartAttempts": attempt,
                 },
             )
 
-            _emit_start_event(job)
-            job_name = _start_transcription_job(job)
-
-            _mark_job(
-                call_id,
-                "TRANSCRIBING",
-                extra={"TranscriptionJobName": job_name},
-            )
-            logger.info(
-                "callId=%s: START emitted, Transcribe job %s started, status=TRANSCRIBING",
-                call_id,
-                job_name,
-            )
+            # A retry after the START was sent does not send it again: the meeting
+            # is already in the list, and a second START records its start again.
+            start_sent_at = job.get("StartEventSentAt")
+            if not start_sent_at:
+                _emit_start_event(job)
+                start_sent_at = datetime.now(timezone.utc).isoformat()
+                _record_start_sent(call_id, start_sent_at)
         except Exception as err:  # noqa: BLE001
             logger.exception(
                 "Processing failed for callId=%s key=%s: %s",
@@ -357,6 +460,57 @@ def lambda_handler(event, context):  # noqa: ARG001
                 extra={"ErrorMessage": str(err)[:1024]},
             )
             errors.append((call_id, err))
+            continue
+
+        try:
+            job_name = _start_transcription_job(job)
+        except Exception as err:  # noqa: BLE001
+            if _is_retryable(err) and attempt < MAX_START_ATTEMPTS:
+                logger.warning(
+                    "callId=%s: transcription job not started on attempt %d of %d, "
+                    "to be retried: %s",
+                    call_id,
+                    attempt,
+                    MAX_START_ATTEMPTS,
+                    err,
+                )
+                _mark_job(
+                    call_id,
+                    "ERROR",
+                    extra={"ErrorMessage": str(err)[:1024], "StartEventSentAt": start_sent_at},
+                )
+                errors.append((call_id, err))
+                continue
+            logger.exception(
+                "callId=%s: transcription job could not be started on attempt %d; "
+                "ending the meeting as failed",
+                call_id,
+                attempt,
+            )
+            try:
+                _fail_meeting(job, err)
+            except Exception as end_err:  # noqa: BLE001
+                # Left for the retry, which reaches this point again without a
+                # second START.
+                logger.exception("callId=%s: could not end the meeting: %s", call_id, end_err)
+                _mark_job(
+                    call_id,
+                    "ERROR",
+                    extra={"ErrorMessage": str(err)[:1024], "StartEventSentAt": start_sent_at},
+                )
+                errors.append((call_id, end_err))
+            continue
+
+        _mark_job(
+            call_id,
+            "TRANSCRIBING",
+            extra={"TranscriptionJobName": job_name},
+        )
+        logger.info(
+            "callId=%s: START emitted, Transcribe job %s started, status=TRANSCRIBING",
+            call_id,
+            job_name,
+        )
 
     if errors:
         raise RuntimeError(

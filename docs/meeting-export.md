@@ -42,6 +42,9 @@ meeting that does not exist.
 ### `include`
 
 `include` is a list of the parts to add. By default, every part is included.
+An empty list (`include: []`) is the same as leaving `include` out: it returns
+every part, not only the parts that are always included. To leave a part out,
+name the parts you want.
 
 | Part | What it adds |
 |---|---|

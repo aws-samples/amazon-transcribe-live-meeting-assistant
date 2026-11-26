@@ -8,7 +8,9 @@ summary, one transcript segment, and one key frame with its picture in the
 recordings bucket -- asks for its archive through AppSync
 (``prepareMeetingArchive``), reads ``getMeetingArchive`` until it is READY,
 downloads the archive through the signed link it returns, and checks its files
-and README.md. Everything it wrote, and the archive, is deleted afterwards.
+and README.md. It builds an EVERYTHING archive and, for another synthetic
+meeting, a KEY_FRAMES archive, which holds the key frame and README.md only.
+Everything it wrote, and the archives, are deleted afterwards.
 
 Opt-in: ``LMA_TEST_MEETING_ARCHIVE=1``. Needs an assumed role (CI's, or a
 developer's SSO role), which AppSync treats as the backend: an IAM user is
@@ -146,10 +148,9 @@ def meeting(stack):
                 s3.delete_object(Bucket=stack.recordings_bucket, Key=key)
 
 
-def test_everything_archive_holds_the_meeting_files_and_lists_them(client, meeting):
-    started = client.appsync.graphql(
-        PREPARE, {"CallId": meeting, "Contents": "EVERYTHING"}
-    )
+def _build(client, meeting: str, contents: str) -> tuple[dict, zipfile.ZipFile]:
+    """Prepare the meeting's archive of ``contents``, wait for it, and download it."""
+    started = client.appsync.graphql(PREPARE, {"CallId": meeting, "Contents": contents})
     archive = started["prepareMeetingArchive"]
     assert archive["Status"] == "PREPARING"
 
@@ -170,6 +171,19 @@ def test_everything_archive_holds_the_meeting_files_and_lists_them(client, meeti
     assert len(body) == status["Size"]
     files = zipfile.ZipFile(io.BytesIO(body))
     assert files.testzip() is None
+    return status, files
+
+
+def test_key_frames_archive_holds_only_the_key_frames_and_readme(client, meeting):
+    status, files = _build(client, meeting, "KEY_FRAMES")
+    assert status["FileName"].endswith("-key-frames.zip"), status["FileName"]
+    assert sorted(files.namelist()) == sorted(["README.md", f"keyframes/{FRAME_ID}.jpg"])
+    assert files.read(f"keyframes/{FRAME_ID}.jpg") == FRAME_BYTES
+    assert f"`keyframes/{FRAME_ID}.jpg`" in files.read("README.md").decode()
+
+
+def test_everything_archive_holds_the_meeting_files_and_lists_them(client, meeting):
+    _status, files = _build(client, meeting, "EVERYTHING")
     names = set(files.namelist())
     for name in (
         "README.md",

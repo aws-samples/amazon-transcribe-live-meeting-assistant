@@ -35,8 +35,10 @@ it).
     ``prepareMeetingArchive(Contents: EXPORT)`` as the signed-in user, read back
     through ``getMeetingArchive`` and downloaded through its link.
 ``test_a_large_export_is_answered_with_a_link_for_ten_minutes``
-    A second meeting with more than 6 MB of transcript: the tool answers with a
-    link, signed for at most ten minutes, to an export that validates.
+    *(opt-in, ``LMA_TEST_LARGE_EXPORT=1``)* A second meeting with more than 6 MB
+    of transcript: the tool answers with a link, signed for at most ten minutes,
+    to an export that validates. It writes 3,200 segments, so it is left out of a
+    default run.
 ``test_an_export_after_the_transcript_was_deleted_leaves_it_out``
     Runs the transcript deletion function on the first meeting, as a scheduled
     deletion does, and exports again.
@@ -524,6 +526,10 @@ def test_the_export_download_is_one_json_file(env, discovery_meeting) -> None:
     assert "X-Amz-Expires=600" in status["DownloadUrl"]
 
 
+@pytest.mark.skipif(
+    os.environ.get("LMA_TEST_LARGE_EXPORT") != "1",
+    reason="writes a transcript of more than 6 MB; set LMA_TEST_LARGE_EXPORT=1 to run",
+)
 def test_a_large_export_is_answered_with_a_link_for_ten_minutes(env) -> None:
     meeting = env.meeting("large")
     meeting.start()

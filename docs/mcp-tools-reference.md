@@ -391,13 +391,20 @@ takes the whole new list of `panels`. A panel the tool writes or changes is reco
 as the caller's (`source: user`), so the assistant does not change it afterwards; send
 a panel with `source: "assistant"` to hand it to the assistant. Read-write key only.
 
+Because `panels` is the whole new list, a panel left out of an update is removed.
+The example below changes the Decisions panel of a Decisions and open questions
+whiteboard and keeps its other two panels: they are sent with their `panelId` and
+`title` and without `content`, which keeps what they hold and who they belong to.
+
 ```json
 {"meetingId": "e3b9…", "whiteboardId": "4c1f…", "baseVersion": 7,
- "panels": [{"panelId": "decisions", "title": "Decisions", "content": "- Launch on March 4"}]}
+ "panels": [{"panelId": "decisions", "title": "Decisions", "content": "- Launch on March 4"},
+            {"panelId": "open-questions", "title": "Open questions"},
+            {"panelId": "notes", "title": "Notes"}]}
 ```
 
 ```json
-{"meetingId": "e3b9…", "whiteboardId": "4c1f…", "title": "Plan", "version": 8, "panels": [{"panelId": "decisions", "title": "Decisions", "kind": "markdown", "content": "- Launch on March 4", "source": "user", "updatedBy": "user@example.com", "updatedAt": "…"}], "…": "…"}
+{"meetingId": "e3b9…", "whiteboardId": "4c1f…", "title": "Plan", "version": 8, "panels": [{"panelId": "decisions", "title": "Decisions", "kind": "markdown", "content": "- Launch on March 4", "source": "user", "updatedBy": "user@example.com", "updatedAt": "…"}, {"panelId": "open-questions", "…": "…"}, {"panelId": "notes", "…": "…"}], "…": "…"}
 ```
 
 ### list_summary_profiles

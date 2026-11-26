@@ -1007,6 +1007,27 @@ def test_the_recorded_duration_is_whole_seconds_truncated_from_milliseconds() ->
     assert json.loads(summary)["MEETING DURATION (SECONDS)"] == 1
 
 
+def test_a_one_section_summary_is_stored_under_summary_with_the_meeting_fields() -> None:
+    """A summary of one section is its text, not a JSON object, so the
+    knowledge-base document holds it under SUMMARY beside the meeting fields."""
+    stored = json.loads(index.format_summary("We ship on Friday.", METADATA))
+    assert stored == {
+        "SUMMARY": "We ship on Friday.",
+        "MEETING NAME": CALL_ID,
+        "MEETING DATE AND TIME": "2025-01-02T03:04:05.000Z",
+        "MEETING DURATION (SECONDS)": 125,
+    }
+
+
+def test_a_meeting_without_a_recorded_duration_is_stored_with_zero_seconds() -> None:
+    """A meeting row the call event processor did not aggregate has no
+    TotalConversationDurationMillis; its summary is still written."""
+    metadata = {k: v for k, v in METADATA.items() if k != "TotalConversationDurationMillis"}
+    stored = json.loads(index.format_summary('{"Summary": "one"}', metadata))
+    assert stored["Summary"] == "one"
+    assert stored["MEETING DURATION (SECONDS)"] == 0
+
+
 def test_only_the_indexed_attributes_are_written_to_the_metadata_sidecar() -> None:
     """Unlisted fields are dropped: the knowledge base rejects unknown attributes."""
     metadata = json.loads(index.getKBMetadata(METADATA))

@@ -996,6 +996,13 @@ def test_include_chooses_the_parts(fakes) -> None:
         export.parse_include(["recordings"])
 
 
+@pytest.mark.parametrize("value", [None, "", []])
+def test_an_empty_or_absent_include_gives_every_part(value) -> None:
+    """docs/meeting-export.md says so: ``include: []`` is not "only the parts
+    that are always included"."""
+    assert export.parse_include(value) == list(export.DEFAULT_INCLUDE)
+
+
 def test_section_labels_read_as_headings() -> None:
     assert export.section_label("ACTION ITEMS") == "Action items"
     assert export.section_label("Summary") == "Summary"
