@@ -211,6 +211,7 @@ def _profile_out(item: Mapping[str, Any]) -> Dict[str, Any]:
         ],
         "Subject": (item.get("Subject") or {}).get("S") or "",
         "UpdatedAt": (item.get("UpdatedAt") or {}).get("S") or "",
+        "Version": int((item.get("Version") or {}).get("N") or 0),
     }
 
 
@@ -257,7 +258,8 @@ def save_profile(
     ``subject`` is the Cognito sub of the account that holds ``email``. Names
     kept for another account with that address are replaced. With no name
     left, the names and their search entries are removed. One transaction,
-    conditional on the names being as read, retried a few times.
+    conditional on the names being as read (their ``Version``, which every
+    write increases), retried a few times.
     """
     display, shorts = clean_names(display_name, short_names)
     address = email.strip().casefold()
@@ -265,11 +267,13 @@ def save_profile(
     for _attempt in range(WRITE_ATTEMPTS):
         before = client.get_item(TableName=table, Key=key, ConsistentRead=True).get("Item")
         old = _profile_out(before) if before else None
-        if before:
+        if before and "Version" in before:
             condition = {
-                "ConditionExpression": "UpdatedAt = :prev",
-                "ExpressionAttributeValues": {":prev": {"S": old["UpdatedAt"]}},
+                "ConditionExpression": "Version = :prev",
+                "ExpressionAttributeValues": {":prev": {"N": str(old["Version"])}},
             }
+        elif before:
+            condition = {"ConditionExpression": "attribute_not_exists(Version)"}
         else:
             condition = {"ConditionExpression": "attribute_not_exists(PK)"}
         new_entries = index_entries(address, display, shorts)
@@ -289,6 +293,7 @@ def save_profile(
                 "ShortNames": {"L": [{"S": s} for s in shorts]},
                 "UpdatedAt": {"S": now},
                 "UpdatedBy": {"S": updated_by[:256]},
+                "Version": {"N": str((old or {}).get("Version", 0) + 1)},
             }
             items.append({"Put": {"TableName": table, "Item": profile, **condition}})
         elif before:
@@ -319,9 +324,15 @@ def delete_profile(client: Any, table: str, email: str) -> None:
     if not before:
         return
     old = _profile_out(before)
-    for entry in index_entries(address, old["DisplayName"], old["ShortNames"]):
-        client.delete_item(TableName=table, Key={"PK": entry["PK"], "SK": entry["SK"]})
-    client.delete_item(TableName=table, Key=profile_key(address))
+    # One transaction, so the names never go without their search entries.
+    keys = [
+        {"PK": e["PK"], "SK": e["SK"]}
+        for e in index_entries(address, old["DisplayName"], old["ShortNames"])
+    ]
+    keys.append(profile_key(address))
+    client.transact_write_items(
+        TransactItems=[{"Delete": {"TableName": table, "Key": k}} for k in keys]
+    )
 
 
 def search_index(client: Any, table: str, text: str, limit: int) -> List[Dict[str, str]]:

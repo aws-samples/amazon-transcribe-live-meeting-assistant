@@ -807,7 +807,7 @@ type Query @aws_iam {
 	# name, short name or email address starts with text (at least 3
 	# characters, ignoring case and spacing), each with its display name and
 	# address only. A User searches at most 200 times a day. See
-	# docs/virtual-participant.md#participant-list.
+	# docs/virtual-participant.md#adding-a-person-who-has-an-lma-account.
 	searchAccounts(text: String!): [AccountMatch] @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	getMyZoomCredentialsStatus: ZoomCredentialsStatus @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	getMyChromeProfileStatus(platform: String): ChromeProfileStatus @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])

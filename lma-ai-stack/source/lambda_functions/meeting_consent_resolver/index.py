@@ -60,6 +60,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -780,6 +781,8 @@ MAX_CACHED_ACCOUNTS = 5000
 #: Characters a user pool filter value cannot hold unescaped.
 FILTER_SPECIAL = ('"', "\\")
 _ACCOUNTS: Dict[str, tuple] = {}
+#: The lookups run on several threads; the cache is read and written under this.
+_ACCOUNTS_LOCK = threading.Lock()
 
 
 def memoized(function: Callable[[List[str]], Any]) -> Callable[[List[str]], Any]:
@@ -806,9 +809,11 @@ def account_of(email: str) -> Optional[Dict[str, str]]:
     Its Cognito ``sub`` and standard ``name``. Accounts made in LMA have the
     address as their username; another is found by its email attribute. The
     answer is reused for ACCOUNT_CACHE_SECONDS, so a meeting whose attendees
-    are listed again and again asks the user pool once in that time.
+    are listed again and again asks the user pool once in that time; an
+    account deleted or disabled meanwhile is seen as such once it expires.
     """
-    cached = _ACCOUNTS.get(email)
+    with _ACCOUNTS_LOCK:
+        cached = _ACCOUNTS.get(email)
     if cached and cached[0] > time.monotonic():
         return cached[1]
     user: Optional[Mapping[str, Any]] = None
@@ -826,13 +831,14 @@ def account_of(email: str) -> Optional[Dict[str, str]]:
         verified = str(attributes.get("email_verified")).lower() == "true"
         if verified and (attributes.get("email") or "").strip().casefold() == email:
             answer = {"sub": attributes.get("sub") or "", "name": attributes.get("name") or ""}
-    if len(_ACCOUNTS) >= MAX_CACHED_ACCOUNTS:
-        moment = time.monotonic()
-        for key in [k for k, (expires, _) in _ACCOUNTS.items() if expires <= moment]:
-            del _ACCOUNTS[key]
+    with _ACCOUNTS_LOCK:
         if len(_ACCOUNTS) >= MAX_CACHED_ACCOUNTS:
-            _ACCOUNTS.clear()
-    _ACCOUNTS[email] = (time.monotonic() + ACCOUNT_CACHE_SECONDS, answer)
+            moment = time.monotonic()
+            for key in [k for k, (expires, _) in list(_ACCOUNTS.items()) if expires <= moment]:
+                _ACCOUNTS.pop(key, None)
+            if len(_ACCOUNTS) >= MAX_CACHED_ACCOUNTS:
+                _ACCOUNTS.clear()
+        _ACCOUNTS[email] = (time.monotonic() + ACCOUNT_CACHE_SECONDS, answer)
     return answer
 
 

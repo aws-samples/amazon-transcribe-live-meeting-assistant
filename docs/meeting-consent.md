@@ -1562,7 +1562,10 @@ person's name, from any source, matches nobody.
 read while the Virtual Participant lists who is present, that listing counts
 no consent given in advance at all (matching on the list's names alone could
 match a name another listed person's account also goes by); the attendees are
-asked in the meeting as usual, and the next listing tries again.
+asked in the meeting as usual, and the next listing tries again. The meeting
+consent resolver keeps the user pool's answer for an address for up to five
+minutes, so an account deleted or disabled in that time can still count by its
+names until then; its consents stop counting when it is deleted.
 
 ## What is stored
 
