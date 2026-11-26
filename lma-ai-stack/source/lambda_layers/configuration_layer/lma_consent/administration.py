@@ -85,7 +85,12 @@ def partition(email: str) -> str:
 
 
 def consents_of(client: Any, table: str, email: str) -> List[Dict[str, Any]]:
-    """Every consent kept under one address, newest first, a page at a time."""
+    """Every consent kept under one address, newest first, at most MAX_ERASED of them."""
+    return _consents_read(client, table, email)[0]
+
+
+def _consents_read(client: Any, table: str, email: str) -> tuple:
+    """The first MAX_ERASED consents under one address, and whether any were left unread."""
     arguments: Dict[str, Any] = {
         "TableName": table,
         "KeyConditionExpression": "PK = :pk AND begins_with(SK, :ac)",
@@ -97,8 +102,15 @@ def consents_of(client: Any, table: str, email: str) -> List[Dict[str, Any]]:
     while True:
         response = client.query(**arguments)
         out += [item_of(item) for item in response.get("Items") or []]
-        if not response.get("LastEvaluatedKey") or len(out) >= MAX_ERASED:
-            return out[:MAX_ERASED]
+        if len(out) > MAX_ERASED:
+            return out[:MAX_ERASED], True
+        if not response.get("LastEvaluatedKey"):
+            return out, False
+        if len(out) == MAX_ERASED:
+            # A last page can be empty, so whether one is left takes one more read.
+            arguments["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+            arguments["Limit"] = 1
+            return out, bool(client.query(**arguments).get("Items"))
         arguments["ExclusiveStartKey"] = response["LastEvaluatedKey"]
 
 
@@ -201,15 +213,23 @@ def erase(  # pylint: disable=too-many-arguments,too-many-locals
     ``subject``, every one the account with that Cognito sub gave. A consent in
     force is withdrawn first (reason ``erased``) and ``pass_on(consent)`` is
     called with it, to stop capture in the meetings that counted it. Answers
-    ``Deleted``, ``Withdrawn``, the ``ConsentIds`` removed and the ``AuditId``.
+    ``Deleted``, ``Withdrawn``, the ``ConsentIds`` removed, the ``AuditId`` and
+    ``MoreRemain``.
+
+    Named consents are read by their keys. Otherwise one erasure reads at most
+    MAX_ERASED consents under the address; when more are kept there,
+    ``MoreRemain`` is true and the audit entry's status is ``partial``, with
+    the count of those removed: erasing again removes the next ones.
     """
-    wanted = {str(i) for i in consent_ids} if consent_ids is not None else None
-    targets = [
-        c
-        for c in consents_of(client, table, email)
-        if (wanted is None or str(c.get("ConsentId")) in wanted)
-        and (not subject or c.get("Subject") == subject)
-    ]
+    if consent_ids is not None:
+        keys = [
+            {"PK": {"S": partition(email)}, "SK": {"S": f"ac#{i}"}}
+            for i in dict.fromkeys(str(i) for i in consent_ids)
+        ]
+        read, more_remain = list(read_items(client, table, keys).values()), False
+    else:
+        read, more_remain = _consents_read(client, table, email)
+    targets = [c for c in read if not subject or c.get("Subject") == subject]
     withdrawn = 0
     for consent in targets:
         if in_force(consent, now):
@@ -249,13 +269,16 @@ def erase(  # pylint: disable=too-many-arguments,too-many-locals
         client.delete_item(
             TableName=table, Key={"PK": {"S": consent["PK"]}, "SK": {"S": consent["SK"]}}
         )
-    audit["Status"] = "complete"
+    audit["Status"] = "partial" if more_remain else "complete"
+    if more_remain:
+        audit["MoreRemain"] = True
     client.put_item(TableName=table, Item={k: _SER.serialize(v) for k, v in audit.items()})
     return {
         "Deleted": len(removed),
         "Withdrawn": withdrawn,
         "ConsentIds": removed,
         "AuditId": audit_id,
+        "MoreRemain": more_remain,
     }
 
 

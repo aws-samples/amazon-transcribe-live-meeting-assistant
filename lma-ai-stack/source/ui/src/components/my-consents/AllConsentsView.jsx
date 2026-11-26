@@ -120,6 +120,26 @@ const download = (text, name) => {
   URL.revokeObjectURL(url);
 };
 
+/**
+ * What an erasure's answer reads as. One erasure removes a bounded number of a
+ * person's records; when more remain (MoreRemain), the result says so and
+ * offers to delete the next ones.
+ */
+export const erasureResult = (answer, deleting) => {
+  const { Email } = deleting.consent;
+  const text =
+    `Deleted ${answer.Deleted} consent record${answer.Deleted === 1 ? '' : 's'} of ${Email}` +
+    `${answer.Withdrawn ? `, ${answer.Withdrawn} of them withdrawn first` : ''}. Audit entry ${answer.AuditId}.`;
+  if (!answer.MoreRemain) return { type: 'success', text };
+  return {
+    type: 'warning',
+    text:
+      `${text} More consent records remain under ${Email}; the audit entry records this erasure as partial. ` +
+      'Choose Delete the next ones to continue.',
+    more: deleting,
+  };
+};
+
 const personCell = (c) => (
   <SpaceBetween size="xxxs">
     <Box>{c.Email}</Box>
@@ -193,7 +213,7 @@ const AllConsentsView = () => {
   const [nextToken, setNextToken] = useState(null);
   const [pageIndex, setPageIndex] = useState(1);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
   const [selected, setSelected] = useState([]);
   const [details, setDetails] = useState(null);
@@ -223,10 +243,12 @@ const AllConsentsView = () => {
     return answer;
   }, []);
 
+  // A failed read is shown with a way to try it again: the server answers
+  // "try again" when some consents or names could not be read this time.
   const search = useCallback(
     async (variables) => {
       setLoading(true);
-      setError('');
+      setError(null);
       setSelected([]);
       try {
         const page = await fetchPage(variables, null);
@@ -236,7 +258,7 @@ const AllConsentsView = () => {
         setPageIndex(1);
       } catch (e) {
         logger.error('could not list the consents', e);
-        setError(errorText(e, 'The consents could not be listed.'));
+        setError({ text: errorText(e, 'The consents could not be listed.'), retry: () => search(variables) });
       } finally {
         setLoading(false);
       }
@@ -257,6 +279,7 @@ const AllConsentsView = () => {
     }
     if (!nextToken) return;
     setLoading(true);
+    setError(null);
     try {
       const page = await fetchPage(applied, nextToken);
       setPages((current) => [...current, page.Consents || []]);
@@ -264,7 +287,7 @@ const AllConsentsView = () => {
       setPageIndex(pages.length + 1);
     } catch (e) {
       logger.error('could not read the next page', e);
-      setError(errorText(e, 'The next page could not be read.'));
+      setError({ text: errorText(e, 'The next page could not be read.'), retry: nextPage });
     } finally {
       setLoading(false);
     }
@@ -272,7 +295,7 @@ const AllConsentsView = () => {
 
   const exportCsv = async () => {
     setExporting(true);
-    setError('');
+    setError(null);
     try {
       const all = [];
       let token = null;
@@ -297,7 +320,7 @@ const AllConsentsView = () => {
       });
     } catch (e) {
       logger.error('could not export the consents', e);
-      setError(errorText(e, 'The consents could not be exported.'));
+      setError({ text: errorText(e, 'The consents could not be exported.'), retry: exportCsv });
     } finally {
       setExporting(false);
     }
@@ -340,12 +363,7 @@ const AllConsentsView = () => {
         : { Email: deleting.consent.Email, ConsentIds: [deleting.consent.ConsentId] };
       const response = await client.graphql({ query: deleteAdvanceConsentRecords, variables: { input } });
       const answer = response?.data?.deleteAdvanceConsentRecords || {};
-      setResult({
-        type: 'success',
-        text:
-          `Deleted ${answer.Deleted} consent record${answer.Deleted === 1 ? '' : 's'} of ${deleting.consent.Email}` +
-          `${answer.Withdrawn ? `, ${answer.Withdrawn} of them withdrawn first` : ''}. Audit entry ${answer.AuditId}.`,
-      });
+      setResult(erasureResult(answer, deleting));
       setDeleting(null);
       await search(applied);
     } catch (e) {
@@ -397,11 +415,41 @@ const AllConsentsView = () => {
   return (
     <SpaceBetween size="l">
       {result && (
-        <Alert type={result.type} dismissible onDismiss={() => setResult(null)}>
+        <Alert
+          type={result.type}
+          dismissible
+          onDismiss={() => setResult(null)}
+          action={
+            result.more && (
+              <Button
+                onClick={() => {
+                  setUnderstood(false);
+                  setActionError('');
+                  setDeleting(result.more);
+                }}
+              >
+                Delete the next ones
+              </Button>
+            )
+          }
+        >
           {result.text}
         </Alert>
       )}
-      {error && <Alert type="error">{error}</Alert>}
+      {error && (
+        <Alert
+          type="error"
+          action={
+            error.retry && (
+              <Button onClick={error.retry} loading={loading || exporting}>
+                Try again
+              </Button>
+            )
+          }
+        >
+          {error.text}
+        </Alert>
+      )}
       <Table
         header={
           <Header

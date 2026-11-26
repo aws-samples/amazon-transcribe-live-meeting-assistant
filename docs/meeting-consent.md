@@ -1289,9 +1289,40 @@ owner, the users it is shared with and Admins. The page says so before they ask.
   the Virtual Participant, which the people who can see it can read (its owner,
   the users it is shared with and Admins), and shown in the **Participants**
   section of its page, as *Asked to be added*, to its owner and Admins, until
-  the person is on the list. The newest 20 are kept.
+  the person is on the list. The newest 20 are kept. When the Virtual
+  Participant creates its meeting, each one still waiting reaches the meeting
+  too, as below.
 
-The owner adds them to the list as usual. A person is asked for once per meeting
+The owner adds them to the list as usual.
+
+#### Asking to be added before the meeting exists
+
+A request kept on a Virtual Participant is published to its meeting when the
+Virtual Participant creates it. The call event processor creates the meeting
+from the Virtual Participant's START event; right after it does, it reads the
+Virtual Participant's requests and publishes each one from a person not on the
+participant list the meeting was created with, as the same
+`participant_list_request` notification a request made on the meeting is, with
+the same key for the same address. So the meeting's notifications show it,
+and a later request from that person, or the same request published again,
+updates that one notification rather than adding a second. This happens only
+for the Virtual Participant whose row names this meeting and whose owner owns
+it, and only on the START that created the meeting, not a redelivered one or a
+rejoined session's. The requests also stay on the Virtual Participant's page.
+
+A Virtual Participant puts the meeting's CallId on its row when it starts,
+before its meeting exists, so a request made between that moment and the
+meeting's creation is still kept on the row. A request kept while the meeting
+is being created could be missed by that read, so once a request is kept, the
+meeting is looked for again, and if it now exists the request is published to
+it as well. A publish that fails at either point is logged and the request
+stays on the Virtual Participant's page; it does not fail the meeting's
+creation or the request.
+
+This is the chosen design rather than having the meeting page read the Virtual
+Participant's requests: a notification reaches everyone who can see the
+meeting, in the notifications drawer as well as on the page, and needs nothing
+new on the page. A person is asked for once per meeting
 in 30 days, however often they choose the button, and one person may ask at
 most 20 times a day.
 
@@ -1606,6 +1637,11 @@ list, so with a narrow filter the view reads on until it has matches; a page
 that still says *No matches among the consents read so far* has more to
 search with the next page.
 
+When a page cannot be read completely (some consents, or the names their
+accounts go by, could not be read at that moment), the view shows the
+server's message with **Try again**, which reads it again; the export and the
+next page are retried the same way.
+
 **Withdrawing on a person's behalf.** **Withdraw** (one consent in force
 selected) has the same effect as the person's own withdrawal: from then on it
 does not count, and each meeting in progress that counted it records an
@@ -1627,7 +1663,16 @@ before anything is removed, with who deleted them, when, the address, the
 consent ids, how many there were and how many were withdrawn first, and nothing
 of their content: not the text, the scope or the dates. Its `Status` is
 `pending` until every item is removed, then `complete`, so an erasure that
-stops part way is still on record. Audit entries are not removed by the table's time to
+stops part way is still on record.
+
+One deletion removes at most 1,000 consent records. **Delete all for this
+person** for an address with more removes the newest 1,000; its audit entry's
+`Status` is `partial` (with `MoreRemain` set and the `Count` it removed), and
+the view says that more records remain and offers **Delete the next ones**,
+which deletes the next 1,000 with an audit entry of its own. Repeat until the
+result no longer says so. Deleting a user with the records ticked runs up to
+five such deletions; if records still remain, it reports how many were
+deleted and that the rest are to be deleted on the **All consents** view. Audit entries are not removed by the table's time to
 live. Deleting a user in User Management with **Also permanently delete their
 consent records** ticked does the same for the consents that account gave,
 after the account is deleted, with the audit entry's reason `account_deleted`.

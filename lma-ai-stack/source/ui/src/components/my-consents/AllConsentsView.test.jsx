@@ -190,3 +190,57 @@ describe('the export and the filters', () => {
     });
   });
 });
+
+describe('a read or an erasure that does not finish', () => {
+  it('shows a failed listing with a way to try again, which reads again', async () => {
+    groups.value = ['Admin'];
+    let reads = 0;
+    answer({
+      ...HANDLERS,
+      listAllAdvanceConsents: () => {
+        reads += 1;
+        if (reads === 1) throw new Error('The names of the people on this page could not be read; try again');
+        return { Consents: [consent()], NextToken: null };
+      },
+    });
+    renderAt('/consents?view=all');
+    expect(await screen.findByText(/could not be read; try again/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByText('Ana Silva')).toBeTruthy();
+    expect(screen.queryByText(/could not be read; try again/)).toBeNull();
+  });
+
+  it('says when more records remain after an erasure, and deletes the next ones on request', async () => {
+    groups.value = ['Admin'];
+    let erasures = 0;
+    answer({
+      ...HANDLERS,
+      deleteAdvanceConsentRecords: () => {
+        erasures += 1;
+        return erasures === 1
+          ? { Deleted: 1000, Withdrawn: 0, ConsentIds: [], AuditId: 'audit-1', MoreRemain: true }
+          : { Deleted: 5, Withdrawn: 0, ConsentIds: [], AuditId: 'audit-2', MoreRemain: false };
+      },
+    });
+    renderAt('/consents?view=all');
+    await selectFirst();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete all for this person' }));
+    let dialog = await screen.findByRole('dialog', { name: 'Permanently delete consent records' });
+    fireEvent.click(within(dialog).getByText('I understand this cannot be undone.'));
+    fireEvent.click(within(dialog).getByText('Delete permanently', { selector: 'button *' }));
+    expect(await screen.findByText(/More consent records remain under ana@example.com/)).toBeTruthy();
+    expect(screen.getByText(/records this erasure as partial/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete the next ones' }));
+    dialog = await screen.findByRole('dialog', { name: 'Permanently delete consent records' });
+    expect(within(dialog).getByText('Every consent record kept under ana@example.com will be deleted.')).toBeTruthy();
+    fireEvent.click(within(dialog).getByText('I understand this cannot be undone.'));
+    fireEvent.click(within(dialog).getByText('Delete permanently', { selector: 'button *' }));
+    expect(
+      await screen.findByText(/Deleted 5 consent records of ana@example.com\. Audit entry audit-2\./),
+    ).toBeTruthy();
+    expect(calls('deleteAdvanceConsentRecords').map((c) => c.variables.input)).toEqual([
+      { Email: 'ana@example.com', AllForPerson: true },
+      { Email: 'ana@example.com', AllForPerson: true },
+    ]);
+  });
+});

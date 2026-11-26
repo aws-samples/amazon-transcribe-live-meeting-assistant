@@ -27,6 +27,12 @@ participant list sends, and given a label. Then:
     The unlisted Participant is told only that they are not listed, cannot
     give consent, and asks to be added: the owner gets an in-app notification
     on the meeting, and nothing is stored about the Participant's consent.
+``test_a_request_made_before_a_virtual_participants_meeting_exists_reaches_the_meeting``
+    A never-launched Virtual Participant of the owner's, linked to a CallId
+    whose meeting does not exist yet (as a starting Virtual Participant is): the
+    unlisted Participant's request is kept on its row, and the START that then
+    creates the meeting publishes it as the meeting's notification, which a
+    second request on the meeting updates rather than repeats.
 ``test_a_meeting_counts_a_consent_given_in_advance_and_a_withdrawal_as_an_objection``
     What a Virtual Participant does, without one: the runner's assumed role
     starts the meeting's consent (opt-in) and lists the attendee by a display
@@ -46,8 +52,9 @@ participant list sends, and given a label. Then:
 What the Virtual Participant posts in the chat, and its matching of a live
 roster, need a live meeting and are not part of this run.
 
-Teardown deletes the users, the consents and the request by their keys, and
-the meeting's record, list row and notifications. Needs pycognito and
+Teardown deletes the users, the consents and the requests by their keys, the
+meetings' records, list rows and notifications, and the Virtual Participant's
+row. Needs pycognito and
 graphql-core (requirements.txt).
 """
 
@@ -237,6 +244,11 @@ def _delete_everything(ddb, table: str, call_id: str, created_at: str, users) ->
             TableName=table,
             Key={"PK": {"S": f"usr#{user.username}"}, "SK": {"S": f"ask-to-be-added#{day}"}},
         )
+    _delete_meeting(ddb, table, call_id, created_at)
+
+
+def _delete_meeting(ddb, table: str, call_id: str, created_at: str) -> None:
+    """A meeting's record, its requests to be added, its notifications and its list row."""
     for pk in (f"c#{call_id}", f"pmr#c#{call_id}", f"nt#{call_id}"):
         _delete_partition(ddb, table, pk)
     shard = f"{int(created_at[11:13]) // 4:02d}"
@@ -432,6 +444,143 @@ def test_a_participant_not_on_the_list_learns_nothing_and_can_ask_to_be_added(
     )
     assert again["Requested"] is True
     assert _stored(deployment, unlisted.username) == []
+
+
+CREATE_VP = """
+mutation CreateVirtualParticipant($input: CreateVirtualParticipantInput!) {
+  createVirtualParticipant(input: $input) { id }
+}
+"""
+END_VP = """
+mutation EndVirtualParticipant($input: EndVirtualParticipantInput!) {
+  endVirtualParticipant(input: $input) { id status }
+}
+"""
+
+
+def test_a_request_made_before_a_virtual_participants_meeting_exists_reaches_the_meeting(
+    deployment, users, meeting, stamp
+) -> None:
+    """A never-launched Virtual Participant linked to a CallId whose meeting does
+    not exist yet, as one is from its start until its START is processed: a request
+    from the unlisted Participant is kept on its row; the START that creates the
+    meeting publishes it as the meeting's notification, and asking again on the
+    meeting updates that notification rather than adding a second."""
+    owner, unlisted = users["owner"], users["unlisted"]
+    enabled = _data(
+        probe.call(deployment, unlisted, INVITATION, {"CallId": meeting}),
+        "getAdvanceConsentInvitation",
+    )["Enabled"]
+    if not enabled:
+        pytest.skip("Meeting Consent › Allow consent given in advance is off on this stack")
+    session = deployment.session
+    ddb = session.client("dynamodb")
+    table = deployment.ai_resources["EventSourcingTable"]
+    vp_table = deployment.ai_resources["VirtualParticipantTable"]
+    call_id = f"integ-test-pre-meeting-consent-vp-{stamp}"
+    created_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    listed = [{"name": "Integ Listed", "email": users["listed"].username}]
+    vp = _data(
+        probe.call(
+            deployment,
+            owner,
+            CREATE_VP,
+            {
+                "input": {
+                    "meetingName": "integ-test (request to be added before the meeting, never launched)",
+                    "meetingPlatform": "ZOOM",
+                    "meetingId": "0000000000",
+                    "isScheduled": True,
+                    "status": "SCHEDULED",
+                    "meetingTime": int(time.time()) + 24 * 3600,
+                    "participants": listed,
+                }
+            },
+        ),
+        "createVirtualParticipant",
+    )
+    key = {"id": {"S": vp["id"]}}
+    try:
+        # What the Virtual Participant does when it starts, before it sends START.
+        ddb.update_item(
+            TableName=vp_table,
+            Key=key,
+            UpdateExpression="SET CallId = :c",
+            ExpressionAttributeValues={":c": {"S": call_id}},
+        )
+        asked = _data(
+            probe.call(
+                deployment,
+                unlisted,
+                ASK,
+                {"input": {"VirtualParticipantId": vp["id"], "Name": "Integ Unlisted"}},
+            ),
+            "askToBeAddedToMeeting",
+        )
+        assert asked == {"Requested": True, "Listed": False}
+        row = ddb.get_item(TableName=vp_table, Key=key, ConsistentRead=True)["Item"]
+        kept = [r["M"]["email"]["S"] for r in row["participantListRequests"]["L"]]
+        assert kept == [unlisted.username.casefold()]
+
+        # The START the Virtual Participant sends, which creates the meeting.
+        session.client("kinesis").put_record(
+            StreamName=deployment.outputs["CallDataStreamName"],
+            Data=json.dumps(
+                {
+                    "EventType": "START",
+                    "CallId": call_id,
+                    "CustomerPhoneNumber": "Integ Test Pre-meeting Consent (VP)",
+                    "SystemPhoneNumber": "LMA Integ Test",
+                    "AgentId": owner.username,
+                    "CreatedAt": created_at,
+                    "AccessToken": "",
+                    "IdToken": "",
+                    "RefreshToken": "",
+                    "Participants": listed,
+                    "ParticipantsUpdatedBy": owner.username,
+                    "ParticipantsUpdatedAt": created_at,
+                    "VirtualParticipantId": vp["id"],
+                }
+            ).encode(),
+            PartitionKey=call_id,
+        )
+        found = wait_for(
+            lambda: read_meeting(ddb, table, call_id),
+            timeout=MEETING_RECORD_TIMEOUT_S,
+            interval=3.0,
+        )
+        assert found, f"the START for {call_id} did not create a meeting within {MEETING_RECORD_TIMEOUT_S:.0f}s"
+
+        def requests_on_meeting():
+            items = _data(
+                probe.call(deployment, owner, NOTIFICATIONS, {"CallId": call_id}),
+                "listMeetingNotifications",
+            )["Items"]
+            return [i for i in items or [] if i["Type"] == "participant_list_request"]
+
+        notified = wait_for(requests_on_meeting, timeout=NOTIFICATION_TIMEOUT_S, interval=3.0)
+        assert notified, "the request kept on the Virtual Participant was not published to its meeting"
+        digest = hashlib.sha256(unlisted.username.casefold().encode()).hexdigest()[:16]
+        assert [n["DedupKey"] for n in notified] == [f"participant_list_request:{digest}"]
+        assert "Integ Unlisted" in notified[0]["Body"]
+
+        # Asked again on the meeting: the one notification is updated, not repeated.
+        probe.call(deployment, unlisted, ASK, {"input": {"CallId": call_id}})
+        time.sleep(3)
+        assert len(requests_on_meeting()) == 1
+    finally:
+        # Unlinked first, so ending the never-launched Virtual Participant touches no meeting.
+        ddb.update_item(TableName=vp_table, Key=key, UpdateExpression="REMOVE CallId")
+        ended = probe.call(
+            deployment,
+            owner,
+            END_VP,
+            {"input": {"id": vp["id"], "endReason": "integ-test request to be added: cancelled before launch"}},
+        )
+        ddb.delete_item(TableName=vp_table, Key=key)
+        _delete_meeting(ddb, table, call_id, created_at)
+        _delete_partition(ddb, table, f"pmr#vp#{vp['id']}")
+        assert not ended.get("errors"), ended
 
 
 CONSENT_FIELDS_ON_RECORD = (

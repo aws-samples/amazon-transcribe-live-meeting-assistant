@@ -649,3 +649,62 @@ def test_only_an_admin_may_create_a_user_for_a_meeting(pool, ddb):
             groups=["User"],
         )
     assert pool.calls == [] and ddb.updates == []
+
+
+# ── a throttled lookup ───────────────────────────────────────────────────────
+
+
+def _throttle(pool, monkeypatch, address, times):
+    """Make the user pool throttle the lookups of one address, ``times`` times."""
+    real = pool.admin_get_user
+    left = {"n": times}
+
+    def admin_get_user(**kwargs):
+        if kwargs["Username"].casefold() == address and left["n"]:
+            left["n"] -= 1
+            raise _CognitoError("TooManyRequestsException")
+        return real(**kwargs)
+
+    monkeypatch.setattr(pool, "admin_get_user", admin_get_user)
+    monkeypatch.setattr(index.time, "sleep", lambda _s: None)
+    return left
+
+
+def test_a_throttled_lookup_is_tried_again(pool, ddb, monkeypatch):
+    pool.add("ana@example.com", groups=["Participant"])
+    _throttle(pool, monkeypatch, "ana@example.com", index.LOOKUP_ATTEMPTS - 1)
+    answer = {e["email"]: e["account"] for e in accounts({"CallId": CALL_ID})}
+    assert answer["ana@example.com"] == "Participant"
+
+
+def test_an_address_still_throttled_is_answered_unknown_and_the_rest_are_answered(
+    pool, ddb, monkeypatch
+):
+    pool.add("cy@example.net", groups=["Participant"])
+    _throttle(pool, monkeypatch, "ana@example.com", 99)
+    answer = {e["email"]: e["account"] for e in accounts({"CallId": CALL_ID})}
+    assert answer == {
+        "ana@example.com": "unknown",
+        "Bo@Example.org": "none",
+        "cy@example.net": "Participant",
+        "di@example.com": "none",
+    }
+
+
+def test_an_address_still_throttled_is_not_created_and_says_to_try_again(pool, ddb, monkeypatch):
+    _throttle(pool, monkeypatch, "ana@example.com", 99)
+    result = create({"CallId": CALL_ID, "emails": ["ana@example.com", "di@example.com"]})
+    outcomes = {r["email"]: (r["outcome"], r["message"]) for r in result["results"]}
+    assert outcomes["ana@example.com"][0] == "failed"
+    assert "try again" in outcomes["ana@example.com"][1]
+    assert outcomes["di@example.com"] == ("created", None)
+    assert "ana@example.com" not in pool.users
+
+
+def test_an_error_other_than_a_throttle_still_fails_the_answer(pool, ddb, monkeypatch):
+    def broken(**_kwargs):
+        raise _CognitoError("InternalErrorException")
+
+    monkeypatch.setattr(pool, "admin_get_user", broken)
+    with pytest.raises(ClientError):
+        accounts({"CallId": CALL_ID})

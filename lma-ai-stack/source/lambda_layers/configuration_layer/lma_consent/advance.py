@@ -391,3 +391,44 @@ def match_listed(
             if shown[address] == {key}:
                 matches[names[0]] = {**people[address], "source": source}
     return matches
+
+
+# ── a request to be added to a meeting's participant list ───────────────────
+
+_MARKDOWN_SPECIAL = re.compile(r"([\\`*_{}\[\]()#+\-.!|<>~])")
+
+#: The meeting notification a request to be added is shown as.
+REQUEST_NOTIFICATION_TYPE = "participant_list_request"
+
+
+def request_dedup_key(email: str) -> str:
+    """The notification's dedup key for one address: a later request updates it."""
+    digest = hashlib.sha256(email.strip().casefold().encode()).hexdigest()[:16]
+    return f"{REQUEST_NOTIFICATION_TYPE}:{digest}"
+
+
+def participant_list_request_notification(email: str, name: str = "") -> Dict[str, Any]:
+    """The keyword arguments of lma_notifications.publish_meeting_notification for a request.
+
+    The same for a request made on a meeting and for one made on a Virtual
+    Participant before its meeting existed and published to the meeting when
+    it was created, so one address is one notification on the meeting.
+    """
+    address = email.strip().casefold()
+    who = f"{name} <{address}>" if name else address
+    shown = _MARKDOWN_SPECIAL.sub(r"\\\1", who)
+    return {
+        "category": "meeting",
+        "type": REQUEST_NOTIFICATION_TYPE,
+        "title": "Asked to be added to the participant list",
+        "body": (
+            f"**{shown}** opened this meeting's consent link and is "
+            "not on its participant list. To let them give consent in advance, add them in the "
+            "meeting's **Participants** section. Nothing about their consent is recorded until "
+            "then."
+        ),
+        "severity": "suggestion",
+        "dedup_key": request_dedup_key(address),
+        "actions": [{"label": "Copy name and address", "kind": "copy", "payload": {"text": who}}],
+        "source": "advance-consent",
+    }

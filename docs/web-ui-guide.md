@@ -37,11 +37,14 @@ The left sidebar organizes the application into the following sections:
 - **Meeting List** — View and manage all accessible meetings
 - **Meetings Query Tool** — Advanced search and filtering across meetings
 
+### My consents
+- **My consents** — Every role's own consents given before meetings, and withdrawing them (see [Consent given in advance](meeting-consent.md#consent-given-in-advance)). An Admin also has a switch in its header, **My consents | All consents (admin)**: the **All consents** view lists, filters and exports everyone's consents given in advance, withdraws one on a person's behalf, and permanently deletes a person's consent records (`/#/consents?view=all`; see [Administering consents given in advance](meeting-consent.md#administering-consents-given-in-advance))
+
 ### A Participant's navigation
 A [Participant](user-based-access-control.md#participant) sees none of the sections above. Their navigation has four entries:
 - **Home** — What the Participant's account is for
 - **Shared meetings** — The meetings shared with them, each opening the [Meeting Detail Page](#meeting-detail-page) read-only: the header, the Summary, Transcript (with Auto-scroll and, once the meeting has ended, the player) and Details tabs, and the meeting assistant panel beside them, without the owner's panels and controls (see [The shared meeting's page](user-based-access-control.md#the-shared-meetings-page))
-- **My consents** — The consents they gave before meetings, and withdrawing them (see [Consent given in advance](meeting-consent.md#consent-given-in-advance)). An Admin also has a switch in its header, **My consents | All consents (admin)**: the **All consents** view lists, filters and exports everyone's consents given in advance, withdraws one on a person's behalf, and permanently deletes a person's consent records (`/#/consents?view=all`; see [Administering consents given in advance](meeting-consent.md#administering-consents-given-in-advance))
+- **My consents** — The consents they gave before meetings, and withdrawing them (see [Consent given in advance](meeting-consent.md#consent-given-in-advance))
 - **Voice enrollment** — Enrolling their own voice, and deleting it (see [Voice Enrollment](voice-enrollment.md))
 
 Their pages have the same frame as every other page: this navigation, the breadcrumbs, the notifications and the help panel at the right.

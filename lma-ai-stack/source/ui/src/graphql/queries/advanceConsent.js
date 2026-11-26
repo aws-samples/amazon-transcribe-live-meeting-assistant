@@ -99,6 +99,7 @@ export const deleteAdvanceConsentRecords = /* GraphQL */ `
       Withdrawn
       ConsentIds
       AuditId
+      MoreRemain
     }
   }
 `;

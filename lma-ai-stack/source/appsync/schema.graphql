@@ -3840,6 +3840,9 @@ type DeleteAdvanceConsentRecordsOutput @aws_cognito_user_pools {
 	ConsentIds: [String]
 	# The audit entry written for the erasure.
 	AuditId: String!
+	# True when more consents are kept under the address than one erasure
+	# reads; erasing again removes the next ones.
+	MoreRemain: Boolean
 }
 
 type AdvanceConsentList @aws_cognito_user_pools {

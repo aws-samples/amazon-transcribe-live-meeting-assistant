@@ -929,3 +929,65 @@ def test_no_standing_consent_is_taken_when_the_deployment_turns_it_off(aws):
             {"input": {"Scope": "deployment", "ValidUntil": _day(10), "NoticeHash": "x"}},
         )
     assert stored(aws, BO) == []
+
+
+def test_a_request_kept_on_a_vp_whose_meeting_has_just_been_created_reaches_the_meeting(
+    aws, monkeypatch
+):
+    """The VP links its CallId before its meeting exists. A request read while the
+    meeting did not exist is kept on the row; if the meeting exists by the time it
+    is kept, it is published to the meeting as well, as the START that created the
+    meeting may already have read the row."""
+    aws["dynamo"].vps.items[(VP_ID, None)] = {
+        "id": VP_ID,
+        "Owner": OWNER,
+        "CallId": CALL_ID,
+        "participants": [{"name": "Ana", "email": ANA}],
+    }
+    meeting = aws["dynamo"].events.items.pop((f"c#{CALL_ID}", f"c#{CALL_ID}"))
+    real_keep = index._keep_request_on_vp
+
+    def keep_then_meeting_created(*args):
+        kept = real_keep(*args)
+        aws["dynamo"].events.items[(f"c#{CALL_ID}", f"c#{CALL_ID}")] = meeting
+        return kept
+
+    monkeypatch.setattr(index, "_keep_request_on_vp", keep_then_meeting_created)
+    answer = call("askToBeAddedToMeeting", BO, {"input": {"VirtualParticipantId": VP_ID}})
+    assert answer == {"Requested": True, "Listed": False}
+    [request] = aws["dynamo"].vps.items[(VP_ID, None)]["participantListRequests"]
+    assert request["email"] == BO
+    [(call_id, notification)] = aws["published"]
+    assert call_id == CALL_ID and notification["type"] == "participant_list_request"
+    assert notification["dedup_key"] == advance.request_dedup_key(BO)
+
+
+def test_a_kept_request_whose_late_publish_fails_is_still_answered_as_made(aws, monkeypatch):
+    aws["dynamo"].vps.items[(VP_ID, None)] = {"id": VP_ID, "Owner": OWNER, "CallId": CALL_ID}
+    meeting = aws["dynamo"].events.items.pop((f"c#{CALL_ID}", f"c#{CALL_ID}"))
+    real_keep = index._keep_request_on_vp
+
+    def keep_then_meeting_created(*args):
+        kept = real_keep(*args)
+        aws["dynamo"].events.items[(f"c#{CALL_ID}", f"c#{CALL_ID}")] = meeting
+        return kept
+
+    import lma_notifications  # pylint: disable=import-outside-toplevel
+
+    def failing(*_args, **_kwargs):
+        raise lma_notifications.NotificationRateLimited("too many")
+
+    monkeypatch.setattr(index, "_keep_request_on_vp", keep_then_meeting_created)
+    monkeypatch.setattr(lma_notifications, "publish_meeting_notification", failing)
+    answer = call("askToBeAddedToMeeting", BO, {"input": {"VirtualParticipantId": VP_ID}})
+    assert answer == {"Requested": True, "Listed": False}
+    assert aws["dynamo"].vps.items[(VP_ID, None)]["participantListRequests"][0]["email"] == BO
+
+
+def test_a_request_on_a_meeting_and_one_on_its_vp_share_one_notification_key(aws):
+    call("askToBeAddedToMeeting", BO, {"input": {"CallId": CALL_ID}})
+    [(_, notification)] = aws["published"]
+    assert notification == {
+        **advance.participant_list_request_notification(BO, ""),
+        "timeout": 10,
+    }

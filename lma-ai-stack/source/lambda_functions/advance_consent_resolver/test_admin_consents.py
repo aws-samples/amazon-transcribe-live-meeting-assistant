@@ -369,3 +369,43 @@ def test_the_last_page_has_no_next_token_when_a_filter_reads_past_a_page(admin) 
     store(admin, ANA, 9)
     page = as_admin("listAllAdvanceConsents", {"Person": "ana@", "Limit": 2})
     assert [c["Email"] for c in page["Consents"]] == [ANA] and page["NextToken"] is None
+
+
+def test_an_erasure_past_the_cap_answers_that_more_remain(admin, monkeypatch) -> None:
+    monkeypatch.setattr(index.administration, "MAX_ERASED", 2)
+    for n in range(1, 4):
+        store(admin, ANA, n)
+    first = as_admin("deleteAdvanceConsentRecords", {"input": {"Email": ANA, "AllForPerson": True}})
+    assert (first["Deleted"], first["MoreRemain"]) == (2, True)
+    assert admin["low"].puts[-1]["Status"] == "partial"
+    second = as_admin(
+        "deleteAdvanceConsentRecords", {"input": {"Email": ANA, "AllForPerson": True}}
+    )
+    assert (second["Deleted"], second["MoreRemain"]) == (1, False)
+    assert admin["low"].puts[-1]["Status"] == "complete"
+
+
+def test_names_that_cannot_be_read_ask_the_admin_to_try_again(admin, monkeypatch) -> None:
+    store(admin, ANA, 1)
+
+    def changing(*_a, **_k):
+        raise index.account_names.NamesChanged("the names could not all be read; try again")
+
+    monkeypatch.setattr(index.account_names, "read_profiles", changing)
+    with pytest.raises(index.BadRequest, match="try again"):
+        as_admin("listAllAdvanceConsents")
+
+
+def test_named_consents_that_cannot_be_read_ask_the_admin_to_try_again(admin, monkeypatch) -> None:
+    first = store(admin, ANA, 1)
+
+    def unreadable(*_a, **_k):
+        raise index.administration.ConsentsUnreadable("some consents could not be read; try again")
+
+    monkeypatch.setattr(index.administration, "read_items", unreadable)
+    with pytest.raises(index.BadRequest, match="try again"):
+        as_admin(
+            "deleteAdvanceConsentRecords",
+            {"input": {"Email": ANA, "ConsentIds": [first["ConsentId"]]}},
+        )
+    assert (first["PK"], first["SK"]) in admin["dynamo"].events.items

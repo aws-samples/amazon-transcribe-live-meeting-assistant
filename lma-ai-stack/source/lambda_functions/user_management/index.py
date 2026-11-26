@@ -587,6 +587,10 @@ def delete_user(event, args):
     return {"username": username, "success": True, "consentRecordsDeleted": erased}
 
 
+#: The most erasures one account deletion runs, each removing up to MAX_ERASED consents.
+MAX_ERASURE_ROUNDS = 5
+
+
 def _erase_advance_consents(email, sub, erased_by):
     """Erase the consents the deleted account gave in advance; how many were removed.
 
@@ -601,19 +605,27 @@ def _erase_advance_consents(email, sub, erased_by):
 
         now = datetime.now(timezone.utc)
         lambda_client = boto3.client("lambda")
-        answer = administration.erase(
-            boto3.client("dynamodb"),
-            EVENT_SOURCING_TABLE,
-            email=email,
-            subject=sub,
-            erased_by=erased_by or "LMA",
-            now=now,
-            expires_after=int(now.timestamp() + MEETING_RECORD_EXPIRATION_DAYS * 86400),
-            reason="account_deleted",
-            pass_on=lambda consent: administration.pass_withdrawal_on(
-                lambda_client, MEETING_CONSENT_FUNCTION, consent, now
-            ),
-        )
+        dynamodb = boto3.client("dynamodb")
+        deleted = 0
+        # One erasure removes at most a bounded number; a few more rounds finish
+        # an address with more, while each one still removes some.
+        for _round in range(MAX_ERASURE_ROUNDS):
+            answer = administration.erase(
+                dynamodb,
+                EVENT_SOURCING_TABLE,
+                email=email,
+                subject=sub,
+                erased_by=erased_by or "LMA",
+                now=now,
+                expires_after=int(now.timestamp() + MEETING_RECORD_EXPIRATION_DAYS * 86400),
+                reason="account_deleted",
+                pass_on=lambda consent: administration.pass_withdrawal_on(
+                    lambda_client, MEETING_CONSENT_FUNCTION, consent, now
+                ),
+            )
+            deleted += answer["Deleted"]
+            if not answer.get("MoreRemain") or not answer["Deleted"]:
+                break
     except (ImportError, ClientError, BotoCoreError) as exc:
         logger.warning("Could not erase a deleted user's consent records", exc_info=True)
         # At least what a deletion without erasure leaves: none still in force.
@@ -622,8 +634,13 @@ def _erase_advance_consents(email, sub, erased_by):
             "The user was deleted, but their consent records could not be erased; erase them "
             "on My consents › All consents (admin)"
         ) from exc
-    logger.info("Erased %d consent records of a deleted user", answer["Deleted"])
-    return answer["Deleted"]
+    logger.info("Erased %d consent records of a deleted user", deleted)
+    if answer.get("MoreRemain"):
+        raise ValidationError(
+            f"The user was deleted and {deleted} of their consent records were erased, but more "
+            "remain; erase them on My consents › All consents (admin)"
+        )
+    return deleted
 
 
 def _sub_and_email_of(username):
@@ -768,6 +785,11 @@ def _delete_notification_preferences(username):
 # condition and the web UI compare it.
 
 NO_ACCOUNT = "none"
+#: An address whose account could not be looked up (the user pool kept throttling).
+UNKNOWN_ACCOUNT = "unknown"
+THROTTLE_CODES = ("TooManyRequestsException", "ThrottlingException")
+LOOKUP_ATTEMPTS = 4
+LOOKUP_BACKOFF_SECONDS = 0.2
 #: A meeting lists at most this many people (normalize_participants in the
 #: configuration layer's lma_meeting_preparation/rules.py).
 MAX_PARTICIPANTS = 100
@@ -896,12 +918,32 @@ def _find_account(email):
     return None
 
 
+def _throttled(exc):
+    return isinstance(exc, ClientError) and exc.response.get("Error", {}).get("Code") in (
+        THROTTLE_CODES
+    )
+
+
 def _account_of(email):
-    """ "none" or the role of the account with this address."""
-    username = _find_account(email)
-    if username is None:
-        return NO_ACCOUNT
-    return effective_role(_group_names(username))
+    """ "none", the role of the account with this address, or "unknown".
+
+    A lookup the user pool throttles is tried again after a pause, up to
+    LOOKUP_ATTEMPTS times; an address still throttled is answered "unknown",
+    so one busy moment does not fail the answer for the whole list.
+    """
+    for attempt in range(LOOKUP_ATTEMPTS):
+        try:
+            username = _find_account(email)
+            if username is None:
+                return NO_ACCOUNT
+            return effective_role(_group_names(username))
+        except ClientError as exc:
+            if not _throttled(exc):
+                raise
+            if attempt + 1 < LOOKUP_ATTEMPTS:
+                time.sleep(LOOKUP_BACKOFF_SECONDS * 2**attempt)
+    logger.warning("An account lookup was throttled %d times; answered unknown", LOOKUP_ATTEMPTS)
+    return UNKNOWN_ACCOUNT
 
 
 def _accounts_of(emails):
@@ -1255,6 +1297,15 @@ def create_participant_accounts(event, args):
     results = []
     attempts = 0
     for email in wanted:
+        if accounts[email] == UNKNOWN_ACCOUNT:
+            results.append(
+                {
+                    "email": email,
+                    "outcome": "failed",
+                    "message": "Whether this person has an account could not be checked; try again",
+                }
+            )
+            continue
         if accounts[email] != NO_ACCOUNT:
             results.append({"email": email, "outcome": "exists", "message": None})
             continue

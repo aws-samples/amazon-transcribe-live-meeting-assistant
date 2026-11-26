@@ -120,6 +120,8 @@ describe('account answers', () => {
     expect(accountLabel('none')).toBe('No account');
     expect(accountLabel('Participant')).toBe('Participant');
     expect(accountLabel('Admin')).toBe('Admin');
+    // The server answers "unknown" for an address whose lookup kept being throttled.
+    expect(accountLabel('unknown')).toBe('Could not be checked');
   });
 
   it('summarises every outcome of a creation', () => {
