@@ -19,7 +19,6 @@
   "dependencies": {
     "@aws-sdk/client-kinesis": "^3.1175.0",
     "@aws-sdk/client-transcribe-streaming": "^3.1175.0",
-    "amazon-cognito-srp": "^1.0.1",
     "commander": "^15.1.0",
     "dotenv": "^18.0.10",
     "stream-chain": "^4.4.2",
@@ -29,6 +28,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@stylistic/eslint-plugin": "^6.0.1",
     "@types/node": "^16.18.54",
     "@types/stream-chain": "^2.0.1",
     "@types/ws": "^8.18.2",
@@ -37,8 +37,5 @@
     "eslint": "^10.15.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
-  },
-  "overrides": {
-    "sjcl": "^1.0.9"
   }
 }
