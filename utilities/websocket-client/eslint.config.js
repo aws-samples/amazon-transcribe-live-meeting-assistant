@@ -11,6 +11,8 @@ const stylistic = require('@stylistic/eslint-plugin');
 // object-curly-spacing: it checks a space inside single-line `{ }` and one item
 // per line in a multi-line `{ }` whose first item starts on its own line.
 // Parentheses, brackets and angle brackets stay unchecked.
+// Keep the options in step with LIST_STYLE_BRACES in
+// lma-websocket-transcriber-stack/source/app/eslint.config.mjs.
 module.exports = [
     {
         ignores: ['dist/**', 'node_modules/**', 'eslint.config.js'],
