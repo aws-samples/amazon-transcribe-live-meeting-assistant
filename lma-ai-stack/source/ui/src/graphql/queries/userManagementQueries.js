@@ -94,6 +94,7 @@ export const deleteUser = /* GraphQL */ `
     deleteUser(input: $input) {
       username
       success
+      consentRecordsDeleted
     }
   }
 `;

@@ -550,6 +550,14 @@ type Mutation @aws_iam {
 	# (advance_consent_resolver). Replaces the names kept before; with neither,
 	# they are removed. See docs/meeting-consent.md#the-match-is-by-display-name.
 	updateMyAccountNames(input: UpdateMyAccountNamesInput!): AccountNames @aws_cognito_user_pools(cognito_groups: ["Admin", "User", "Participant"])
+	# Admins only (advance_consent_resolver): withdraw one person's consent given
+	# in advance on their behalf, with the same effect as their own withdrawal,
+	# recorded as withdrawn by the Admin; and permanently remove a person's
+	# consents (some or all), withdrawing those in force first, keeping an audit
+	# entry without their content. See
+	# docs/meeting-consent.md#administering-consents-given-in-advance.
+	withdrawAdvanceConsentAsAdmin(input: WithdrawAdvanceConsentAsAdminInput!): AdminAdvanceConsent @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	deleteAdvanceConsentRecords(input: DeleteAdvanceConsentRecordsInput!): DeleteAdvanceConsentRecordsOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	addCallSummaryText(input: AddCallSummaryTextInput!): Call @aws_iam
 	addTranscriptSegment(input: AddTranscriptSegmentInput!): TranscriptSegment @aws_iam
 	# Written by the call event processor for an ADD_VIDEO_KEYFRAME event; IAM only,
@@ -832,6 +840,11 @@ type Query @aws_iam {
 	# and optionally LabelKey and LabelValue) or "deployment", the text of that
 	# standing consent is returned, and nothing about any meeting.
 	getAdvanceConsentInvitation(CallId: ID, VirtualParticipantId: ID, Scope: String, ValidUntil: String, LabelKey: String, Organizer: String, LabelValue: String): AdvanceConsentInvitation @aws_cognito_user_pools(cognito_groups: ["Admin", "User", "Participant"])
+	# Admins only: every consent given in advance, newest first, a page at a
+	# time (Limit at most 100; NextToken from the page before). Person is the
+	# start of the address; Scope "meeting", "organizer" or "deployment"; State
+	# "active", "expired" or "withdrawn"; ExpiringBefore a date, YYYY-MM-DD.
+	listAllAdvanceConsents(Person: String, Scope: String, State: String, ExpiringBefore: String, Limit: Int, NextToken: String): AdminAdvanceConsentPage @aws_cognito_user_pools(cognito_groups: ["Admin"])
 }
 
 type ZoomCredentialsStatus @aws_cognito_user_pools {
@@ -3437,6 +3450,9 @@ type AccountMatch @aws_cognito_user_pools {
 
 input DeleteUserInput {
 	username: String!
+	# Also permanently remove the consents the account gave in advance (after
+	# withdrawing those in force); otherwise they are withdrawn and kept.
+	deleteConsentRecords: Boolean
 }
 
 # role is "Admin", "User" or "Participant".
@@ -3448,6 +3464,8 @@ input SetUserRoleInput {
 type DeleteUserOutput @aws_cognito_user_pools {
 	username: String!
 	success: Boolean!
+	# With deleteConsentRecords, how many consent records were removed.
+	consentRecordsDeleted: Int
 }
 
 # A person on a meeting's participant list, as that list names them, and
@@ -3737,8 +3755,11 @@ type AdvanceConsent @aws_cognito_user_pools {
 	GrantedAt: AWSDateTime!
 	ValidUntil: AWSDateTime!
 	WithdrawnAt: AWSDateTime
-	# "withdrawn", or "replaced" by a later consent for the same thing.
+	# "withdrawn", "replaced" by a later consent for the same thing,
+	# "account_deleted", or "withdrawn_by_admin" on the person's behalf.
 	WithdrawnReason: String
+	# The note an Admin gave when withdrawing it on the person's behalf.
+	WithdrawnNote: String
 	# The exact text agreed to, its SHA-256 in hex, and the version of the
 	# configured wording it came from.
 	NoticeText: String!
@@ -3752,6 +3773,72 @@ type AdvanceConsent @aws_cognito_user_pools {
 	# Whether the sign-in device's details were kept with it (the Meeting
 	# Consent setting); the details themselves are never returned.
 	DeviceDetailsKept: Boolean
+}
+
+# A consent given in advance as an Admin sees it: the consent, the Admin who
+# withdrew it on the person's behalf, the display name of the account that
+# gave it, the earlier consents it replaced and the meetings that counted it.
+type AdminAdvanceConsent @aws_cognito_user_pools {
+	ConsentId: ID!
+	Scope: String!
+	CallId: String
+	VirtualParticipantId: String
+	MeetingName: String
+	Organizer: String
+	LabelKey: String
+	LabelValue: String
+	GrantedAt: AWSDateTime!
+	ValidUntil: AWSDateTime!
+	WithdrawnAt: AWSDateTime
+	WithdrawnReason: String
+	WithdrawnNote: String
+	WithdrawnBy: String
+	NoticeText: String!
+	NoticeHash: String!
+	NoticeVersion: String!
+	Source: String!
+	Email: String!
+	Status: String!
+	DeviceDetailsKept: Boolean
+	DisplayName: String
+	Supersedes: [String]
+	CountedIn: [AdvanceConsentMeeting]
+}
+
+# A meeting that counted a consent given in advance, and when it noted it.
+type AdvanceConsentMeeting @aws_cognito_user_pools {
+	CallId: String!
+	At: AWSDateTime
+}
+
+type AdminAdvanceConsentPage @aws_cognito_user_pools {
+	Consents: [AdminAdvanceConsent]
+	# Null on the last page.
+	NextToken: String
+}
+
+input WithdrawAdvanceConsentAsAdminInput {
+	Email: String!
+	ConsentId: ID!
+	# Optional, at most 500 characters; shown to the person on My consents.
+	Note: String
+}
+
+# The consents named by ConsentIds, or every consent under the address with
+# AllForPerson (exactly one of the two).
+input DeleteAdvanceConsentRecordsInput {
+	Email: String!
+	ConsentIds: [ID!]
+	AllForPerson: Boolean
+}
+
+type DeleteAdvanceConsentRecordsOutput @aws_cognito_user_pools {
+	Deleted: Int!
+	# How many were in force, and were withdrawn first.
+	Withdrawn: Int!
+	ConsentIds: [String]
+	# The audit entry written for the erasure.
+	AuditId: String!
 }
 
 type AdvanceConsentList @aws_cognito_user_pools {

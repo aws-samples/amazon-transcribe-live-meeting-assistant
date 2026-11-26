@@ -41,7 +41,7 @@ The left sidebar organizes the application into the following sections:
 A [Participant](user-based-access-control.md#participant) sees none of the sections above. Their navigation has four entries:
 - **Home** — What the Participant's account is for
 - **Shared meetings** — The meetings shared with them, each opening the [Meeting Detail Page](#meeting-detail-page) read-only: the header, the Summary, Transcript (with Auto-scroll and, once the meeting has ended, the player) and Details tabs, and the meeting assistant panel beside them, without the owner's panels and controls (see [The shared meeting's page](user-based-access-control.md#the-shared-meetings-page))
-- **My consents** — The consents they gave before meetings, and withdrawing them (see [Consent given in advance](meeting-consent.md#consent-given-in-advance))
+- **My consents** — The consents they gave before meetings, and withdrawing them (see [Consent given in advance](meeting-consent.md#consent-given-in-advance)). An Admin also has a switch in its header, **My consents | All consents (admin)**: the **All consents** view lists, filters and exports everyone's consents given in advance, withdraws one on a person's behalf, and permanently deletes a person's consent records (`/#/consents?view=all`; see [Administering consents given in advance](meeting-consent.md#administering-consents-given-in-advance))
 - **Voice enrollment** — Enrolling their own voice, and deleting it (see [Voice Enrollment](voice-enrollment.md))
 
 Their pages have the same frame as every other page: this navigation, the breadcrumbs, the notifications and the help panel at the right.
@@ -892,7 +892,7 @@ Create and delete LMA users and choose their roles (Admin, User or Participant),
 - View all users in the Cognito user pool, with role, status, and creation date
 - Create a new user and choose their role (Admin, User or Participant) — Cognito emails them a temporary password
 - Change one user's role
-- Select and delete one or more users
+- Select and delete one or more users, optionally also permanently deleting their consent records
 - Guard rails prevent changing or deleting your own account, and changing or deleting the last remaining Admin
 
 See [User Management](user-management.md) for full documentation.

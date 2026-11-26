@@ -41,8 +41,27 @@ Who the caller is comes from the verified AppSync identity only: the username
 and Cognito sub of the token, and the email address the user pool holds for
 that username, which must be verified. No argument names a person. A
 consent is stored under the caller's email address (``PK = pmc#<address>``,
-compared ignoring case), so reading or withdrawing one names only the caller's
-own partition: another person's consent id is not found there.
+compared ignoring case), with the Cognito sub of the account that gave it
+(``Subject``), so reading or withdrawing one names only the caller's own
+partition, and only the consents their own account gave: another person's
+consent id is not found there, and a consent an earlier account with the same
+address gave is not the caller's.
+
+Three more operations are for Admins only (the Admin group, checked here as
+well as in the schema), over everyone's consents given in advance
+(lma_consent.administration):
+
+=================================== ==============================================
+``listAllAdvanceConsents``          Every consent, newest first, a page at a time,
+                                    filtered by the start of the address, scope,
+                                    state and end date.
+``withdrawAdvanceConsentAsAdmin``   Withdraws one person's consent, as their own
+                                    withdrawal does, recorded as withdrawn by the
+                                    Admin, with an optional note.
+``deleteAdvanceConsentRecords``     Removes one person's consents (some or all),
+                                    withdrawing those in force first, and keeps an
+                                    audit entry without their content.
+=================================== ==============================================
 
 A standing consent given with no meeting named names its organizer by the
 address the person types. It is never looked up: the answer is the same
@@ -57,6 +76,7 @@ docs/meeting-consent.md#consent-given-in-advance.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import logging
@@ -81,7 +101,7 @@ from lma_config import (  # configuration layer
     ConfigurationTableNotConfigured,
     offered_settings,
 )
-from lma_consent import account_names, advance  # configuration layer
+from lma_consent import account_names, administration, advance  # configuration layer
 from lma_consent import rules as consent  # configuration layer
 
 # pylint: enable=import-error
@@ -116,6 +136,11 @@ MAX_ID_LENGTH = 512
 MAX_WITHDRAWAL_MEETINGS = 50
 #: The most earlier consents a consent names as replaced.
 MAX_SUPERSEDED = 20
+ADMIN_GROUP = os.environ.get("ADMIN_GROUP", "Admin")
+#: The most consents one page of listAllAdvanceConsents answers, and the most
+#: index pages it reads to fill one.
+MAX_ADMIN_PAGE = 100
+MAX_INDEX_READS = 10
 
 DYNAMODB = boto3.resource("dynamodb", config=CLIENT_CONFIG)
 DYNAMODB_CLIENT = boto3.client("dynamodb", config=CLIENT_CONFIG)
@@ -153,11 +178,15 @@ def caller_of(event: Mapping[str, Any]) -> Dict[str, Any]:
     if isinstance(source_ip, list):
         source_ip = source_ip[0] if source_ip else ""
     request = event.get("request") or {}
+    groups = claims.get("cognito:groups") or []
+    if isinstance(groups, str):
+        groups = [groups]
     return {
         "username": username,
         "sub": str(sub),
         "source_ip": str(source_ip or "")[:64],
         "user_agent": str(request.get("userAgent") or "")[:512],
+        "is_admin": ADMIN_GROUP in groups,
     }
 
 
@@ -351,10 +380,22 @@ def _table():
     return DYNAMODB.Table(EVENT_SOURCING_TABLE)
 
 
-def my_consents(email: str, not_withdrawn: bool = False) -> List[Dict[str, Any]]:
+def my_consents(email: str, subject: str, not_withdrawn: bool = False) -> List[Dict[str, Any]]:
     """The caller's consents, newest first: the newest MAX_CONSENTS_PER_PERSON,
     or with ``not_withdrawn`` every one not withdrawn, however old, read a page
-    at a time (each person has at most MAX_ACTIVE_PER_PERSON in force)."""
+    at a time (each person has at most MAX_ACTIVE_PER_PERSON in force).
+
+    Only those their own account gave (``Subject``, its Cognito sub): a
+    consent an earlier account with the same address gave is not theirs.
+    """
+    return [
+        item
+        for item in _consents_under(email, not_withdrawn)
+        if subject and item.get("Subject") == subject
+    ]
+
+
+def _consents_under(email: str, not_withdrawn: bool) -> List[Dict[str, Any]]:
     arguments: Dict[str, Any] = {
         "KeyConditionExpression": Key("PK").eq(_partition(email)) & Key("SK").begins_with("ac#"),
         "ScanIndexForward": False,
@@ -397,6 +438,7 @@ def consent_out(item: Mapping[str, Any], now: datetime) -> Dict[str, Any]:
         "NoticeVersion",
         "Source",
         "Email",
+        "WithdrawnNote",
     )
     out = {name: item.get(name) for name in fields}
     out["Status"] = advance.status_of(item, now)
@@ -409,23 +451,42 @@ def _new_consent_id(now: datetime) -> str:
     return f"{now.strftime('%Y%m%d%H%M%S')}-{secrets.token_hex(6)}"
 
 
-def _withdraw(email: str, consent_id: str, now: datetime, reason: str) -> Optional[Dict]:
+def _withdraw(  # pylint: disable=too-many-arguments
+    email: str,
+    consent_id: str,
+    now: datetime,
+    reason: str,
+    *,
+    subject: str = "",
+    by: str = "",
+    note: str = "",
+) -> Optional[Dict]:
     """Mark one consent withdrawn; None when it is not the caller's, already
-    withdrawn, or expired."""
+    withdrawn, or expired.
+
+    With ``subject``, only a consent that account gave. ``by`` and ``note``
+    record an Admin's withdrawal on the person's behalf.
+    """
+    sets = "SET WithdrawnAt = :w, WithdrawnReason = :r, ExpiresAfter = :e"
+    # Only one still in force: an expired consent stopped counting at
+    # its end date, and keeps the expiry counted from then.
+    condition = "attribute_exists(PK) AND attribute_not_exists(WithdrawnAt) AND ValidUntil > :w"
+    values: Dict[str, Any] = {":w": advance.iso(now), ":r": reason, ":e": _expires_after(now)}
+    if subject:
+        condition += " AND Subject = :s"
+        values[":s"] = subject
+    if by:
+        sets += ", WithdrawnBy = :b"
+        values[":b"] = by[:256]
+    if note:
+        sets += ", WithdrawnNote = :n"
+        values[":n"] = note
     try:
         response = _table().update_item(
             Key={"PK": _partition(email), "SK": f"ac#{consent_id}"},
-            UpdateExpression="SET WithdrawnAt = :w, WithdrawnReason = :r, ExpiresAfter = :e",
-            # Only one still in force: an expired consent stopped counting at
-            # its end date, and keeps the expiry counted from then.
-            ConditionExpression=(
-                "attribute_exists(PK) AND attribute_not_exists(WithdrawnAt) AND ValidUntil > :w"
-            ),
-            ExpressionAttributeValues={
-                ":w": advance.iso(now),
-                ":r": reason,
-                ":e": _expires_after(now),
-            },
+            UpdateExpression=sets,
+            ConditionExpression=condition,
+            ExpressionAttributeValues=values,
             ReturnValues="ALL_NEW",
         )
     except ClientError as error:
@@ -569,7 +630,7 @@ def list_my_advance_consents(caller: Mapping[str, Any], _arguments: Mapping[str,
     now = datetime.now(timezone.utc)
     profile = account_names.read_profile(DYNAMODB_CLIENT, EVENT_SOURCING_TABLE, email)
     return {
-        "Consents": [consent_out(item, now) for item in my_consents(email)],
+        "Consents": [consent_out(item, now) for item in my_consents(email, caller["sub"])],
         "Enabled": bool(settings.get("advanceConsentEnabled")),
         "MaxDays": advance.max_days(settings.get("advanceConsentMaxDays")),
         "Email": email,
@@ -649,7 +710,7 @@ def get_advance_consent_invitation(caller: Mapping[str, Any], arguments: Mapping
     settings = consent_settings()
     enabled = bool(settings.get("advanceConsentEnabled"))
     if not names_a_meeting(arguments) and arguments.get("Scope") in advance.STANDING_SCOPES:
-        return standing_invitation(email, arguments, settings, enabled)
+        return standing_invitation(email, caller["sub"], arguments, settings, enabled)
     meeting = meeting_of(arguments)
     entry = listed_entry(meeting, email) if meeting else None
     if meeting is None or entry is None:
@@ -662,7 +723,7 @@ def get_advance_consent_invitation(caller: Mapping[str, Any], arguments: Mapping
     offer = proposed(meeting, arguments, settings, now) if enabled else {}
     covering = [
         consent_out(item, now)
-        for item in _with_created_meetings(my_consents(email, not_withdrawn=True))
+        for item in _with_created_meetings(my_consents(email, caller["sub"], not_withdrawn=True))
         if advance.covers(item, _covering_meeting(meeting), now)
     ]
     return {
@@ -689,7 +750,11 @@ def get_advance_consent_invitation(caller: Mapping[str, Any], arguments: Mapping
 
 
 def standing_invitation(
-    email: str, arguments: Mapping[str, Any], settings: Mapping[str, Any], enabled: bool
+    email: str,
+    subject: str,
+    arguments: Mapping[str, Any],
+    settings: Mapping[str, Any],
+    enabled: bool,
 ) -> Dict:
     """The My consents page with no meeting named: the standing consent the
     arguments describe and its exact text, and the caller's consents in force
@@ -722,7 +787,7 @@ def standing_invitation(
     )
     answer["ActiveConsents"] = [
         consent_out(item, now)
-        for item in my_consents(email, not_withdrawn=True)
+        for item in my_consents(email, subject, not_withdrawn=True)
         if advance.status_of(item, now) == advance.STATUS_ACTIVE and advance.same_scope(item, offer)
     ]
     return answer
@@ -756,7 +821,7 @@ def give_advance_consent(caller: Mapping[str, Any], data: Mapping[str, Any]) -> 
         raise BadRequest("the consent text has changed since the page showed it; read it again")
     active = [
         item
-        for item in _with_created_meetings(my_consents(email, not_withdrawn=True))
+        for item in _with_created_meetings(my_consents(email, caller["sub"], not_withdrawn=True))
         if advance.status_of(item, now) == advance.STATUS_ACTIVE
     ]
     if len(active) >= MAX_ACTIVE_PER_PERSON:
@@ -766,6 +831,8 @@ def give_advance_consent(caller: Mapping[str, Any], data: Mapping[str, Any]) -> 
     item: Dict[str, Any] = {
         "PK": _partition(email),
         "SK": f"ac#{consent_id}",
+        # Lists it in the meetings table's TypeDateIndex, for Admins.
+        "ItemType": administration.ITEM_TYPE,
         "ConsentId": consent_id,
         "Email": email,
         "Subject": caller["sub"],
@@ -813,7 +880,7 @@ def give_advance_consent(caller: Mapping[str, Any], data: Mapping[str, Any]) -> 
         item["AppliedAt"] = applied
     _table().put_item(Item=item, ConditionExpression="attribute_not_exists(PK)")
     for earlier in replaced:
-        _withdraw(email, str(earlier["ConsentId"]), now, "replaced")
+        _withdraw(email, str(earlier["ConsentId"]), now, "replaced", subject=caller["sub"])
     LOGGER.info("consent given in advance, scope %s", offer["Scope"])
     return consent_out(item, now)
 
@@ -824,7 +891,7 @@ def withdraw_advance_consent(caller: Mapping[str, Any], data: Mapping[str, Any])
     if not isinstance(consent_id, str) or not re.fullmatch(r"[0-9]{14}-[0-9a-f]{12}", consent_id):
         raise BadRequest("ConsentId is not one of your consents")
     now = datetime.now(timezone.utc)
-    updated = _withdraw(email, consent_id, now, "withdrawn")
+    updated = _withdraw(email, consent_id, now, "withdrawn", subject=caller["sub"])
     if updated is not None:
         pass_withdrawal_on(updated, now)
     if updated is None:
@@ -833,7 +900,7 @@ def withdraw_advance_consent(caller: Mapping[str, Any], data: Mapping[str, Any])
             .get_item(Key={"PK": _partition(email), "SK": f"ac#{consent_id}"}, ConsistentRead=True)
             .get("Item")
         )
-        if not item:
+        if not item or item.get("Subject") != caller["sub"]:
             raise BadRequest("ConsentId is not one of your consents")
         updated = _plain(item)  # already withdrawn: answered as it is
     LOGGER.info("consent given in advance withdrawn")
@@ -848,38 +915,9 @@ def pass_withdrawal_on(consent: Mapping[str, Any], now: datetime) -> int:
     objection in the meeting does; a meeting that has ended is left as it is.
     The calls are asynchronous, so the withdrawal answers at once; the Virtual
     Participant reads the record within about 10 seconds. Answers how many
-    meetings were told.
+    meetings were told (lma_consent.administration.pass_withdrawal_on).
     """
-    noted = consent.get("AppliedAt") or {}
-    if not MEETING_CONSENT_FUNCTION or not isinstance(noted, Mapping) or not noted:
-        return 0
-    # The consent and every earlier one it replaced: a meeting may have
-    # counted any of them.
-    consent_ids = [str(consent.get("ConsentId"))] + list(consent.get("Supersedes") or [])
-    # The most recently noted first: a meeting in progress noted the consent
-    # when it listed the attendee, so it is among them.
-    meetings = sorted(noted, key=lambda call_id: str(noted[call_id]), reverse=True)
-    told = 0
-    for call_id in meetings[:MAX_WITHDRAWAL_MEETINGS]:
-        try:
-            LAMBDA.invoke(
-                FunctionName=MEETING_CONSENT_FUNCTION,
-                InvocationType="Event",
-                Payload=json.dumps(
-                    {
-                        "advanceConsentWithdrawn": {
-                            "CallId": call_id,
-                            "ConsentId": consent.get("ConsentId"),
-                            "ConsentIds": consent_ids,
-                            "WithdrawnAt": advance.iso(now),
-                        }
-                    }
-                ).encode(),
-            )
-            told += 1
-        except (ClientError, BotoCoreError):
-            LOGGER.exception("could not pass a withdrawal on to a meeting that counted it")
-    return told
+    return administration.pass_withdrawal_on(LAMBDA, MEETING_CONSENT_FUNCTION, consent, now)
 
 
 def _markdown_text(value: str) -> str:
@@ -1037,6 +1075,234 @@ def ask_to_be_added_to_meeting(caller: Mapping[str, Any], data: Mapping[str, Any
     return {"Requested": True, "Listed": False}
 
 
+# ── for Admins: everyone's consents given in advance ────────────────────────
+
+_CONSENT_ID = re.compile(r"[0-9]{14}-[0-9a-f]{12}")
+_DAY = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+
+
+def _require_admin(caller: Mapping[str, Any]) -> None:
+    if not caller.get("is_admin"):
+        raise Refused("only an Admin may administer everyone's consents")
+
+
+def _address(value: Any, name: str, required: bool) -> str:
+    text = value.strip().casefold() if isinstance(value, str) else ""
+    if not text:
+        if required:
+            raise BadRequest(f"{name} is required")
+        return ""
+    if len(text) > 254 or re.search(r"[\s\x00-\x1f\x7f]", text):
+        raise BadRequest(f"{name} must be an email address or the start of one")
+    return text
+
+
+def _next_key(token: Any) -> Optional[Dict[str, Any]]:
+    """The index key a NextToken names, or None for the first page."""
+    if not token:
+        return None
+    try:
+        key = json.loads(base64.urlsafe_b64decode(str(token).encode()).decode())
+    except (ValueError, UnicodeDecodeError) as error:
+        raise BadRequest("NextToken is not one this operation answered") from error
+    ok = (
+        isinstance(key, dict)
+        and set(key) == {"ItemType", "SK", "PK"}
+        and key["ItemType"] == {"S": administration.ITEM_TYPE}
+        and all(isinstance(key[k], dict) and isinstance(key[k].get("S"), str) for k in key)
+        and key["PK"]["S"].startswith("pmc#")
+        and key["SK"]["S"].startswith("ac#")
+    )
+    if not ok:
+        raise BadRequest("NextToken is not one this operation answered")
+    return key
+
+
+def _token(key: Optional[Mapping[str, Any]]) -> Optional[str]:
+    return base64.urlsafe_b64encode(json.dumps(key).encode()).decode() if key else None
+
+
+def _admin_filters(arguments: Mapping[str, Any]) -> Dict[str, Any]:
+    scope = arguments.get("Scope") or None
+    if scope is not None and scope not in advance.SCOPES:
+        raise BadRequest(f"Scope must be one of {', '.join(advance.SCOPES)}")
+    state = arguments.get("State") or None
+    states = (advance.STATUS_ACTIVE, advance.STATUS_EXPIRED, advance.STATUS_WITHDRAWN)
+    if state is not None and state not in states:
+        raise BadRequest(f"State must be one of {', '.join(states)}")
+    before = arguments.get("ExpiringBefore") or None
+    if before is not None and not (isinstance(before, str) and _DAY.fullmatch(before)):
+        raise BadRequest("ExpiringBefore must be a date, YYYY-MM-DD")
+    return {
+        "person": _address(arguments.get("Person"), "Person", required=False),
+        "scope": scope,
+        "state": state,
+        "before": f"{before}T00:00:00Z" if before else None,
+    }
+
+
+def _admin_matches(item: Mapping[str, Any], filters: Mapping[str, Any], now: datetime) -> bool:
+    if filters["scope"] and item.get("Scope") != filters["scope"]:
+        return False
+    if filters["state"] and advance.status_of(item, now) != filters["state"]:
+        return False
+    if filters["before"] and not str(item.get("ValidUntil") or "") < filters["before"]:
+        return False
+    return True
+
+
+def admin_consent_out(
+    item: Mapping[str, Any], now: datetime, profiles: Mapping[str, Mapping[str, Any]]
+) -> Dict[str, Any]:
+    """The ``AdminAdvanceConsent`` shape: the consent, who withdrew it, the
+    meetings that counted it, and the display name of the account that gave it."""
+    out = consent_out(item, now)
+    profile = profiles.get(str(item.get("Email") or "")) or {}
+    mine = profile.get("Subject") and profile.get("Subject") == item.get("Subject")
+    applied = item.get("AppliedAt") or {}
+    out.update(
+        {
+            "WithdrawnBy": item.get("WithdrawnBy"),
+            "DisplayName": (profile.get("DisplayName") or None) if mine else None,
+            "Supersedes": list(item.get("Supersedes") or []),
+            "CountedIn": [
+                {"CallId": call_id, "At": applied[call_id]}
+                for call_id in sorted(applied, key=lambda c: str(applied[c]), reverse=True)
+            ]
+            if isinstance(applied, Mapping)
+            else [],
+        }
+    )
+    return out
+
+
+def list_all_advance_consents(caller: Mapping[str, Any], arguments: Mapping[str, Any]) -> Dict:
+    """Every consent given in advance, newest first, filtered, a page at a time."""
+    _require_admin(caller)
+    filters = _admin_filters(arguments)
+    try:
+        limit = max(1, min(int(arguments.get("Limit") or 50), MAX_ADMIN_PAGE))
+    except (TypeError, ValueError) as error:
+        raise BadRequest("Limit must be a number") from error
+    key = _next_key(arguments.get("NextToken"))
+    now = datetime.now(timezone.utc)
+    found: List[Dict[str, Any]] = []
+    next_key: Optional[Dict[str, Any]] = None
+    for _read in range(MAX_INDEX_READS):
+        query: Dict[str, Any] = {
+            "TableName": EVENT_SOURCING_TABLE,
+            "IndexName": administration.INDEX_NAME,
+            "KeyConditionExpression": "ItemType = :t",
+            "ExpressionAttributeValues": {":t": {"S": administration.ITEM_TYPE}},
+            "ScanIndexForward": False,
+            "Limit": MAX_ADMIN_PAGE,
+        }
+        if filters["person"]:
+            query["FilterExpression"] = "begins_with(PK, :p)"
+            query["ExpressionAttributeValues"][":p"] = {"S": f"pmc#{filters['person']}"}
+        if key:
+            query["ExclusiveStartKey"] = key
+        response = DYNAMODB_CLIENT.query(**query)
+        entries = [
+            administration.item_of(raw)
+            for raw in response.get("Items") or []
+            if raw.get("SK", {}).get("S", "").startswith("ac#")
+        ]
+        items = administration.read_items(
+            DYNAMODB_CLIENT,
+            EVENT_SOURCING_TABLE,
+            [{"PK": {"S": e["PK"]}, "SK": {"S": e["SK"]}} for e in entries],
+        )
+        key = response.get("LastEvaluatedKey")
+        for entry in entries:
+            item = items.get((entry["PK"], entry["SK"]))
+            if item and _admin_matches(item, filters, now):
+                found.append(item)
+                if len(found) == limit:
+                    break
+        if len(found) == limit:
+            # The next page starts after the last consent answered.
+            next_key = administration.index_key(found[-1])
+            break
+        # The index read on from here, or nothing more to read.
+        next_key = key
+        if not key:
+            break
+    profiles = account_names.read_profiles(
+        DYNAMODB_CLIENT, EVENT_SOURCING_TABLE, {str(i.get("Email") or "") for i in found}
+    )
+    LOGGER.info("an Admin listed %d consents given in advance", len(found))
+    return {
+        "Consents": [admin_consent_out(item, now, profiles) for item in found],
+        "NextToken": _token(next_key),
+    }
+
+
+def _consent_ref(data: Mapping[str, Any]) -> tuple:
+    email = _address(data.get("Email"), "Email", required=True)
+    consent_id = data.get("ConsentId")
+    if not isinstance(consent_id, str) or not _CONSENT_ID.fullmatch(consent_id):
+        raise BadRequest("ConsentId is not a consent given in advance")
+    return email, consent_id
+
+
+def withdraw_advance_consent_as_admin(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict:
+    """Withdraw one person's consent on their behalf, with the same effect as their own withdrawal."""
+    _require_admin(caller)
+    email, consent_id = _consent_ref(data)
+    note = consent.clip(data.get("Note"), administration.MAX_NOTE_LENGTH) or ""
+    now = datetime.now(timezone.utc)
+    updated = _withdraw(
+        email, consent_id, now, administration.REASON_ADMIN, by=caller["username"], note=note
+    )
+    if updated is not None:
+        pass_withdrawal_on(updated, now)
+        LOGGER.info("an Admin withdrew a consent given in advance")
+    else:
+        item = (
+            _table()
+            .get_item(Key={"PK": _partition(email), "SK": f"ac#{consent_id}"}, ConsistentRead=True)
+            .get("Item")
+        )
+        if not item:
+            raise BadRequest("There is no such consent")
+        updated = _plain(item)  # no longer in force: answered as it is
+    return admin_consent_out(updated, now, {})
+
+
+def delete_advance_consent_records(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict:
+    """Permanently remove one person's consents, withdrawing those in force first."""
+    _require_admin(caller)
+    email = _address(data.get("Email"), "Email", required=True)
+    ids = data.get("ConsentIds")
+    every = bool(data.get("AllForPerson"))
+    if every == bool(ids):
+        raise BadRequest("Name the consents with ConsentIds, or set AllForPerson, not both")
+    if ids and (
+        not isinstance(ids, list)
+        or len(ids) > administration.MAX_ERASED
+        or not all(isinstance(i, str) and _CONSENT_ID.fullmatch(i) for i in ids)
+    ):
+        raise BadRequest("ConsentIds must be consents given in advance")
+    now = datetime.now(timezone.utc)
+    answer = administration.erase(
+        DYNAMODB_CLIENT,
+        EVENT_SOURCING_TABLE,
+        email=email,
+        erased_by=caller["username"],
+        now=now,
+        expires_after=_expires_after(now),
+        consent_ids=None if every else ids,
+        pass_on=lambda written: pass_withdrawal_on(written, now),
+    )
+    LOGGER.info(
+        "an Admin erased %d consents given in advance (%d withdrawn first)",
+        answer["Deleted"],
+        answer["Withdrawn"],
+    )
+    return {k: answer[k] for k in ("Deleted", "Withdrawn", "ConsentIds", "AuditId")}
+
+
 OPERATIONS = {
     "listMyAdvanceConsents": list_my_advance_consents,
     "getAdvanceConsentInvitation": get_advance_consent_invitation,
@@ -1044,6 +1310,9 @@ OPERATIONS = {
     "withdrawAdvanceConsent": withdraw_advance_consent,
     "askToBeAddedToMeeting": ask_to_be_added_to_meeting,
     "updateMyAccountNames": update_my_account_names,
+    "listAllAdvanceConsents": list_all_advance_consents,
+    "withdrawAdvanceConsentAsAdmin": withdraw_advance_consent_as_admin,
+    "deleteAdvanceConsentRecords": delete_advance_consent_records,
 }
 
 

@@ -1798,7 +1798,9 @@ Resources:
       # filter and skipped backfill on pre-existing stacks, leaving the GSI
       # empty.  v1.1 always starts the state machine; the worker's conditional
       # update makes repeat runs cheap no-ops).
-      BackfillVersion: "1.1"
+      # v1.2: also stamps consents given in advance (pmc#, SK ac#) with
+      # ItemType advance_consent, for the Admins' list of every consent.
+      BackfillVersion: "1.2"
 
   ##########################################################################
   # ParameterStore
@@ -6203,7 +6205,7 @@ Resources:
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
     # checkov:skip=CKV_AWS_116: "DLQ not required for resolver function"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
-    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only table and bucket names, a prefix and a group name"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only table and bucket names, a prefix, a group name and a user pool id"
     DependsOn:
       - MeetingConsentResolverFunctionLogGroup
       # Ordered behind the seeder, like every configuration reader.
@@ -11635,6 +11637,9 @@ Resources:
           # Meeting Consent › Allow consent given in advance, which decides
           # what an invitation says about the My consents page.
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+          # Told of each meeting in progress that counted a consent erased
+          # with its account.
+          MEETING_CONSENT_FUNCTION: !GetAtt MeetingConsentResolverFunction.Arn
       # lma_config and lma_consent, for that setting. Pure Python.
       Layers:
         - !Ref ConfigurationPythonLayer
@@ -11729,6 +11734,14 @@ Resources:
                     "dynamodb:LeadingKeys":
                       - "pmc#*"
                       - "acn#*"
+                      # The audit entry of consent records erased with an account.
+                      - "cnsaudit#*"
+              # A consent erased with its account is withdrawn first, and each
+              # meeting in progress that counted it is told.
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt MeetingConsentResolverFunction.Arn
               # A meeting's owner and participant list, read to decide who may
               # see its attendees' account status or create their accounts,
               # and appended to when an Admin creates a user for the meeting

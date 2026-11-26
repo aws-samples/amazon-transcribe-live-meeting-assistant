@@ -2767,9 +2767,12 @@ Resources:
               # names' search entries (acn#), the requests to be added (pmr#)
               # and the daily count of those requests (usr#): read and written.
               # The names and their entries are written in one transaction.
+              # For an Admin, everyone's consents are read in batches and a
+              # person's are erased, with an audit entry (cnsaudit#).
               - Effect: Allow
                 Action:
                   - dynamodb:GetItem
+                  - dynamodb:BatchGetItem
                   - dynamodb:PutItem
                   - dynamodb:UpdateItem
                   - dynamodb:DeleteItem
@@ -2782,6 +2785,17 @@ Resources:
                       - "pmr#*"
                       - "usr#*"
                       - "acn#*"
+                      - "cnsaudit#*"
+              # Every consent given in advance, newest first, for an Admin:
+              # the consents' entries in TypeDateIndex only.
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                Resource: !Sub "${EventSourcingTableArn}/index/TypeDateIndex"
+                Condition:
+                  ForAllValues:StringEquals:
+                    "dynamodb:LeadingKeys":
+                      - "advance_consent"
               # The meeting rows (c#): read only, for the owner, the
               # participant list and the labels.
               - Effect: Allow
@@ -2856,6 +2870,49 @@ Resources:
       DataSourceName: !GetAtt AdvanceConsentLambdaDataSource.Name
       TypeName: Mutation
       FieldName: updateMyAccountNames
+      RequestMappingTemplateS3Location: ../source/appsync/advanceConsent.request.vtl
+      ResponseMappingTemplate: |
+        #if( $ctx.error )
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  # Everyone's consents given in advance, for Admins (advance_consent_resolver).
+  ListAllAdvanceConsentsAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref AppSyncApiId
+      DataSourceName: !GetAtt AdvanceConsentLambdaDataSource.Name
+      TypeName: Query
+      FieldName: listAllAdvanceConsents
+      RequestMappingTemplateS3Location: ../source/appsync/advanceConsent.request.vtl
+      ResponseMappingTemplate: |
+        #if( $ctx.error )
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  WithdrawAdvanceConsentAsAdminAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref AppSyncApiId
+      DataSourceName: !GetAtt AdvanceConsentLambdaDataSource.Name
+      TypeName: Mutation
+      FieldName: withdrawAdvanceConsentAsAdmin
+      RequestMappingTemplateS3Location: ../source/appsync/advanceConsent.request.vtl
+      ResponseMappingTemplate: |
+        #if( $ctx.error )
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  DeleteAdvanceConsentRecordsAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref AppSyncApiId
+      DataSourceName: !GetAtt AdvanceConsentLambdaDataSource.Name
+      TypeName: Mutation
+      FieldName: deleteAdvanceConsentRecords
       RequestMappingTemplateS3Location: ../source/appsync/advanceConsent.request.vtl
       ResponseMappingTemplate: |
         #if( $ctx.error )

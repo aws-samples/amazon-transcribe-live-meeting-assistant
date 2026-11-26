@@ -17,6 +17,9 @@ Two handlers:
 
 PK prefix → ItemType mapping:
 - cls#    → ItemType = "call"   (meeting list-tracking rows, go into GSI)
+- pmc# with SK ac# → ItemType = "advance_consent" (consents given in advance,
+  which the Admins' list of every consent reads from the GSI; the account
+  names kept in the same partitions are not stamped)
 - c#      → skip (call detail item, not needed in GSI)
 - ts#, trs#, chat#, mcp#, …      → skip (all non-list rows)
 """
@@ -36,6 +39,23 @@ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 PK_PREFIX_TO_ITEM_TYPE = {
     "cls#": "call",
 }
+# (PK prefix, SK prefix) → ItemType, for partitions that hold rows of more
+# than one kind.
+KEY_PREFIXES_TO_ITEM_TYPE = {
+    ("pmc#", "ac#"): "advance_consent",
+}
+
+
+def item_type_of(pk, sk):
+    """The ItemType a row is stamped with, or None for a row the GSI does not list."""
+    for prefix, item_type in PK_PREFIX_TO_ITEM_TYPE.items():
+        if pk.startswith(prefix):
+            return item_type
+    for (pk_prefix, sk_prefix), item_type in KEY_PREFIXES_TO_ITEM_TYPE.items():
+        if pk.startswith(pk_prefix) and str(sk).startswith(sk_prefix):
+            return item_type
+    return None
+
 
 # Safety margin before Lambda timeout (60 seconds)
 TIMEOUT_SAFETY_MARGIN_MS = 60_000
@@ -140,11 +160,7 @@ def lambda_handler(event, context):
                 continue
 
             # Only stamp list-tracking rows (cls#…)
-            new_item_type = None
-            for prefix, item_type in PK_PREFIX_TO_ITEM_TYPE.items():
-                if pk.startswith(prefix):
-                    new_item_type = item_type
-                    break
+            new_item_type = item_type_of(pk, item.get("SK", ""))
             if not new_item_type:
                 stats["skipped"] += 1
                 continue

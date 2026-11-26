@@ -37,6 +37,41 @@ def iso(moment: datetime) -> str:
     return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+class FakeCognito:
+    """The user pool: an account per address, with its sub and standard name."""
+
+    class exceptions:  # noqa: N801 - mirrors botocore's client.exceptions
+        class UserNotFoundException(Exception):
+            pass
+
+    def __init__(self, accounts: Dict[str, Dict[str, str]]) -> None:
+        self.accounts = accounts
+        self.fail = False
+        self.reads: List[str] = []
+
+    def admin_get_user(self, UserPoolId, Username):  # noqa: N803
+        self.reads.append(Username)
+        if self.fail:
+            raise base.ClientError({"Error": {"Code": "Throttling", "Message": "slow"}}, "Get")
+        account = self.accounts.get(Username)
+        if account is None:
+            raise self.exceptions.UserNotFoundException()
+        attributes = {"email": Username, "email_verified": "true", **account}
+        return {
+            "Username": Username,
+            "Enabled": True,
+            "UserAttributes": [{"Name": k, "Value": v} for k, v in attributes.items()],
+        }
+
+    def list_users(self, **_kw):
+        return {"Users": []}
+
+
+def accounts_for(*emails: str) -> FakeCognito:
+    """An account for each address, whose sub is the one the consents in these tests carry."""
+    return FakeCognito({email: {"sub": f"sub-{email}"} for email in emails})
+
+
 class AdvanceDynamo(base.FakeDynamo):
     """The meeting rows, and the consents given in advance under pmc#<address>."""
 
@@ -62,6 +97,7 @@ class AdvanceDynamo(base.FakeDynamo):
             "NoticeHash": "a" * 64,
             "NoticeVersion": "abcdefabcdef",
             "Source": "pre_meeting",
+            "Subject": f"sub-{email}",
         }
         item.update(fields)
         self.consents.setdefault(item["PK"], []).append(item)
@@ -75,6 +111,10 @@ class AdvanceDynamo(base.FakeDynamo):
                 {k: SER.serialize(v) for k, v in item.items()} for item in self.consents.get(pk, [])
             ]
         }
+
+    def batch_get_item(self, RequestItems):  # noqa: N803
+        # No names kept for any address.
+        return {"Responses": {table: [] for table in RequestItems}}
 
     def get_item(self, TableName, Key, **kwargs):  # noqa: N803
         if TableName == "lma-vps":
@@ -115,6 +155,10 @@ def dynamo(monkeypatch):
     monkeypatch.setattr(index, "VIRTUAL_PARTICIPANT_TABLE", "lma-vps")
     monkeypatch.setattr(index, "S3", base.FakeS3())
     monkeypatch.setattr(index, "_STORE", base.FakeStore())
+    fake.cognito = accounts_for("ana@example.com", "bo@example.com", "cy@example.com")
+    monkeypatch.setattr(index, "COGNITO", fake.cognito)
+    monkeypatch.setattr(index, "USER_POOL_ID", "pool")
+    monkeypatch.setattr(index, "_ACCOUNTS", {})
     return fake
 
 
@@ -366,6 +410,25 @@ def test_a_consent_for_every_meeting_counts_only_while_in_force(dynamo) -> None:
     start()
     record = present("Bo Chen", "Cy Diaz")
     assert record["Events"] == [] and record["CaptureAllowed"] is False
+
+
+def test_consent_from_a_deleted_account_is_not_counted_for_a_new_account_with_the_same_address(
+    dynamo,
+) -> None:
+    dynamo.give("bo@example.com", Subject="sub-of-the-deleted-account")
+    start()
+    assert present("Bo Chen")["Events"] == []
+    # Given by the account that holds the address now, it counts.
+    dynamo.give("bo@example.com")
+    assert present("Bo Chen")["Events"][0]["Source"] == "pre_meeting"
+
+
+def test_a_consent_under_an_address_no_account_holds_is_not_counted(dynamo) -> None:
+    dynamo.give("bo@example.com")
+    del dynamo.cognito.accounts["bo@example.com"]
+    start()
+    assert present("Bo Chen")["Events"] == []
+    assert dynamo.queries == []
 
 
 def test_a_consent_for_every_meeting_does_not_reach_an_attendee_who_is_not_listed(dynamo) -> None:

@@ -5,7 +5,7 @@
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import {
@@ -17,12 +17,12 @@ import {
   Container,
   ContentLayout,
   DatePicker,
-  ExpandableSection,
   FormField,
   Header,
   Input,
   Modal,
   RadioGroup,
+  SegmentedControl,
   Select,
   SpaceBetween,
   StatusIndicator,
@@ -45,15 +45,12 @@ import {
   shortNamesProblem,
   shortNamesText,
 } from '../common/account-names';
-import {
-  consentLinkMeeting,
-  consentScopeLabel,
-  consentStatusLabel,
-  dateAhead,
-  localDay,
-} from '../common/advance-consent';
+import { consentLinkMeeting, consentScopeLabel, dateAhead, localDay } from '../common/advance-consent';
 import { CONSENT_PROMPT_TEXT, dismissPrompt, sessionSub, shouldPrompt } from './consent-prompt';
 import useAppContext from '../../contexts/app';
+import useUserGroups from '../../hooks/use-user-groups';
+import AllConsentsView from './AllConsentsView';
+import { statusCell, textCell } from './consent-cells';
 
 const client = generateClient();
 const logger = new ConsoleLogger('MyConsentsPage');
@@ -542,25 +539,6 @@ ConsentPromptBanner.propTypes = {
   sub: PropTypes.string,
 };
 
-const statusCell = (c) => (
-  <StatusIndicator type={c.Status === 'active' ? 'success' : 'stopped'}>
-    {`${consentStatusLabel(c)}${c.WithdrawnAt ? ` ${when(c.WithdrawnAt)}` : ''}`}
-  </StatusIndicator>
-);
-
-const textCell = (c) => (
-  <ExpandableSection headerText="Show">
-    <SpaceBetween size="xxs">
-      <Box variant="p">{c.NoticeText}</Box>
-      <Box color="text-body-secondary" fontSize="body-s">
-        {`Version ${c.NoticeVersion}; SHA-256 ${c.NoticeHash}${
-          c.DeviceDetailsKept ? '; sign-in device details kept' : ''
-        }`}
-      </Box>
-    </SpaceBetween>
-  </ExpandableSection>
-);
-
 const withdrawCell = (c, onWithdraw) =>
   c.Status === 'active' ? (
     <Button variant="inline-link" onClick={() => onWithdraw(c)} ariaLabel={`Withdraw ${consentScopeLabel(c)}`}>
@@ -792,10 +770,27 @@ MyNamesInMeetings.propTypes = {
  * `offerPrompt` (a Participant's pages) shows, without a link, the banner a
  * person with no consent on record sees until they dismiss it.
  */
+/** The page's view: "all" (an Admin's view of everyone's consents) or "mine". */
+export const VIEW_ALL = 'all';
+export const VIEW_MINE = 'mine';
+export const viewFromSearch = (search) =>
+  new URLSearchParams(search || '').get('view') === VIEW_ALL ? VIEW_ALL : VIEW_MINE;
+
 const MyConsentsPage = ({ offerPrompt = false }) => {
   const sub = sessionSub(useAppContext());
-  const { search } = useLocation();
+  const { isAdmin } = useUserGroups();
+  const { search, pathname } = useLocation();
+  const navigate = useNavigate();
   const meetingRef = useMemo(() => consentLinkMeeting(search), [search]);
+  // ?view=all is an Admin's view; anyone else is shown their own consents.
+  const view = isAdmin && !meetingRef ? viewFromSearch(search) : VIEW_MINE;
+  const chooseView = (next) => {
+    const params = new URLSearchParams(search || '');
+    if (next === VIEW_ALL) params.set('view', VIEW_ALL);
+    else params.delete('view');
+    const query = params.toString();
+    navigate(`${pathname}${query ? `?${query}` : ''}`, { replace: true });
+  };
   const [answer, setAnswer] = useState(null);
   const [error, setError] = useState('');
 
@@ -814,6 +809,40 @@ const MyConsentsPage = ({ offerPrompt = false }) => {
     loadConsents();
   }, [loadConsents]);
 
+  const viewSwitch =
+    isAdmin && !meetingRef ? (
+      <SegmentedControl
+        selectedId={view}
+        onChange={({ detail }) => chooseView(detail.selectedId)}
+        label="Whose consents"
+        options={[
+          { id: VIEW_MINE, text: 'My consents' },
+          { id: VIEW_ALL, text: 'All consents (admin)' },
+        ]}
+      />
+    ) : null;
+
+  if (view === VIEW_ALL) {
+    return (
+      <ContentLayout
+        header={
+          <Header
+            variant="h1"
+            description={
+              "Everyone's consents given in advance on this deployment: withdraw one on a person's behalf, or " +
+              "permanently delete a person's consent records."
+            }
+            actions={viewSwitch}
+          >
+            All consents
+          </Header>
+        }
+      >
+        <AllConsentsView />
+      </ContentLayout>
+    );
+  }
+
   return (
     <ContentLayout
       header={
@@ -823,6 +852,7 @@ const MyConsentsPage = ({ offerPrompt = false }) => {
             'Consent you give before a meeting to its being recorded and transcribed. ' +
             'You can still object during any meeting.'
           }
+          actions={viewSwitch}
         >
           My consents
         </Header>

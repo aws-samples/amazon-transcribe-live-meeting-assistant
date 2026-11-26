@@ -808,6 +808,10 @@ at most 200 times a day (UTC). The names an account goes by in meetings, its
 display name and short names, count for matching attendees in every meeting
 that lists its address, alongside the name the list entry gives; see
 [The match is by display name](meeting-consent.md#the-match-is-by-display-name).
+The user pool compares its own `name` attribute case by case, so an account
+known only by that attribute is found when the text is typed as the name is
+written, all in lower case, or with each word capitalised ("McDonald" is not
+found by "mcd"); a display name set in LMA is found in any case.
 
 ### Who has an LMA account
 

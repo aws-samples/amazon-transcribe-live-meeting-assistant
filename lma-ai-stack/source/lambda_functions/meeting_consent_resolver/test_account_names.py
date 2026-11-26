@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import pytest
 
@@ -28,34 +28,7 @@ index = advance.index
 SER = advance.SER
 
 
-class FakeCognito:
-    """The user pool: an account per address, with its sub and standard name."""
-
-    class exceptions:  # noqa: N801 - mirrors botocore's client.exceptions
-        class UserNotFoundException(Exception):
-            pass
-
-    def __init__(self, accounts: Dict[str, Dict[str, str]]) -> None:
-        self.accounts = accounts
-        self.fail = False
-        self.reads: List[str] = []
-
-    def admin_get_user(self, UserPoolId, Username):  # noqa: N803
-        self.reads.append(Username)
-        if self.fail:
-            raise base.ClientError({"Error": {"Code": "Throttling", "Message": "slow"}}, "Get")
-        account = self.accounts.get(Username)
-        if account is None:
-            raise self.exceptions.UserNotFoundException()
-        attributes = {"email": Username, "email_verified": "true", **account}
-        return {
-            "Username": Username,
-            "Enabled": True,
-            "UserAttributes": [{"Name": k, "Value": v} for k, v in attributes.items()],
-        }
-
-    def list_users(self, **_kw):
-        return {"Users": []}
+FakeCognito = advance.FakeCognito
 
 
 class NamedDynamo(advance.AdvanceDynamo):

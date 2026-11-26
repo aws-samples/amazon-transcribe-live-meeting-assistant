@@ -13,6 +13,7 @@ import {
   Badge,
   Box,
   Button,
+  Checkbox,
   Container,
   FormField,
   Header,
@@ -247,6 +248,7 @@ const UserManagementPage = () => {
   const [namesErr, setNamesErr] = useState(null);
 
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteConsents, setDeleteConsents] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteErr, setDeleteErr] = useState(null);
 
@@ -432,6 +434,7 @@ const UserManagementPage = () => {
 
   const handleOpenDelete = () => {
     setDeleteErr(null);
+    setDeleteConsents(false);
     setDeleteOpen(true);
   };
 
@@ -444,7 +447,9 @@ const UserManagementPage = () => {
         try {
           await client.graphql({
             query: deleteUser,
-            variables: { input: { username: user.username } },
+            variables: {
+              input: { username: user.username, ...(deleteConsents ? { deleteConsentRecords: true } : {}) },
+            },
           });
           return null;
         } catch (err) {
@@ -732,6 +737,16 @@ const UserManagementPage = () => {
               </li>
             ))}
           </ul>
+          <Checkbox
+            checked={deleteConsents}
+            onChange={({ detail }) => setDeleteConsents(detail.checked)}
+            description={
+              'Otherwise their consents given in advance are withdrawn and kept for the meeting record retention ' +
+              "period. Each meeting's own consent record and evidence are never deleted here."
+            }
+          >
+            Also permanently delete their consent records
+          </Checkbox>
         </SpaceBetween>
       </Modal>
     </SpaceBetween>

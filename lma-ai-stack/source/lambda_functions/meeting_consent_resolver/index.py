@@ -843,14 +843,15 @@ def account_of(email: str) -> Optional[Dict[str, str]]:
 
 
 def listed_account_names(emails: List[str]) -> Optional[Dict[str, Dict[str, Any]]]:
-    """The names each listed address's account goes by, by the address in lower case.
+    """The account holding each listed address, by the address in lower case:
+    its Cognito ``sub`` and the names it goes by.
 
     Only for an address an account holds, and only the names kept for that
     account (lma_consent.account_names.account_names). Empty when the user
-    pool is not named. None when the accounts or their names cannot be read:
-    matching on the list's names alone could match a name another listed
-    person's account also goes by, so nothing given in advance is counted in
-    that write, and the next listing tries again.
+    pool is not named: then no consent given in advance is counted, since none
+    can be tied to the account that holds its address now. None when the
+    accounts or their names cannot be read: nothing given in advance is
+    counted in that write, and the next listing tries again.
     """
     if not USER_POOL_ID or not emails:
         return {}
@@ -866,7 +867,8 @@ def listed_account_names(emails: List[str]) -> Optional[Dict[str, Dict[str, Any]
     for email in held:
         names = account_names.account_names(profiles.get(email), accounts[email])
         if names:
-            out[email] = names
+            # The account's sub: only a consent that account gave counts.
+            out[email] = {**names, "sub": accounts[email]["sub"]}
     return out
 
 
@@ -940,8 +942,10 @@ def reconcile_advance_consents(  # pylint: disable=too-many-arguments,too-many-p
     (``names_of``); a match whose listed address has a consent that covers
     this meeting now is recorded as that person's consent, with the consent's
     scope, times and text hash, the basis of the match and which of the
-    person's names matched. ``applied`` gets each consent's key, so the consent
-    can note this meeting, for a withdrawal to reach it.
+    person's names matched. A consent counts only when the account that holds
+    the listed address now gave it (its ``Subject``). ``applied`` gets each
+    consent's key, so the consent can note this meeting, for a withdrawal to
+    reach it.
 
     The match is made over everyone present and everyone already on the
     record, not only the attendees looked up: a listed person goes by several
@@ -996,8 +1000,14 @@ def reconcile_advance_consents(  # pylint: disable=too-many-arguments,too-many-p
     at = advance.parse_time(now) or datetime.now(timezone.utc)
     events: List[Dict[str, Any]] = []
     for name, person in list(matches.items())[:MAX_ADVANCE_LOOKUPS]:
+        # Only a consent the account holding the address now gave counts: one
+        # an earlier account with the same address gave does not.
+        sub = (accounts.get(person["email"].strip().casefold()) or {}).get("sub")
+        if not sub:
+            continue
         try:
-            found = advance.covering(consents_of(person["email"]), covering_meeting, at)
+            given = [c for c in consents_of(person["email"]) if c.get("Subject") == sub]
+            found = advance.covering(given, covering_meeting, at)
         except (ClientError, BotoCoreError):
             LOGGER.exception("could not read consents given in advance; the attendee is asked")
             continue
