@@ -15,6 +15,9 @@
  * credentials, as the Details tab's Open file is; a chat attachment is read
  * again through getChatAttachments for a fresh link, which saves the file
  * rather than showing it; an archive's link comes from getMeetingArchive.
+ * An archive's link is taken off the page shortly before it lapses (an hour
+ * after it was signed; ten minutes for the meeting export), and the page says
+ * to choose the download again for a new link.
  */
 import React, { useEffect, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
@@ -42,6 +45,14 @@ import {
 const COPIED_VISIBLE_MS = 4000;
 /** How often the attachment list is read again while the meeting is going on. */
 const ATTACHMENTS_REFRESH_MS = 60_000;
+/**
+ * How long an archive's link stays on the page: the server signs it for an
+ * hour (the meeting export for ten minutes), less a minute's margin for the
+ * time it took to reach the page. Kept in step by hand with LINK_SECONDS and
+ * EXPORT_LINK_SECONDS in lambda_functions/meeting_archive/index.py.
+ */
+export const ARCHIVE_LINK_VISIBLE_MS = 59 * 60 * 1000;
+export const EXPORT_LINK_VISIBLE_MS = 9 * 60 * 1000;
 
 const ARCHIVE_LABELS = {
   EVERYTHING: 'Everything',
@@ -109,6 +120,29 @@ const MeetingDownloadMenu = ({
     };
   }, [callId]);
 
+  // A ready archive's link is replaced, before it lapses, by a note to choose the download again.
+  useEffect(() => {
+    if (archive?.Status !== 'READY' || !archive.DownloadUrl) return undefined;
+    const shown = archive;
+    const visibleMs = shown.contents === 'EXPORT' ? EXPORT_LINK_VISIBLE_MS : ARCHIVE_LINK_VISIBLE_MS;
+    const shownAt = Date.now();
+    const lapse = () =>
+      setArchive((current) =>
+        current === shown ? { label: shown.label, FileName: shown.FileName, Status: 'LAPSED' } : current,
+      );
+    const timer = setTimeout(lapse, visibleMs);
+    // A timer can fire late after the computer sleeps or the tab is in the
+    // background, so the time is read again when the page is shown.
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && Date.now() - shownAt >= visibleMs) lapse();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [archive]);
+
   const hasSummary = Boolean(item.callSummaryText);
   const canDownloadTranscript = item.recordingStatusLabel === DONE_STATUS && !item.transcriptDeletedAt;
   let transcriptReason;
@@ -132,19 +166,19 @@ const MeetingDownloadMenu = ({
     archiveRun.current += 1;
     const run = archiveRun.current;
     const label = ARCHIVE_LABELS[contents];
-    setArchive({ label, Status: 'PREPARING' });
+    setArchive({ label, contents, Status: 'PREPARING' });
     let result;
     try {
       result = await prepareArchive(callId, contents, {
         isCancelled: () => run !== archiveRun.current,
         onUpdate: (update) => {
-          if (run === archiveRun.current) setArchive({ label, ...update });
+          if (run === archiveRun.current) setArchive({ label, contents, ...update });
         },
       });
     } catch (error) {
       result = { Status: 'FAILED', Message: 'The archive could not be prepared.' };
     }
-    if (result && run === archiveRun.current) setArchive({ label, ...result });
+    if (result && run === archiveRun.current) setArchive({ label, contents, ...result });
   };
 
   const printTheSlides = async () => {
@@ -214,9 +248,21 @@ const MeetingDownloadMenu = ({
           )}
           {archive.Status === 'READY' && archive.DownloadUrl && (
             <StatusIndicator type="success">
-              <Link href={archive.DownloadUrl} external externalIconAriaLabel="(link valid for an hour)">
+              <Link
+                href={archive.DownloadUrl}
+                external
+                externalIconAriaLabel={
+                  archive.contents === 'EXPORT' ? '(link valid for ten minutes)' : '(link valid for an hour)'
+                }
+              >
                 Download {archive.FileName || `${archive.label}.zip`}
               </Link>
+            </StatusIndicator>
+          )}
+          {archive.Status === 'LAPSED' && (
+            <StatusIndicator type="info">
+              The link to {archive.FileName || `${archive.label}.zip`} has lapsed. Choose it from Download again for a
+              new link.
             </StatusIndicator>
           )}
           {archive.Status === 'FAILED' && (

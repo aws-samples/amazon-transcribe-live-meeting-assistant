@@ -12,9 +12,9 @@
  */
 import React from 'react';
 import { afterEach, describe, it, expect, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-import MeetingDownloadMenu from './MeetingDownloadMenu';
+import MeetingDownloadMenu, { ARCHIVE_LINK_VISIBLE_MS, EXPORT_LINK_VISIBLE_MS } from './MeetingDownloadMenu';
 import { prepareAndWaitForArchive } from '../../hooks/use-meeting-archive';
 import { DONE_STATUS } from '../common/get-recording-status';
 
@@ -181,6 +181,66 @@ describe('a recording', () => {
     choose('Audio, session 2');
     // Session 2 is the current recording; session 1 the earlier one the meeting keeps.
     await waitFor(() => expect(sign).toHaveBeenCalledWith(ITEM.recordingUrl, undefined));
+  });
+});
+
+describe('a lapsed archive link', () => {
+  afterEach(() => vi.useRealTimers());
+
+  const readyAfterChoosing = async (name, ready) => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const prepareArchive = vi.fn(async () => ({ Status: 'READY', ...ready }));
+    renderMenu({ prepareArchive });
+    openMenu();
+    choose(name);
+    expect(await screen.findByRole('link', { name: new RegExp(`Download ${ready.FileName}`) })).toBeTruthy();
+    return prepareArchive;
+  };
+
+  it('takes the link off the page before it lapses, and a new choice gives a fresh one', async () => {
+    const prepareArchive = await readyAfterChoosing('Everything (.zip)', {
+      FileName: 'Meeting-A.zip',
+      DownloadUrl: 'https://signed.example.com/a.zip',
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(ARCHIVE_LINK_VISIBLE_MS - 1000);
+    });
+    expect(screen.getByRole('link', { name: /Download Meeting-A.zip/ })).toBeTruthy();
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(screen.queryByRole('link', { name: /Download Meeting-A.zip/ })).toBeNull();
+    expect(screen.getByText(/The link to Meeting-A.zip has lapsed/)).toBeTruthy();
+    openMenu();
+    choose('Everything (.zip)');
+    expect(await screen.findByRole('link', { name: /Download Meeting-A.zip/ })).toBeTruthy();
+    expect(prepareArchive).toHaveBeenCalledTimes(2);
+  });
+
+  it('takes the link off when the page is shown again after its time has passed', async () => {
+    await readyAfterChoosing('Everything (.zip)', {
+      FileName: 'Meeting-A.zip',
+      DownloadUrl: 'https://signed.example.com/a.zip',
+    });
+    // As after the computer slept: the clock moved on, and the timer has not fired.
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now() + ARCHIVE_LINK_VISIBLE_MS);
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    expect(screen.queryByRole('link', { name: /Download Meeting-A.zip/ })).toBeNull();
+    expect(screen.getByText(/The link to Meeting-A.zip has lapsed/)).toBeTruthy();
+  });
+
+  it("takes the meeting export's ten-minute link off sooner", async () => {
+    await readyAfterChoosing('Meeting export (.json)', {
+      FileName: 'Meeting-A-export.json',
+      DownloadUrl: 'https://signed.example.com/export.json',
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(EXPORT_LINK_VISIBLE_MS);
+    });
+    expect(screen.queryByRole('link', { name: /Download Meeting-A-export.json/ })).toBeNull();
+    expect(screen.getByText(/The link to Meeting-A-export.json has lapsed/)).toBeTruthy();
   });
 });
 

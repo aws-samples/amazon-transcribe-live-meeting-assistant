@@ -48,6 +48,7 @@ import {
   videoStopMessage,
 } from './screen-video';
 import ConsentStep from './ConsentStep';
+import './StreamAudio.css';
 import {
   captureEvidenceScreenshot,
   CONSENT_MODE_OPT_IN,
@@ -1243,7 +1244,7 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
                         muted
                         autoPlay
                         playsInline
-                        style={{ maxWidth: '320px', border: '1px solid #ccc' }}
+                        className="stream-audio-preview"
                       />
                     )}
                   </SpaceBetween>

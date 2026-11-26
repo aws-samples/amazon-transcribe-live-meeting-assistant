@@ -163,31 +163,9 @@ def _segment(segment_id: str, end: float) -> updater.Segment:
     return updater.Segment(segment_id, end - 3, end, "Lee", "x")
 
 
-def test_a_segment_finalized_after_the_last_run_but_ending_before_its_marker_is_read() -> None:
+def test_the_layers_selection_reads_the_updaters_segments() -> None:
+    """The selection itself is tested in lma_live_pass/test_lma_live_pass.py."""
     segments = [_segment("a", 100), _segment("late", 95), _segment("b", 110), _segment("c", 130)]
     fresh = live_pass.new_segments(segments, 110, ["a", "b"])
     assert [s.segment_id for s in fresh] == ["late", "c"]
-
-
-def test_a_segment_before_the_overlap_is_not_read_again() -> None:
-    segments = [_segment("old", 110 - live_pass.OVERLAP_SECONDS - 1), _segment("c", 130)]
-    assert [s.segment_id for s in live_pass.new_segments(segments, 110, [])] == ["c"]
-
-
-def test_a_state_row_without_shown_ids_is_read_by_its_marker_alone() -> None:
-    segments = [_segment("late", 95), _segment("c", 130)]
-    assert [s.segment_id for s in live_pass.new_segments(segments, 110, None)] == ["c"]
-
-
-def test_after_a_row_without_shown_ids_what_its_marker_covered_is_not_read_again() -> None:
-    segments = [_segment("a", 90), _segment("b", 110), _segment("c", 150)]
-    fresh = live_pass.new_segments(segments, 110, None)
-    recorded = live_pass.shown_after_run(segments, 110, None, fresh)
-    assert recorded == ["a", "b", "c"]
-    later = [*segments, _segment("late", 100), _segment("d", 200)]
-    assert [s.segment_id for s in live_pass.new_segments(later, 150, recorded)] == ["late", "d"]
-
-
-def test_the_marker_never_moves_back_and_a_first_run_starts_it() -> None:
-    assert live_pass.next_marker([_segment("late", 95)], 110) == 110
-    assert live_pass.next_marker([_segment("a", 10), _segment("b", 200)], None) == 200
+    assert live_pass.next_marker(fresh, 110) == 130

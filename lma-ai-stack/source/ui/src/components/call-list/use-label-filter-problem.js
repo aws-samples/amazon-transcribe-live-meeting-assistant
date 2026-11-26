@@ -28,7 +28,9 @@ const useLabelFilterProblem = (labelFilter) => {
     const timer = setTimeout(() => setProblem(found), LABEL_PROBLEM_DELAY_MS);
     return () => clearTimeout(timer);
   }, [labelFilter]);
-  return problem;
+  // Checked again here so a filter that has become valid clears the reason in
+  // this render, not one frame later when the effect runs.
+  return labelFilterProblem(labelFilter) ? problem : null;
 };
 
 export default useLabelFilterProblem;

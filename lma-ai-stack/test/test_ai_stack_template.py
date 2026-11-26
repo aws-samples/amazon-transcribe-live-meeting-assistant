@@ -857,7 +857,8 @@ VP_ENHANCEMENTS = TEMPLATE.parent / "virtual-participant-enhancements.yaml"
 
 
 def test_the_vp_enhancements_template_hardcodes_no_partition_or_endpoint():
-    """The template outside the AI stack's nesting is held to none at all.
+    """A template no stack nests (only the Makefile's ``CFN_TEMPLATES`` lint list
+    names it), so the AI stack's ratchet does not read it; it is held to none at all.
 
     A service principal such as ``lambda.amazonaws.com`` is the same in every
     partition, so only those lines may name ``amazonaws.com``.

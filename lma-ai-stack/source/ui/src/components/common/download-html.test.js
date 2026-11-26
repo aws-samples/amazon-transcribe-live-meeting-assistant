@@ -309,16 +309,17 @@ describe('the transcript web page', () => {
   });
 });
 
-describe('a web page download that fails', () => {
-  const failedWith = async (options) => {
-    const alerts = [];
-    vi.spyOn(window, 'alert').mockImplementation((message) => alerts.push(message));
-    await downloadSummaryAsHtml(MEETING, null, { loadThumbnails: async () => ({}), ...options });
-    return alerts;
-  };
+/** The messages a summary web page download shows, with the given loaders. */
+const alertsFrom = async (options) => {
+  const alerts = [];
+  vi.spyOn(window, 'alert').mockImplementation((message) => alerts.push(message));
+  await downloadSummaryAsHtml(MEETING, null, { loadThumbnails: async () => ({}), ...options });
+  return alerts;
+};
 
+describe('a web page download that fails', () => {
   it('mentions the connection only when the renderer could not be loaded', async () => {
-    const alerts = await failedWith({
+    const alerts = await alertsFrom({
       loadRenderer: async () => {
         throw new TypeError('Failed to fetch dynamically imported module');
       },
@@ -328,7 +329,7 @@ describe('a web page download that fails', () => {
   });
 
   it('says the page could not be prepared when rendering fails', async () => {
-    const alerts = await failedWith({
+    const alerts = await alertsFrom({
       loadRenderer: async () => ({
         renderSummaryHtml: () => {
           throw new Error('render failed');
@@ -338,6 +339,16 @@ describe('a web page download that fails', () => {
     expect(alerts).toEqual(['Could not prepare the web page for download. Please try again.']);
   });
 
+  it('says the page could not be prepared when a thumbnail loader rejects', async () => {
+    const alerts = await alertsFrom({
+      loadThumbnails: () => Promise.reject(new TypeError('Failed to fetch')),
+      loadRenderer,
+    });
+    expect(alerts).toEqual(['Could not prepare the web page for download. Please try again.']);
+  });
+});
+
+describe('a web page download whose key frames cannot be fetched', () => {
   it('is saved without pictures, and with no message, when the key frames cannot be fetched', async () => {
     const offline = () => Promise.reject(new TypeError('Failed to fetch'));
     const saved = [];
@@ -358,7 +369,7 @@ describe('a web page download that fails', () => {
     // eslint-disable-next-line no-restricted-syntax -- one download at a time, so each is read on its own
     for (const loadThumbnails of loaders) {
       // eslint-disable-next-line no-await-in-loop
-      alerts.push(...(await failedWith({ loadThumbnails, loadRenderer })));
+      alerts.push(...(await alertsFrom({ loadThumbnails, loadRenderer })));
     }
     expect(alerts).toEqual([]);
     expect(saved).toHaveLength(2);
@@ -368,13 +379,5 @@ describe('a web page download that fails', () => {
       expect(page.body.textContent).toContain('(Slide at 00:30)');
       expect(page.body.textContent).toContain('(Slide at 01:30)');
     });
-  });
-
-  it('says the page could not be prepared when a thumbnail loader rejects', async () => {
-    const alerts = await failedWith({
-      loadThumbnails: () => Promise.reject(new TypeError('Failed to fetch')),
-      loadRenderer,
-    });
-    expect(alerts).toEqual(['Could not prepare the web page for download. Please try again.']);
   });
 });
