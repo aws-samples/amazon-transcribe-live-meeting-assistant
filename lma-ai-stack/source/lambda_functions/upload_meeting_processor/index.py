@@ -55,7 +55,13 @@ from datetime import datetime, timezone
 from typing import Any
 
 import boto3
-from botocore.exceptions import BotoCoreError, ClientError
+from botocore.exceptions import (
+    ClientError,
+    ConnectionClosedError,
+    ConnectTimeoutError,
+    EndpointConnectionError,
+    ReadTimeoutError,
+)
 
 # ---------------------------------------------------------------------------
 # Environment
@@ -105,6 +111,13 @@ RETRYABLE_TRANSCRIBE_ERROR_CODES = frozenset(
 #: A retryable error on the last attempt ends the meeting as failed, since no
 #: further attempt follows.
 MAX_START_ATTEMPTS = 3
+#: The botocore errors, raised without an answer from Transcribe, that a retry can clear.
+TRANSIENT_BOTOCORE_ERRORS = (
+    EndpointConnectionError,
+    ConnectTimeoutError,
+    ReadTimeoutError,
+    ConnectionClosedError,
+)
 
 # ---------------------------------------------------------------------------
 # Logging / clients
@@ -299,8 +312,9 @@ def _is_retryable(err: Exception) -> bool:
     if isinstance(err, ClientError):
         code = err.response.get("Error", {}).get("Code", "")
         return code in RETRYABLE_TRANSCRIBE_ERROR_CODES
-    # A connection or timeout error raised by botocore itself.
-    return isinstance(err, BotoCoreError)
+    # A connection or timeout error raised by botocore itself; not a parameter or
+    # credentials error, which repeats on every attempt.
+    return isinstance(err, TRANSIENT_BOTOCORE_ERRORS)
 
 
 def _emit_end_event(job: dict) -> None:

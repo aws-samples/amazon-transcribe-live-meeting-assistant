@@ -37,7 +37,12 @@ from types import SimpleNamespace
 from unittest import mock
 
 import pytest
-from botocore.exceptions import ClientError, EndpointConnectionError
+from botocore.exceptions import (
+    ClientError,
+    EndpointConnectionError,
+    NoCredentialsError,
+    ParamValidationError,
+)
 
 BUCKET = "lma-recordings-bucket"
 TABLE = "lma-event-sourcing-table"
@@ -485,6 +490,18 @@ def test_a_connection_error_is_left_for_the_retry(env, monkeypatch) -> None:
     with pytest.raises(RuntimeError):
         index.lambda_handler(s3_event(), None)
     assert [p["EventType"] for p in kinesis.payloads] == ["START"]
+
+
+def test_a_parameter_or_credentials_error_ends_the_meeting_at_once(env, monkeypatch) -> None:
+    """botocore raises these without asking Transcribe, and they repeat on every attempt."""
+    for error in (ParamValidationError(report="bad"), NoCredentialsError()):
+        table, kinesis = FakeTable(job_row()), FakeKinesis()
+        monkeypatch.setattr(index, "job_table", table)
+        monkeypatch.setattr(index, "kinesis_client", kinesis)
+        monkeypatch.setattr(index, "transcribe_client", FakeTranscribe(error))
+        assert index.lambda_handler(s3_event(), None) == {"processed": 1}
+        assert [p["EventType"] for p in kinesis.payloads] == ["START", "END"]
+        assert table.statuses[-1] == "FAILED"
 
 
 def test_a_retry_after_the_start_was_sent_does_not_send_it_again(env, monkeypatch) -> None:
