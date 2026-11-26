@@ -1601,7 +1601,10 @@ when, and the earlier consents it replaced. The filters apply on the server:
 **Person** (the start of the address), **Scope** (one meeting, an organizer's
 meetings or every meeting), **State**, and **Counts until before** a date.
 **Export CSV** downloads the filtered set, at most 5,000 consents; narrow the
-filters for more.
+filters for more. Each answer from the server reads a bounded stretch of the
+list, so with a narrow filter the view reads on until it has matches; a page
+that still says *No matches among the consents read so far* has more to
+search with the next page.
 
 **Withdrawing on a person's behalf.** **Withdraw** (one consent in force
 selected) has the same effect as the person's own withdrawal: from then on it

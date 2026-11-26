@@ -1684,7 +1684,7 @@ Resources:
       Handler: index.lambda_handler
       Runtime: python3.12
       CodeUri: ../source/lambda_functions/backfill_gsi_attributes
-      Description: Worker for Step Functions Distributed Map that stamps ItemType on existing cls# list rows
+      Description: Worker for Step Functions Distributed Map that stamps ItemType on existing cls# list rows and consents given in advance
       Timeout: 900
       MemorySize: 512
       LoggingConfig:

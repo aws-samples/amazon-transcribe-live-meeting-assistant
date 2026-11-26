@@ -108,8 +108,23 @@ describe('All consents (admin)', () => {
     renderAt('/consents?view=all');
     expect(await screen.findByRole('heading', { level: 1, name: 'All consents' })).toBeTruthy();
     expect(await screen.findByText('Ana Silva')).toBeTruthy();
-    expect(screen.getByText('1 meetings')).toBeTruthy();
+    expect(screen.getByText('1 meeting')).toBeTruthy();
     expect(screen.getByText('My consents')).toBeTruthy();
+  });
+
+  it('reads on past empty answers until a page has consents', async () => {
+    groups.value = ['Admin'];
+    let reads = 0;
+    answer({
+      ...HANDLERS,
+      listAllAdvanceConsents: () => {
+        reads += 1;
+        return reads < 3 ? { Consents: [], NextToken: `t${reads}` } : { Consents: [consent()], NextToken: null };
+      },
+    });
+    renderAt('/consents?view=all');
+    expect(await screen.findByText('Ana Silva')).toBeTruthy();
+    expect(calls('listAllAdvanceConsents').map((c) => c.variables.NextToken)).toEqual([undefined, 't1', 't2']);
   });
 
   it('sends the filters to the server', async () => {

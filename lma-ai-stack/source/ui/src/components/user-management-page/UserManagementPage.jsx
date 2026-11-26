@@ -442,15 +442,17 @@ const UserManagementPage = () => {
     if (selected.length === 0) return;
     setDeleteBusy(true);
     setDeleteErr(null);
+    let erased = 0;
     const results = await Promise.all(
       selected.map(async (user) => {
         try {
-          await client.graphql({
+          const response = await client.graphql({
             query: deleteUser,
             variables: {
               input: { username: user.username, ...(deleteConsents ? { deleteConsentRecords: true } : {}) },
             },
           });
+          erased += response?.data?.deleteUser?.consentRecordsDeleted || 0;
           return null;
         } catch (err) {
           logger.error(`deleteUser failed for ${user.username}`, err);
@@ -461,7 +463,11 @@ const UserManagementPage = () => {
     const failures = results.filter(Boolean);
     setDeleteBusy(false);
     if (failures.length === 0) {
-      setSuccess(`Deleted ${selected.length} user${selected.length > 1 ? 's' : ''}.`);
+      setSuccess(
+        `Deleted ${selected.length} user${selected.length > 1 ? 's' : ''}.${
+          deleteConsents ? ` Deleted ${erased} consent record${erased === 1 ? '' : 's'}.` : ''
+        }`,
+      );
       setSelected([]);
       setDeleteOpen(false);
       await fetchUsers();

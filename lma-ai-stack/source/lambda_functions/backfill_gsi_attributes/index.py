@@ -4,8 +4,9 @@
 """
 GSI Attribute Backfill Lambda for LMA EventSourcingTable.
 
-Backfills the ItemType attribute on existing `cls#…` list-tracking items so they
-populate the TypeDateIndex GSI. New items written by the createCall mutation
+Backfills the ItemType attribute on existing `cls#…` list-tracking items, and on
+consents given in advance (`pmc#…` with SK `ac#…`), so they populate the
+TypeDateIndex GSI. New items written by the createCall mutation
 already include ItemType, so this custom resource is only needed on first
 deployment of the GSI feature against a pre-existing stack.
 

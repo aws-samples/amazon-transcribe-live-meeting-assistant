@@ -386,7 +386,9 @@ def my_consents(email: str, subject: str, not_withdrawn: bool = False) -> List[D
     at a time (each person has at most MAX_ACTIVE_PER_PERSON in force).
 
     Only those their own account gave (``Subject``, its Cognito sub): a
-    consent an earlier account with the same address gave is not theirs.
+    consent an earlier account with the same address gave is not theirs. The
+    newest MAX_CONSENTS_PER_PERSON under the address are read before this
+    filter, so an earlier account's consents count towards that number.
     """
     return [
         item

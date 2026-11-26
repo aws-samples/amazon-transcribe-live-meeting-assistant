@@ -47,6 +47,8 @@ const logger = new ConsoleLogger('AllConsentsView');
 const errorText = (error, fallback) => error?.errors?.[0]?.message || error?.message || fallback;
 
 export const PAGE_SIZE = 50;
+/** The most empty answers read on through before a page is shown empty. */
+export const MAX_EMPTY_READS = 20;
 /** The most pages a CSV export reads, at 100 consents a page. */
 export const MAX_EXPORT_PAGES = 50;
 
@@ -200,12 +202,22 @@ const AllConsentsView = () => {
   const [actionError, setActionError] = useState('');
   const [exporting, setExporting] = useState(false);
 
+  // The server reads a bounded stretch of the index for each answer, so a
+  // filter that matches only older consents can answer an empty page with a
+  // NextToken: read on until a page has consents or there is nothing more.
   const fetchPage = useCallback(async (variables, token) => {
-    const response = await client.graphql({
-      query: listAllAdvanceConsents,
-      variables: { ...variables, Limit: PAGE_SIZE, ...(token ? { NextToken: token } : {}) },
-    });
-    return response?.data?.listAllAdvanceConsents || { Consents: [], NextToken: null };
+    let answer = { Consents: [], NextToken: token };
+    for (let read = 0; read < MAX_EMPTY_READS; read += 1) {
+      // Each read needs the token of the one before.
+      // eslint-disable-next-line no-await-in-loop
+      const response = await client.graphql({
+        query: listAllAdvanceConsents,
+        variables: { ...variables, Limit: PAGE_SIZE, ...(answer.NextToken ? { NextToken: answer.NextToken } : {}) },
+      });
+      answer = response?.data?.listAllAdvanceConsents || { Consents: [], NextToken: null };
+      if ((answer.Consents || []).length || !answer.NextToken) break;
+    }
+    return answer;
   }, []);
 
   const search = useCallback(
@@ -368,7 +380,14 @@ const AllConsentsView = () => {
       header: 'Text',
       cell: (c) => `Version ${c.NoticeVersion}; SHA-256 ${(c.NoticeHash || '').slice(0, 12)}…`,
     },
-    { id: 'counted', header: 'Counted in', cell: (c) => `${(c.CountedIn || []).length} meetings` },
+    {
+      id: 'counted',
+      header: 'Counted in',
+      cell: (c) => {
+        const n = (c.CountedIn || []).length;
+        return `${n} meeting${n === 1 ? '' : 's'}`;
+      },
+    },
   ];
 
   const items = pages[pageIndex - 1] || [];
@@ -468,7 +487,13 @@ const AllConsentsView = () => {
         selectedItems={selected}
         onSelectionChange={({ detail }) => setSelected(detail.selectedItems)}
         trackBy="ConsentId"
-        empty={<Box color="text-body-secondary">No consents match the filters.</Box>}
+        empty={
+          <Box color="text-body-secondary">
+            {nextToken
+              ? 'No matches among the consents read so far; choose the next page to keep searching.'
+              : 'No consents match the filters.'}
+          </Box>
+        }
       />
       {details && <ConsentDetails consent={details} onDismiss={() => setDetails(null)} />}
       <Modal
