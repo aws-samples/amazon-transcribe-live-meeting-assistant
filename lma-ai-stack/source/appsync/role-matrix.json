@@ -329,6 +329,19 @@
       "uiRoutes": []
     },
     {
+      "id": "advance-consent-administration",
+      "title": "Administering everyone's consents given in advance: listing them, withdrawing one on a person's behalf, and erasing a person's consent records",
+      "roles": ["Admin"],
+      "notes": "On My consents, as the All consents (admin) view. A withdrawal on a person's behalf has the effect of their own and is shown to them as an administrator's. An erasure withdraws consents in force first, removes the consent items and keeps an audit entry without their content; each meeting's own consent record is not changed.",
+      "appsync": [
+        "Query.listAllAdvanceConsents",
+        "Mutation.withdrawAdvanceConsentAsAdmin",
+        "Mutation.deleteAdvanceConsentRecords"
+      ],
+      "surfaces": [],
+      "uiRoutes": []
+    },
+    {
       "id": "account-search",
       "title": "Finding an LMA account by name or address to add to a participant list",
       "roles": ["Admin", "User"],

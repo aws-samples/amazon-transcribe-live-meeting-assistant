@@ -13,6 +13,7 @@ import {
   Badge,
   Box,
   Button,
+  Checkbox,
   Container,
   FormField,
   Header,
@@ -247,6 +248,7 @@ const UserManagementPage = () => {
   const [namesErr, setNamesErr] = useState(null);
 
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteConsents, setDeleteConsents] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteErr, setDeleteErr] = useState(null);
 
@@ -432,6 +434,7 @@ const UserManagementPage = () => {
 
   const handleOpenDelete = () => {
     setDeleteErr(null);
+    setDeleteConsents(false);
     setDeleteOpen(true);
   };
 
@@ -439,13 +442,17 @@ const UserManagementPage = () => {
     if (selected.length === 0) return;
     setDeleteBusy(true);
     setDeleteErr(null);
+    let erased = 0;
     const results = await Promise.all(
       selected.map(async (user) => {
         try {
-          await client.graphql({
+          const response = await client.graphql({
             query: deleteUser,
-            variables: { input: { username: user.username } },
+            variables: {
+              input: { username: user.username, ...(deleteConsents ? { deleteConsentRecords: true } : {}) },
+            },
           });
+          erased += response?.data?.deleteUser?.consentRecordsDeleted || 0;
           return null;
         } catch (err) {
           logger.error(`deleteUser failed for ${user.username}`, err);
@@ -456,7 +463,11 @@ const UserManagementPage = () => {
     const failures = results.filter(Boolean);
     setDeleteBusy(false);
     if (failures.length === 0) {
-      setSuccess(`Deleted ${selected.length} user${selected.length > 1 ? 's' : ''}.`);
+      setSuccess(
+        `Deleted ${selected.length} user${selected.length > 1 ? 's' : ''}.${
+          deleteConsents ? ` Deleted ${erased} consent record${erased === 1 ? '' : 's'}.` : ''
+        }`,
+      );
       setSelected([]);
       setDeleteOpen(false);
       await fetchUsers();
@@ -732,6 +743,16 @@ const UserManagementPage = () => {
               </li>
             ))}
           </ul>
+          <Checkbox
+            checked={deleteConsents}
+            onChange={({ detail }) => setDeleteConsents(detail.checked)}
+            description={
+              'Otherwise their consents given in advance are withdrawn and kept for the meeting record retention ' +
+              "period. Each meeting's own consent record and evidence are never deleted here."
+            }
+          >
+            Also permanently delete their consent records
+          </Checkbox>
         </SpaceBetween>
       </Modal>
     </SpaceBetween>

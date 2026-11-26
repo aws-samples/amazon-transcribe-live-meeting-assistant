@@ -48,6 +48,7 @@ import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from urllib.parse import quote
 
 import boto3
@@ -73,6 +74,9 @@ EVENT_SOURCING_TABLE = os.environ.get("EVENT_SOURCING_TABLE", "")
 # The Virtual Participant table, read for the owner and participant list of a
 # Virtual Participant that has not created its meeting yet.
 VIRTUAL_PARTICIPANT_TABLE = os.environ.get("VIRTUAL_PARTICIPANT_TABLE", "")
+# The meeting consent resolver, told of each meeting in progress that counted a
+# consent withdrawn before it is erased with its account.
+MEETING_CONSENT_FUNCTION = os.environ.get("MEETING_CONSENT_FUNCTION", "")
 # How long a withdrawn consent given in advance is kept, from its withdrawal.
 MEETING_RECORD_EXPIRATION_DAYS = float(os.environ.get("MEETING_RECORD_EXPIRATION_IN_DAYS", "90"))
 # The Cognito stack's table of last sign-in times (key "UserSub"); empty when the
@@ -541,10 +545,17 @@ def set_user_role(event, args):
 
 
 def delete_user(event, args):
-    """Delete a user from Cognito with guard rails."""
+    """Delete a user from Cognito with guard rails.
+
+    The consents the account gave in advance are withdrawn and kept for the
+    meeting records' retention, or, with ``deleteConsentRecords``, erased:
+    withdrawn first where in force (the meetings in progress that counted them
+    are told), then removed, with an audit entry (lma_consent.administration).
+    """
     caller = _get_caller_identity(event)
     payload = args.get("input") or {}
     username = (payload.get("username") or "").strip()
+    erase_consents = payload.get("deleteConsentRecords") is True
 
     if not username:
         raise ValidationError("username is required")
@@ -568,9 +579,51 @@ def delete_user(event, args):
 
     _delete_notification_preferences(username)
     _delete_last_sign_in(sub)
-    _withdraw_advance_consents(email, sub)
     _delete_account_names(email, sub)
-    return {"username": username, "success": True}
+    if not erase_consents:
+        _withdraw_advance_consents(email, sub)
+        return {"username": username, "success": True}
+    erased = _erase_advance_consents(email, sub, caller["username"])
+    return {"username": username, "success": True, "consentRecordsDeleted": erased}
+
+
+def _erase_advance_consents(email, sub, erased_by):
+    """Erase the consents the deleted account gave in advance; how many were removed.
+
+    The account is already deleted, so a failure is reported in words that say
+    so, and the consents can still be erased on the All consents view.
+    """
+    if not EVENT_SOURCING_TABLE or not email or not sub:
+        return 0
+    try:
+        # pylint: disable-next=import-outside-toplevel,import-error
+        from lma_consent import administration
+
+        now = datetime.now(timezone.utc)
+        lambda_client = boto3.client("lambda")
+        answer = administration.erase(
+            boto3.client("dynamodb"),
+            EVENT_SOURCING_TABLE,
+            email=email,
+            subject=sub,
+            erased_by=erased_by or "LMA",
+            now=now,
+            expires_after=int(now.timestamp() + MEETING_RECORD_EXPIRATION_DAYS * 86400),
+            reason="account_deleted",
+            pass_on=lambda consent: administration.pass_withdrawal_on(
+                lambda_client, MEETING_CONSENT_FUNCTION, consent, now
+            ),
+        )
+    except (ImportError, ClientError, BotoCoreError) as exc:
+        logger.warning("Could not erase a deleted user's consent records", exc_info=True)
+        # At least what a deletion without erasure leaves: none still in force.
+        _withdraw_advance_consents(email, sub)
+        raise ValidationError(
+            "The user was deleted, but their consent records could not be erased; erase them "
+            "on My consents › All consents (admin)"
+        ) from exc
+    logger.info("Erased %d consent records of a deleted user", answer["Deleted"])
+    return answer["Deleted"]
 
 
 def _sub_and_email_of(username):

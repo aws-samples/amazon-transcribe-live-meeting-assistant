@@ -24,6 +24,7 @@ const CONSENT_FIELDS = `
   ValidUntil
   WithdrawnAt
   WithdrawnReason
+  WithdrawnNote
   NoticeText
   NoticeHash
   NoticeVersion
@@ -38,6 +39,68 @@ const NAMES_FIELDS = `
   ShortNames
   AccountName
   UpdatedAt
+`;
+
+/**
+ * For Admins: every consent given in advance, newest first, a page at a time,
+ * with the account's display name and the meetings that counted each one; a
+ * withdrawal on a person's behalf; and the permanent removal of a person's
+ * consent records. See
+ * docs/meeting-consent.md#administering-consents-given-in-advance.
+ */
+const ADMIN_CONSENT_FIELDS = `
+  ${CONSENT_FIELDS}
+  WithdrawnBy
+  DisplayName
+  Supersedes
+  CountedIn {
+    CallId
+    At
+  }
+`;
+
+export const listAllAdvanceConsents = /* GraphQL */ `
+  query ListAllAdvanceConsents(
+    $Person: String
+    $Scope: String
+    $State: String
+    $ExpiringBefore: String
+    $Limit: Int
+    $NextToken: String
+  ) {
+    listAllAdvanceConsents(
+      Person: $Person
+      Scope: $Scope
+      State: $State
+      ExpiringBefore: $ExpiringBefore
+      Limit: $Limit
+      NextToken: $NextToken
+    ) {
+      Consents {
+        ${ADMIN_CONSENT_FIELDS}
+      }
+      NextToken
+    }
+  }
+`;
+
+export const withdrawAdvanceConsentAsAdmin = /* GraphQL */ `
+  mutation WithdrawAdvanceConsentAsAdmin($input: WithdrawAdvanceConsentAsAdminInput!) {
+    withdrawAdvanceConsentAsAdmin(input: $input) {
+      ${ADMIN_CONSENT_FIELDS}
+    }
+  }
+`;
+
+export const deleteAdvanceConsentRecords = /* GraphQL */ `
+  mutation DeleteAdvanceConsentRecords($input: DeleteAdvanceConsentRecordsInput!) {
+    deleteAdvanceConsentRecords(input: $input) {
+      Deleted
+      Withdrawn
+      ConsentIds
+      AuditId
+    }
+  }
 `;
 
 export const listMyAdvanceConsents = /* GraphQL */ `

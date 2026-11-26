@@ -4,8 +4,9 @@
 """
 GSI Attribute Backfill Lambda for LMA EventSourcingTable.
 
-Backfills the ItemType attribute on existing `cls#…` list-tracking items so they
-populate the TypeDateIndex GSI. New items written by the createCall mutation
+Backfills the ItemType attribute on existing `cls#…` list-tracking items, and on
+consents given in advance (`pmc#…` with SK `ac#…`), so they populate the
+TypeDateIndex GSI. New items written by the createCall mutation
 already include ItemType, so this custom resource is only needed on first
 deployment of the GSI feature against a pre-existing stack.
 
@@ -17,6 +18,9 @@ Two handlers:
 
 PK prefix → ItemType mapping:
 - cls#    → ItemType = "call"   (meeting list-tracking rows, go into GSI)
+- pmc# with SK ac# → ItemType = "advance_consent" (consents given in advance,
+  which the Admins' list of every consent reads from the GSI; the account
+  names kept in the same partitions are not stamped)
 - c#      → skip (call detail item, not needed in GSI)
 - ts#, trs#, chat#, mcp#, …      → skip (all non-list rows)
 """
@@ -36,6 +40,23 @@ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 PK_PREFIX_TO_ITEM_TYPE = {
     "cls#": "call",
 }
+# (PK prefix, SK prefix) → ItemType, for partitions that hold rows of more
+# than one kind.
+KEY_PREFIXES_TO_ITEM_TYPE = {
+    ("pmc#", "ac#"): "advance_consent",
+}
+
+
+def item_type_of(pk, sk):
+    """The ItemType a row is stamped with, or None for a row the GSI does not list."""
+    for prefix, item_type in PK_PREFIX_TO_ITEM_TYPE.items():
+        if pk.startswith(prefix):
+            return item_type
+    for (pk_prefix, sk_prefix), item_type in KEY_PREFIXES_TO_ITEM_TYPE.items():
+        if pk.startswith(pk_prefix) and str(sk).startswith(sk_prefix):
+            return item_type
+    return None
+
 
 # Safety margin before Lambda timeout (60 seconds)
 TIMEOUT_SAFETY_MARGIN_MS = 60_000
@@ -139,12 +160,8 @@ def lambda_handler(event, context):
                 stats["skipped"] += 1
                 continue
 
-            # Only stamp list-tracking rows (cls#…)
-            new_item_type = None
-            for prefix, item_type in PK_PREFIX_TO_ITEM_TYPE.items():
-                if pk.startswith(prefix):
-                    new_item_type = item_type
-                    break
+            # Only stamp list-tracking rows (cls#…) and consents given in advance
+            new_item_type = item_type_of(pk, item.get("SK", ""))
             if not new_item_type:
                 stats["skipped"] += 1
                 continue
@@ -157,7 +174,8 @@ def lambda_handler(event, context):
                 table.update_item(
                     Key={"PK": item["PK"], "SK": item["SK"]},
                     UpdateExpression="SET #it = :v",
-                    ConditionExpression="attribute_not_exists(#it)",
+                    # Not on a row deleted since the scan read it.
+                    ConditionExpression="attribute_exists(PK) AND attribute_not_exists(#it)",
                     ExpressionAttributeNames={"#it": "ItemType"},
                     ExpressionAttributeValues={":v": new_item_type},
                 )

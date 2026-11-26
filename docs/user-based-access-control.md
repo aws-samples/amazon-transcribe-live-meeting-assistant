@@ -62,6 +62,7 @@ below are tested against it, so the table and the deployed behaviour agree.
 | Installing and changing MCP servers and skills, and importing or exporting their libraries | Yes | No | No |  |
 | Consent given in advance: your own consents, your names in meetings, a meeting's consent page, and asking to be added to its participant list | Yes | Yes | Yes | Each person their own consents and their own names in meetings only, kept under the email address the user pool holds for them. Giving consent needs that address on the meeting's participant list, whose people see the meeting's name, organizer and labels on its consent page; someone not on it is told only that, and may ask to be added, which is shown in LMA to the people who see the meeting's participant list. |
 | A meeting's participant list: changing it and reading whether each person on it has an LMA account | Yes | Yes | No | Admin: every meeting. User: their own meetings only, not those shared with them, and at most 1,000 different addresses looked up a day. The list can be changed at any time, before, during and after the meeting; named by a Virtual Participant's id, the change is to its meeting's list once the meeting exists, and to the Virtual Participant's own list until then, on the Virtual Participant's owner. The list itself is part of the meeting record, read with it; the account answer is none or the account's role, nothing else about it. |
+| Administering everyone's consents given in advance: listing them, withdrawing one on a person's behalf, and erasing a person's consent records | Yes | No | No | On My consents, as the All consents (admin) view. A withdrawal on a person's behalf has the effect of their own and is shown to them as an administrator's. An erasure withdraws consents in force first, removes the consent items and keeps an audit entry without their content; each meeting's own consent record is not changed. |
 | Finding an LMA account by name or address to add to a participant list | Yes | Yes | No | At least 3 characters, matched as the start of an account's display name, short name or email address; at most 10 accounts, each answered with its display name and address only, and no way to page further. A User searches at most 200 times a day. |
 | Creating Participant accounts for the people on a meeting's participant list | Yes | Yes | No | Admin: any meeting. User: their own meetings only, at most 25 accounts a day. Only addresses on the meeting's list without an account, and only ever the Participant role; other roles and role changes stay with User Management. |
 | User Management: adding and deleting users, choosing their roles and setting their names in meetings | Yes | No | No | A new user may be invited to any meeting: the invitation then links to its consent page, and the address is added to its participant list. An Admin may set any user's display name and short names. |
@@ -125,6 +126,10 @@ Admin users have the following privileges:
 - Can see **all meetings** across all users
 - Can share any meeting with other users
 - Can delete any meeting
+- Can see everyone's consents given in advance on **My consents › All consents
+  (admin)**, withdraw one on the person's behalf, and permanently delete a
+  person's consent records; see
+  [Administering consents given in advance](meeting-consent.md#administering-consents-given-in-advance)
 
 **Recommendation**: Use the `jdoe+admin@example.com` email format for your admin account. This separates your admin account from your personal account, allowing you to have a non-admin account for day-to-day use while retaining admin access when needed.
 

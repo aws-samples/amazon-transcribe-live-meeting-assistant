@@ -98,6 +98,7 @@ export const consentStatusLabel = (consent) => {
   if (consent?.Status === 'expired') return 'Expired';
   if (consent?.WithdrawnReason === 'replaced') return 'Replaced';
   if (consent?.WithdrawnReason === 'account_deleted') return 'Withdrawn (account deleted)';
+  if (consent?.WithdrawnReason === 'withdrawn_by_admin') return 'Withdrawn by an administrator';
   return 'Withdrawn';
 };
 

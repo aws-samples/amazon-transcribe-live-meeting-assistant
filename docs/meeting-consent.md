@@ -1386,7 +1386,9 @@ the meetings table under the person's address and holds:
 | `CallId`, `VirtualParticipantId`, `MeetingName` | The meeting it was given from, as named then; absent on a standing consent given without a link |
 | `Organizer`, `LabelKey`, `LabelValue` | The meeting's owner, or the address typed without a link, and the label an `organizer` consent is limited to; absent on a `deployment` consent |
 | `GrantedAt`, `ValidUntil` | When it was given, and until when it counts |
-| `WithdrawnAt`, `WithdrawnReason` | When it stopped counting, and why: `withdrawn`, `replaced` or `account_deleted` |
+| `WithdrawnAt`, `WithdrawnReason` | When it stopped counting, and why: `withdrawn`, `replaced`, `account_deleted`, `withdrawn_by_admin` (an Admin, on the person's behalf) or `erased` (withdrawn just before an Admin deleted the record) |
+| `WithdrawnBy`, `WithdrawnNote` | For a consent an Admin withdrew on the person's behalf: the Admin's username, and the note they gave, if any |
+| `ItemType` | `advance_consent`, which lists the consent in the meetings table's `TypeDateIndex` for the [All consents (admin)](#administering-consents-given-in-advance) view. Consents given before this was written get it from the stack update's backfill |
 | `NoticeText`, `NoticeHash`, `NoticeVersion` | The exact text agreed to, its SHA-256, and the first 12 hex digits of the SHA-256 of the configured wording it came from |
 | `Source` | `pre_meeting` |
 | `DeviceDetails` | Only with **Keep sign-in device details with consents given in advance** on: the request's source IP address and the browser's user agent |
@@ -1419,7 +1421,20 @@ longer in force, and a meeting in progress that counted it records an objection
 from that attendee (see [In the meeting](#in-the-meeting)). The record stays, marked withdrawn with the time, so
 what the person agreed to and when they withdrew remain on record. Deleting an
 account in User Management withdraws the consents that account gave, with the
-reason `account_deleted`.
+reason `account_deleted`, or, with **Also permanently delete their consent
+records** ticked, erases them (see
+[Administering consents given in advance](#administering-consents-given-in-advance)).
+An Admin can also withdraw a consent on the person's behalf; My consents then
+shows it as *Withdrawn by an administrator*, with the Admin's note.
+
+**A consent belongs to the account that gave it.** Each consent keeps the
+Cognito sub of the account that gave it (`Subject`). A person's My consents
+lists, and they can withdraw, only the consents their own account gave, and a
+meeting counts a consent only when the account that holds the listed address
+now gave it. So a consent given by an account that was later deleted never
+counts for, and is never shown to, a new account created with the same
+address. When the user pool cannot be read while attendees are matched,
+nothing given in advance is counted in that listing.
 
 A consent is kept until **`MeetingRecordExpirationInDays`** (the stack parameter)
 days after it stopped counting, at its end date or when it was withdrawn,
@@ -1566,6 +1581,63 @@ asked in the meeting as usual, and the next listing tries again. The meeting
 consent resolver keeps the user pool's answer for an address for up to five
 minutes, so an account deleted or disabled in that time can still count by its
 names until then; its consents stop counting when it is deleted.
+
+## Administering consents given in advance
+
+Admins see everyone's consents given in advance on the **My consents** page:
+a switch in the page header, shown to Admins only, chooses **My consents** (the
+Admin's own, as every role sees them) or **All consents (admin)**. The choice
+is kept in the address (`/#/consents?view=all`), so it survives a reload and
+can be linked; anyone else opening that address sees their own consents, and
+the server refuses the operations below to every role but Admin.
+
+**Listing and filtering.** The **All consents** view lists every consent, newest
+first, a page at a time (`listAllAdvanceConsents`): the person's address and
+the display name their account goes by in meetings, what it covers, its state
+(**In force**, **Expired** or **Withdrawn**, with who withdrew it), when it was
+given and until when it counts, and its text version and hash. **View
+details** shows the exact text agreed to, the meetings that counted it and
+when, and the earlier consents it replaced. The filters apply on the server:
+**Person** (the start of the address), **Scope** (one meeting, an organizer's
+meetings or every meeting), **State**, and **Counts until before** a date.
+**Export CSV** downloads the filtered set, at most 5,000 consents; narrow the
+filters for more. Each answer from the server reads a bounded stretch of the
+list, so with a narrow filter the view reads on until it has matches; a page
+that still says *No matches among the consents read so far* has more to
+search with the next page.
+
+**Withdrawing on a person's behalf.** **Withdraw** (one consent in force
+selected) has the same effect as the person's own withdrawal: from then on it
+does not count, and each meeting in progress that counted it records an
+objection from that attendee, which the Virtual Participant reads within about
+10 seconds and stops capture. It is recorded with `WithdrawnReason`
+`withdrawn_by_admin`, the Admin's username (`WithdrawnBy`) and an optional note
+of at most 500 characters (`WithdrawnNote`). The person's My consents shows it
+as *Withdrawn by an administrator*, with the note, and not which Admin.
+
+**Deleting consent records permanently.** For an erasure request, **Delete
+permanently** removes the selected consent record, and **Delete all for this
+person** every consent record kept under that address
+(`deleteAdvanceConsentRecords`). It is a separate action with a confirmation
+dialog that names what is deleted and has to be acknowledged. A consent still in
+force is withdrawn first, so the meetings in progress that counted it stop
+capture as above; then the consent items are removed, and cannot be restored.
+An audit entry is written in the meetings table (`PK = cnsaudit#<YYYY-MM>`)
+before anything is removed, with who deleted them, when, the address, the
+consent ids, how many there were and how many were withdrawn first, and nothing
+of their content: not the text, the scope or the dates. Its `Status` is
+`pending` until every item is removed, then `complete`, so an erasure that
+stops part way is still on record. Audit entries are not removed by the table's time to
+live. Deleting a user in User Management with **Also permanently delete their
+consent records** ticked does the same for the consents that account gave,
+after the account is deleted, with the audit entry's reason `account_deleted`.
+
+**Each meeting's own record is not changed.** A meeting that counted a consent
+keeps its consent events (its `Consent` record, with the consent's scope,
+dates, text hash and the attendee's display name, never the address) and its
+evidence; they stay with the meeting and are deleted with it, or when its
+retention (`MeetingRecordExpirationInDays`) ends. Delete the meeting itself for
+those.
 
 ## What is stored
 

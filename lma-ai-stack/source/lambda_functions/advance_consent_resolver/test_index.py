@@ -147,9 +147,15 @@ class FakeTable:
                 and not current["ValidUntil"] > values[":w"]
             ):
                 raise _failed()
+            if "Subject = :s" in ConditionExpression and current.get("Subject") != values[":s"]:
+                raise _failed()
             current.update(
                 WithdrawnAt=values[":w"], WithdrawnReason=values[":r"], ExpiresAfter=values[":e"]
             )
+            if ":b" in values:
+                current["WithdrawnBy"] = values[":b"]
+            if ":n" in values:
+                current["WithdrawnNote"] = values[":n"]
             return {"Attributes": copy.deepcopy(current)}
         if UpdateExpression.startswith("ADD #n"):
             current = current or dict(Key)
