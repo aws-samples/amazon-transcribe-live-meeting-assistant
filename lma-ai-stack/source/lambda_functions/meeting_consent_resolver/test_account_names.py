@@ -192,3 +192,21 @@ def test_nothing_given_in_advance_is_counted_while_the_accounts_cannot_be_read(n
     index._ACCOUNTS.clear()
     [event] = present("Bo Chen", "Somebody")["Events"]
     assert event["PreMeeting"]["MatchedNameSource"] == "list"
+
+
+def test_a_second_name_of_a_person_already_counted_matches_nobody(named) -> None:
+    named.give("bo@example.com")
+    start()
+    [first] = present("Bo Chen")["Events"]
+    assert first["Source"] == "pre_meeting"
+    # Later another attendee shows another name of the same listed person.
+    record = present("Bo Chen", "Robert Chen")
+    assert [e["ParticipantName"] for e in record["Events"]] == ["Bo Chen"]
+
+
+def test_a_second_name_of_a_person_who_has_left_matches_nobody(named) -> None:
+    named.give("bo@example.com")
+    start()
+    present("Bo Chen")
+    record = present("Robert Chen")
+    assert [e["ParticipantName"] for e in record["Events"]] == ["Bo Chen"]

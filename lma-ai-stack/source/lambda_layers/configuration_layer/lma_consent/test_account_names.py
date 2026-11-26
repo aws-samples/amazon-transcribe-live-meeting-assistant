@@ -94,6 +94,7 @@ class FakeClient:
     def __init__(self) -> None:
         self.items: Dict[tuple, Dict[str, Any]] = {}
         self.cancel_next = 0
+        self.cancel_code = "ConditionalCheckFailed"
         self.writes = 0
 
     @staticmethod
@@ -110,7 +111,9 @@ class FakeClient:
     def transact_write_items(self, TransactItems):  # noqa: N803
         if self.cancel_next:
             self.cancel_next -= 1
-            raise self.exceptions.TransactionCanceledException()
+            error = self.exceptions.TransactionCanceledException()
+            error.response = {"CancellationReasons": [{"Code": self.cancel_code}]}
+            raise error
         self.writes += 1
         for entry in TransactItems:
             if "Put" in entry:
@@ -189,3 +192,10 @@ def test_a_conflicting_change_is_retried_then_reported():
     client.cancel_next = names.WRITE_ATTEMPTS
     with pytest.raises(names.NamesChanged):
         save(client, display="Other")
+
+
+def test_a_write_cancelled_for_another_reason_is_not_reported_as_a_conflict():
+    client = FakeClient()
+    client.cancel_next, client.cancel_code = 1, "ThrottlingError"
+    with pytest.raises(names.NamesNotSaved, match="could not be saved"):
+        save(client)

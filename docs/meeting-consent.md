@@ -1443,8 +1443,9 @@ Opt-in:
    account's display name and short names (see
    [The match is by display name](#the-match-is-by-display-name)). An attendee
    matches only when exactly one listed person goes by that name, only one
-   attendee shows it, and no other attendee shows another name of the same
-   person.
+   attendee shows it, and no other attendee present or already on the
+   meeting's consent record shows another name of the same person; a consent
+   already counted for one attendee is not counted for another.
 3. **A matched attendee with a consent that covers the meeting is recorded as
    consented** (a `meeting` consent for this meeting, an `organizer` consent
    for its owner and, when it names one, its label, or a `deployment`
@@ -1521,7 +1522,8 @@ when the attendee showed that one.
 The same safety rule applies across all of them: an attendee is matched to a
 listed person only when exactly one person on the list goes by the name the
 attendee shows (in any of the three ways), only one attendee shows it, and no
-other attendee present shows another of that person's names. When two people
+other attendee present, or already on the meeting's consent record from an
+earlier listing, shows another of that person's names. When two people
 on the list go by "Sam", nobody showing "Sam" is matched, and both are asked in
 the meeting as usual.
 

@@ -798,8 +798,9 @@ person is added at the end of the list as `Name <email>` (or the address alone
 when the account has no display name); **Save** saves the list as usual. A
 person already on the list is shown but cannot be chosen again.
 
-The search is the server's (`searchAccounts`), for the meeting's owner and
-Admins, never for a Participant. It answers at most 10 accounts, each with its
+The search is the server's (`searchAccounts`), for Admins and Users, never for
+a Participant; the editor that offers it is shown to the meeting's owner and
+Admins. It answers at most 10 accounts, each with its
 display name and address only, matched at the start of a name or address and
 ignoring case and spacing; it offers no way to page through or list the users,
 only enabled accounts with a verified address are found, and a User can search

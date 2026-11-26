@@ -76,6 +76,10 @@ class NamesChanged(Exception):
     """The names changed while they were being written; read them again."""
 
 
+class NamesNotSaved(NamesChanged):
+    """The names could not be written for a reason other than a conflicting change."""
+
+
 # ── the rules ───────────────────────────────────────────────────────────────
 
 
@@ -295,7 +299,11 @@ def save_profile(
             return {"DisplayName": "", "ShortNames": [], "Subject": subject, "UpdatedAt": ""}
         try:
             client.transact_write_items(TransactItems=items)
-        except client.exceptions.TransactionCanceledException:
+        except client.exceptions.TransactionCanceledException as error:
+            reasons = getattr(error, "response", {}).get("CancellationReasons") or []
+            if reasons and not any(r.get("Code") == "ConditionalCheckFailed" for r in reasons):
+                # Cancelled for another reason (throttling, for one): not a conflict.
+                raise NamesNotSaved("the names could not be saved; try again") from error
             continue
         return {"DisplayName": display, "ShortNames": shorts, "Subject": subject, "UpdatedAt": now}
     raise NamesChanged("the names were changed at the same time; read them again")

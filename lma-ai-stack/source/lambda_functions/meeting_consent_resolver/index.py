@@ -775,6 +775,8 @@ MAX_ADVANCE_LOOKUPS = 50
 #: How long the user pool's answer for an address is reused by this function.
 ACCOUNT_CACHE_SECONDS = 300
 ACCOUNT_LOOKUP_WORKERS = 8
+#: The most addresses whose answer is kept at once, so a warm function's cache stays bounded.
+MAX_CACHED_ACCOUNTS = 5000
 #: Characters a user pool filter value cannot hold unescaped.
 FILTER_SPECIAL = ('"', "\\")
 _ACCOUNTS: Dict[str, tuple] = {}
@@ -824,6 +826,12 @@ def account_of(email: str) -> Optional[Dict[str, str]]:
         verified = str(attributes.get("email_verified")).lower() == "true"
         if verified and (attributes.get("email") or "").strip().casefold() == email:
             answer = {"sub": attributes.get("sub") or "", "name": attributes.get("name") or ""}
+    if len(_ACCOUNTS) >= MAX_CACHED_ACCOUNTS:
+        moment = time.monotonic()
+        for key in [k for k, (expires, _) in _ACCOUNTS.items() if expires <= moment]:
+            del _ACCOUNTS[key]
+        if len(_ACCOUNTS) >= MAX_CACHED_ACCOUNTS:
+            _ACCOUNTS.clear()
     _ACCOUNTS[email] = (time.monotonic() + ACCOUNT_CACHE_SECONDS, answer)
     return answer
 
@@ -928,13 +936,27 @@ def reconcile_advance_consents(  # pylint: disable=too-many-arguments,too-many-p
     scope, times and text hash, the basis of the match and which of the
     person's names matched. ``applied`` gets each consent's key, so the consent
     can note this meeting, for a withdrawal to reach it.
+
+    The match is made over everyone present and everyone already on the
+    record, not only the attendees looked up: a listed person goes by several
+    names, so an attendee showing one of them is not that person when someone
+    present or already recorded shows another. A consent already counted for
+    an attendee is not counted again for another.
     """
-    replied = {
-        consent.normalize_name(event.get("ParticipantName"))
-        for event in record.get("Events") or []
-        if isinstance(event, Mapping)
-    }
+    events_so_far = [e for e in record.get("Events") or [] if isinstance(e, Mapping)]
+    replied = {consent.normalize_name(event.get("ParticipantName")) for event in events_so_far}
     candidates = [name for name in present if consent.normalize_name(name) not in replied]
+    counted = {
+        str((event.get("PreMeeting") or {}).get("ConsentId"))
+        for event in events_so_far
+        if event.get("Source") == consent.SOURCE_PRE_MEETING
+        and isinstance(event.get("PreMeeting"), Mapping)
+    }
+    everyone = list(present) + [
+        str(event.get("ParticipantName"))
+        for event in events_so_far
+        if isinstance(event.get("ParticipantName"), str)
+    ]
     listed = meeting.get("Participants") or []
     accounts: Optional[Dict[str, Any]] = {}
     if candidates and names_of is not None:
@@ -948,7 +970,14 @@ def reconcile_advance_consents(  # pylint: disable=too-many-arguments,too-many-p
         # The accounts' names could not be read: a match on the list's names
         # alone could be one the full rule refuses, so this write counts none.
         return []
-    matches = advance.match_listed(candidates, listed, accounts)
+    looked_up = {consent.normalize_name(name) for name in candidates}
+    matches = {
+        name: person
+        for name, person in advance.match_listed(
+            list(dict.fromkeys(everyone)), listed, accounts
+        ).items()
+        if consent.normalize_name(name) in looked_up
+    }
     covering_meeting = {
         "CallId": meeting.get("CallId"),
         "VirtualParticipantId": vp_id,
@@ -964,6 +993,9 @@ def reconcile_advance_consents(  # pylint: disable=too-many-arguments,too-many-p
             LOGGER.exception("could not read consents given in advance; the attendee is asked")
             continue
         if not found:
+            continue
+        if counted & ({str(found.get("ConsentId"))} | set(found.get("Supersedes") or [])):
+            # Already counted for another attendee in this meeting.
             continue
         events.append(
             {

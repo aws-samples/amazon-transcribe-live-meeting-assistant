@@ -136,8 +136,8 @@ Non-admin users:
 - Only see meetings they **own** or that have been **shared with them**
 - Can share and delete only their own meetings
 - Cannot access admin configuration pages
-- Can find an LMA account to add to their own meeting's participant list by
-  the start of its display name, short name or email address: at least three
+- Can find an LMA account by the start of its display name, short name or
+  email address, as the participant list editor of their own meetings does: at least three
   characters, at most 10 accounts answered, each with its display name and
   address only, and at most 200 searches a day. The search is refused to a
   Participant. See
