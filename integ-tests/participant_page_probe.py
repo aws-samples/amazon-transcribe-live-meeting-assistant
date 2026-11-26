@@ -26,6 +26,16 @@ from dataclasses import dataclass, field
 # The page's route in the web UI (SHARED_MEETINGS_PATH in the UI's routes/constants.js).
 SHARED_MEETINGS_PATH = "/shared-meetings"
 
+# A checkbox's name as assistive technology reads it: the elements its
+# aria-labelledby names first, then aria-label, then a <label> for it. A
+# Cloudscape Toggle names its input with aria-labelledby (a span beside it, not
+# a <label>), so neither aria-label nor the input's labels hold its text.
+_ACCESSIBLE_NAME = """e => {
+  const ids = (e.getAttribute('aria-labelledby') || '').split(/\\s+/).filter(Boolean);
+  const labelled = ids.map((id) => document.getElementById(id)?.textContent || '').join(' ').trim();
+  return labelled || e.getAttribute('aria-label') || e.labels?.[0]?.textContent || '';
+}"""
+
 _OPERATION = re.compile(r"^\s*(?:query|mutation|subscription)\s+\w*\s*(?:\([^)]*\))?\s*\{\s*(?:\w+\s*:\s*)?(\w+)")
 
 
@@ -100,10 +110,7 @@ def read_shared_meeting_page(url: str, username: str, password: str, call_id: st
         page.wait_for_timeout(3000)
         run.tabs = [t.strip() for t in page.get_by_role("tab").all_inner_texts()]
         run.buttons = [b.strip() for b in page.get_by_role("button").all_inner_texts() if b.strip()]
-        run.switches = [
-            (c.get_attribute("aria-label") or c.evaluate("e => e.labels?.[0]?.innerText || ''")).strip()
-            for c in page.get_by_role("checkbox").all()
-        ]
+        run.switches = [c.evaluate(_ACCESSIBLE_NAME).strip() for c in page.get_by_role("checkbox").all()]
         run.breadcrumbs = [b.strip() for b in page.get_by_label("Breadcrumbs").get_by_role("link").all_inner_texts()]
         run.assistant_panel = page.locator("#meeting-assistant-panel iframe[src*='strands-chat.html']").count() > 0
         run.text = page.inner_text("body")

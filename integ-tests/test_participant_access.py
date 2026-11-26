@@ -27,11 +27,13 @@ preparation are written to the meeting directly. Then:
     In Chromium (headless, when playwright and its Chromium are installed;
     skipped otherwise), the listed Participant signs in to the web UI and opens
     the meeting's page: it shows the seeded spoken and chat lines on the
-    meeting page's tabs (Summary, Transcript, Details) with Auto-scroll, and
-    the meeting assistant panel where the deployment has the assistant; it
-    shows none of the owner's panels or controls (Share, Download, Translate,
-    Whiteboards, meeting context, labels); and every GraphQL request it sends
-    over HTTP is a Participant operation or the chat's own, none refused.
+    meeting page's tabs (Summary, Transcript, Details) with the Auto-scroll
+    and Translate switches, and the meeting assistant panel where the
+    deployment has the assistant; it shows none of the owner's panels or
+    controls (Share, Download, Whiteboards, meeting context, labels); and every
+    GraphQL request it sends over HTTP is a Participant operation, the
+    sign-in's read of the Participant's own consents, or the chat's own, none
+    refused.
 ``test_the_participant_follows_the_live_transcript``
     onAddParticipantTranscriptSegment delivers a new line to the listed
     Participant, and refuses a selection of a field outside the view.
@@ -527,8 +529,11 @@ async def _subscribe(
 
 
 #: What a Participant's page may ask the API over HTTP: the Participant view
-#: and the meeting assistant chat (subscriptions go over the WebSocket).
+#: and the meeting assistant chat (subscriptions go over the WebSocket), and the
+#: read of their own consents with which the sign-in decides whether to open My
+#: consents first (SignInLanding.jsx).
 PARTICIPANT_PAGE_OPERATIONS = {
+    "listMyAdvanceConsents",
     "listParticipantMeetings",
     "getParticipantMeeting",
     "getParticipantMeetingTranscript",
@@ -570,7 +575,9 @@ def test_the_participant_page_is_the_meeting_page_without_the_owners_panels(
         assert run.assistant_panel, "the Assistant button is shown but the assistant panel is not"
     for owner_only in ("Share", "Download", "Diagnose", "Name speakers", "Edit labels and audience"):
         assert owner_only not in run.buttons, owner_only
-    assert "Translate" not in run.switches
+    # The Participant page translates the transcript as the owner's does
+    # (docs/user-based-access-control.md).
+    assert "Translate" in run.switches
     for hidden in (OWNER_ONLY_CONTEXT, "integ-owner-only", OWNER_ONLY_ANSWER, "Whiteboards"):
         assert hidden not in run.text, hidden
     assert set(run.operations) <= PARTICIPANT_PAGE_OPERATIONS, sorted(set(run.operations))

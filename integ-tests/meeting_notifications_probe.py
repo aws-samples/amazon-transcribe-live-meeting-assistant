@@ -22,17 +22,32 @@ see it only once it is shared with them. Then:
    the other category stays), then deletes the meeting through the meeting
    controls function (every notification row goes).
 
-Every call names that meeting; it touches no other, and whatever is left is
-removed by its CallId at the end. The result is a dict of observations.
+Live delivery is checked as the web UI receives it: once the meeting is shared,
+the test user subscribes over the AppSync real-time endpoint with the UI's own
+subscription document (lma-ai-stack/source/ui/src/graphql/queries/
+onMeetingNotification.js), once for the meeting and once for every meeting, and
+a publish reaches both. A second synthetic meeting, owned by the test user and
+with no notifications, is used the same way, and first, where Playwright and
+its Chromium are installed, in the web UI: with the meeting list open a publish
+raises the top navigation's count, and with the meeting's page then opened by a
+change of route (no reload), the meeting's first notification opens its
+Notifications drawer.
+
+Every call names one of those meetings; it touches no other, and whatever is
+left is removed by its CallId at the end. The result is a dict of observations.
 See docs/meeting-notifications.md.
 """
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import json
 import os
+import re
 import sys
 import time
+import urllib.parse
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -45,7 +60,12 @@ from mcp_api_key_probe import ProbeError, _graphql, _graphql_url
 from mcp_meeting_tools_probe import _claims
 from ws_stream_probe import _mint_tokens, _outputs, _stack_resources
 
-LAYER = Path(__file__).resolve().parents[1] / "lma-ai-stack" / "source" / "lambda_layers" / "configuration_layer"
+REPO = Path(__file__).resolve().parents[1]
+LAYER = REPO / "lma-ai-stack" / "source" / "lambda_layers" / "configuration_layer"
+# The subscription the web UI makes, read from the UI so the probe asks for what it asks for.
+UI_SUBSCRIPTION = REPO / "lma-ai-stack" / "source" / "ui" / "src" / "graphql" / "queries" / "onMeetingNotification.js"
+LIVE_WAIT_SECONDS = 30
+PAGE_WAIT_MS = 30000
 MEETING_WAIT_SECONDS = 90
 DELETE_WAIT_SECONDS = 120
 RATE_PER_MINUTE = 120
@@ -117,14 +137,16 @@ def _publisher(deployment: Deployment):
 class Probe:
     """One run of the scenario; observations go in ``self.observed``."""
 
-    def __init__(self, deployment: Deployment, id_token: str, username: str, notifications: Any):
+    def __init__(
+        self, deployment: Deployment, id_token: str, username: str, notifications: Any, owner: str | None = None
+    ):
         self.d = deployment
         self.id_token = id_token
         self.username = username
         self.n = notifications
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
         self.call_id = f"integ-test-notifications-{stamp}-{uuid.uuid4().hex[:8]}"
-        self.owner = f"integ-notifications-{uuid.uuid4().hex[:8]}@example.com"
+        self.owner = owner or f"integ-notifications-{uuid.uuid4().hex[:8]}@example.com"
         self.observed: dict[str, Any] = {"call_id": self.call_id}
         self.list_keys: dict[str, str] = {}
 
@@ -259,6 +281,15 @@ class Probe:
         self.observed["read_after_share"] = items
         self.observed["read_guidance_only"] = [item["Category"] for item in self.read("guidance") or []]
 
+    def live(self, title: str) -> dict:
+        """Subscribe as the test user, as the web UI does, publish once, and return what arrived."""
+        return live_delivery(
+            self.d,
+            self.id_token,
+            self.call_id,
+            lambda: self.publish(category="status", type="live", title=title),
+        )
+
     def dedup(self) -> None:
         again = self.publish(
             category="guidance",
@@ -344,6 +375,158 @@ class Probe:
         self.observed["rows_after_delete"] = len(self.partition(f"nt#{self.call_id}"))
 
 
+# ── live delivery ──────────────────────────────────────────────────────────
+
+
+def ui_subscription() -> str:
+    """The web UI's onMeetingNotification subscription document."""
+    match = re.search(r"`([^`]*)`", UI_SUBSCRIPTION.read_text())
+    if not match:
+        raise ProbeError(f"no subscription document in {UI_SUBSCRIPTION}")
+    return match.group(1)
+
+
+def realtime_url(graphql_url: str) -> str | None:
+    """The AppSync real-time endpoint of a GraphQL URL, or None for a custom domain."""
+    if ".appsync-api." not in graphql_url:
+        return None
+    return graphql_url.replace("https://", "wss://").replace(".appsync-api.", ".appsync-realtime-api.")
+
+
+async def _live(url: str, host: str, token: str, call_id: str, publish) -> dict:
+    import websockets  # pylint: disable=import-outside-toplevel
+
+    auth = {"host": host, "Authorization": token}
+    header = base64.b64encode(json.dumps(auth).encode()).decode()
+    payload = base64.b64encode(b"{}").decode()
+    query = ui_subscription()
+    # The meeting page subscribes for its meeting; the top navigation for every meeting.
+    subscriptions = {"meeting": {"callId": call_id}, "every": {}}
+    seen: dict = {"acks": {}, "received": {name: [] for name in subscriptions}}
+    async with websockets.connect(f"{url}?header={header}&payload={payload}", subprotocols=["graphql-ws"]) as ws:
+        await ws.send(json.dumps({"type": "connection_init"}))
+        await asyncio.wait_for(ws.recv(), timeout=20)
+        for name, variables in subscriptions.items():
+            start = {
+                "data": json.dumps({"query": query, "variables": variables}),
+                "extensions": {"authorization": auth},
+            }
+            await ws.send(json.dumps({"id": name, "type": "start", "payload": start}))
+        deadline = time.monotonic() + 20
+        while len(seen["acks"]) < len(subscriptions) and time.monotonic() < deadline:
+            message = json.loads(await asyncio.wait_for(ws.recv(), timeout=20))
+            if message.get("type") in ("start_ack", "error") and message.get("id") in subscriptions:
+                seen["acks"][message["id"]] = message["type"] if message["type"] == "start_ack" else message
+        if sorted(seen["acks"]) != sorted(subscriptions) or any(a != "start_ack" for a in seen["acks"].values()):
+            return seen
+        published = await asyncio.get_running_loop().run_in_executor(None, publish)
+        seen["published_id"] = published.get("NotificationId")
+        deadline = time.monotonic() + LIVE_WAIT_SECONDS
+        def has_published(name: str) -> bool:
+            return any(item.get("NotificationId") == seen["published_id"] for item in seen["received"][name])
+
+        # Until each has the publish itself: an Admin's every-meeting subscription
+        # also receives other meetings' notifications.
+        while time.monotonic() < deadline and not all(has_published(name) for name in subscriptions):
+            try:
+                message = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
+            except asyncio.TimeoutError:
+                continue
+            if message.get("type") == "data" and message.get("id") in subscriptions:
+                seen["received"][message["id"]].append(message["payload"]["data"]["onMeetingNotification"])
+            elif message.get("type") == "error":
+                seen.setdefault("errors", []).append(message)
+    return seen
+
+
+def live_delivery(deployment: Deployment, id_token: str, call_id: str, publish) -> dict:
+    """What the UI's two subscriptions received for one publish, or why it was not checked."""
+    try:
+        import websockets  # noqa: F401  # pylint: disable=import-outside-toplevel,unused-import
+    except ImportError:
+        return {"skipped": "websockets not installed (pip install -r integ-tests/requirements.txt)"}
+    url = realtime_url(deployment.graphql_url)
+    if not url:
+        return {"skipped": "the GraphQL endpoint is not an AppSync domain; its real-time endpoint is not derived"}
+    try:
+        return asyncio.run(_live(url, deployment.graphql_url.split("/")[2], id_token, call_id, publish))
+    except Exception as error:  # noqa: BLE001 — reported by its own test, not the whole scenario
+        return {"error": f"{type(error).__name__}: {str(error)[:200]}"}
+
+
+def page_delivery(listed: Probe, opened: Probe, app_url: str, username: str, password: str) -> dict:
+    """The web UI, signed in as the test user, as two notifications are published.
+
+    The first is published to ``listed``'s meeting with the meeting list open:
+    the top navigation's count shows it. Then ``opened``'s meeting, which has
+    no notifications, is opened by a change of route (not a reload), as a link
+    in LMA opens it, and its first notification is published: its Notifications
+    drawer opens with it.
+    """
+    try:
+        from playwright.sync_api import sync_playwright  # pylint: disable=import-outside-toplevel
+    except ImportError:
+        return {"skipped": "playwright not installed (pip install -r integ-tests/requirements-video.txt)"}
+    on_page = "Published on the meeting page"
+    seen: dict = {}
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True)
+            try:
+                page = browser.new_context(viewport={"width": 1500, "height": 1000}).new_page()
+                page.goto(f"{app_url.rstrip('/')}/#/calls")
+                page.get_by_label(re.compile("^(Username|Email)$")).first.fill(username)
+                page.get_by_label("Password", exact=True).fill(password)
+                page.get_by_role("button", name="Sign in").click()
+                page.wait_for_load_state("networkidle")
+                bell = (
+                    page.locator("#top-navigation")
+                    .get_by_role("button", name=re.compile("^Meeting notifications"))
+                    .first
+                )
+                bell.wait_for(timeout=PAGE_WAIT_MS)
+                # Time for the page's subscriptions to be acknowledged.
+                page.wait_for_timeout(5000)
+                listed.publish(category="status", type="live", title="Published with the meeting list open")
+                try:
+                    page.wait_for_function(
+                        "() => [...document.querySelectorAll('#top-navigation button')]"
+                        ".some((b) => /during this visit/.test(b.getAttribute('aria-label') || ''))",
+                        timeout=PAGE_WAIT_MS,
+                    )
+                except Exception as error:  # noqa: BLE001 — what the bell says is recorded below
+                    seen["bell_wait"] = str(error)[:200]
+                seen["bell_on_list"] = bell.get_attribute("aria-label")
+                page.evaluate(
+                    "(hash) => { window.location.hash = hash; }",
+                    f"#/calls/{urllib.parse.quote(opened.call_id, safe='')}",
+                )
+                page.get_by_text(opened.call_id).first.wait_for(timeout=PAGE_WAIT_MS)
+                page.wait_for_timeout(5000)
+                seen["drawer_triggers_before"] = [
+                    button.get_attribute("aria-label")
+                    for button in page.get_by_role("button", name=re.compile("^Notifications")).all()
+                ]
+                opened.publish(category="status", type="live", title=on_page)
+                try:
+                    page.get_by_text(on_page).first.wait_for(state="visible", timeout=PAGE_WAIT_MS)
+                    seen["drawer_opened"] = True
+                except Exception:  # noqa: BLE001 — reported by the test
+                    seen["drawer_opened"] = False
+                seen["drawer_triggers_after"] = [
+                    button.get_attribute("aria-label")
+                    for button in page.get_by_role("button", name=re.compile("^Notifications")).all()
+                ]
+            finally:
+                browser.close()
+    except Exception as error:  # noqa: BLE001 — reported by its own test, not the whole scenario
+        # Only a missing browser is a skip.
+        if "Executable doesn't exist" in str(error):
+            return {"skipped": "playwright's Chromium is not installed (python -m playwright install chromium)"}
+        return {**seen, "error": f"{type(error).__name__}: {str(error)[:200]}"}
+    return seen
+
+
 def run_probe(stack_name: str, region: str | None = None) -> dict:
     """Run the scenario and report what it observed."""
     credentials = cognito_test_user.resolve(region)
@@ -360,10 +543,22 @@ def run_probe(stack_name: str, region: str | None = None) -> dict:
 
     with _publisher(deployment) as notifications:
         probe = Probe(deployment, tokens["id"], user, notifications)
+        # A meeting of the test user's own, with no notifications until the page check.
+        own = Probe(deployment, tokens["id"], user, notifications, owner=user)
         try:
             probe.create_meeting()
+            own.create_meeting()
+            probe.observed["own_call_id"] = own.call_id
             probe.publish_two()
             probe.shared_reads()
+            probe.observed["live_shared"] = probe.live("Published to a shared meeting")
+            app_url = outputs.get("ApplicationCloudfrontEndpoint")
+            probe.observed["page"] = (
+                page_delivery(probe, own, app_url, username, password)
+                if app_url
+                else {"skipped": "the stack has no ApplicationCloudfrontEndpoint output"}
+            )
+            probe.observed["live_owned"] = own.live("Published to an owned meeting")
             probe.dedup()
             probe.user_view()
             probe.burst()
@@ -371,5 +566,8 @@ def run_probe(stack_name: str, region: str | None = None) -> dict:
             probe.transcript_deletion()
             probe.meeting_deletion()
         finally:
-            probe.cleanup()
+            try:
+                probe.cleanup()
+            finally:
+                own.cleanup()
     return probe.observed
