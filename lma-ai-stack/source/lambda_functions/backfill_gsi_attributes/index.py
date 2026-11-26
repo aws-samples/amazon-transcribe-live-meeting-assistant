@@ -160,7 +160,7 @@ def lambda_handler(event, context):
                 stats["skipped"] += 1
                 continue
 
-            # Only stamp list-tracking rows (cls#…)
+            # Only stamp list-tracking rows (cls#…) and consents given in advance
             new_item_type = item_type_of(pk, item.get("SK", ""))
             if not new_item_type:
                 stats["skipped"] += 1

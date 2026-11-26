@@ -1219,15 +1219,18 @@ def list_all_advance_consents(caller: Mapping[str, Any], arguments: Mapping[str,
         except administration.ConsentsUnreadable as error:
             raise BadRequest(str(error)) from error
         key = response.get("LastEvaluatedKey")
-        for entry in entries:
+        more_here = False
+        for position, entry in enumerate(entries):
             item = items.get((entry["PK"], entry["SK"]))
             if item and _admin_matches(item, filters, now):
                 found.append(item)
                 if len(found) == limit:
+                    more_here = position + 1 < len(entries)
                     break
         if len(found) == limit:
-            # The next page starts after the last consent answered.
-            next_key = administration.index_key(found[-1])
+            # The next page starts after the last consent answered, when
+            # anything is left to read.
+            next_key = administration.index_key(found[-1]) if (more_here or key) else None
             break
         # The index read on from here, or nothing more to read.
         next_key = key

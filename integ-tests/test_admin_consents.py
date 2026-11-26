@@ -8,9 +8,9 @@ behaviour asserted.
 
 Default run (no live meeting needed, a few minutes, self-cleaning). Throwaway
 users are created with a permanent password and no invitation message and
-signed in through SRP: an Admin, a User who owns a meeting, and Participants
-Ana, Bo and Cy, each of whom gives a standing consent for every meeting on the
-deployment (and Ana one for the meeting, which lists her). Then:
+signed in through SRP: an Admin, a User who owns a meeting that lists Ana,
+and Participants Ana, Bo and Cy, each of whom gives a standing consent for
+every meeting on the deployment; Ana also sets a display name. Then:
 
 ``test_an_admin_lists_and_filters_everyones_consents``
     listAllAdvanceConsents finds each by the start of the address, with Ana's
@@ -230,6 +230,15 @@ def run(deployment, stamp):
         yield state
     finally:
         everyone = made + state["extra"]
+        # Ana's display name has a search entry (lma_consent.account_names).
+        name_key = f"integ ana {stamp}"
+        ddb.delete_item(
+            TableName=table,
+            Key={
+                "PK": {"S": f"acn#{name_key[:3]}"},
+                "SK": {"S": f"{name_key}\t{users['ana'].username.casefold()}"},
+            },
+        )
         for user in everyone:
             _delete_partition(ddb, table, f"pmc#{user.username.casefold()}")
         month = datetime.now(timezone.utc).strftime("%Y-%m")

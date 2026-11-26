@@ -357,6 +357,12 @@ def test_a_consent_given_is_kept_in_the_index_admins_list_from(admin) -> None:
     ]
 
 
+def test_a_page_filled_by_the_last_consent_has_no_next_token(admin) -> None:
+    store(admin, ANA, 1)
+    store(admin, BO, 2)
+    assert as_admin("listAllAdvanceConsents", {"Limit": 2})["NextToken"] is None
+
+
 def test_the_last_page_has_no_next_token_when_a_filter_reads_past_a_page(admin) -> None:
     for n in range(3):
         store(admin, f"p{n}@example.com", n)

@@ -1114,9 +1114,11 @@ Resources:
           AttributeType: S
         - AttributeName: SK
           AttributeType: S
-        # GSI attribute — stamped on `cls#…` meeting-list rows only.  Enables the
+        # GSI attribute — stamped on `cls#…` meeting-list rows ("call") and on
+        # consents given in advance ("advance_consent").  Enables the
         # TypeDateIndex GSI used by listCallsDateRange / getCallCount resolvers
-        # for efficient date-range meeting-list queries without scanning.
+        # for efficient date-range meeting-list queries without scanning, and
+        # by listAllAdvanceConsents for the Admins' list of every consent.
         - AttributeName: ItemType
           AttributeType: S
       KeySchema:
@@ -6971,7 +6973,8 @@ Resources:
                 #end
                 ## ItemType flags this row for the TypeDateIndex GSI that
                 ## powers listCallsDateRange / getCallCount.  Only list-tracking
-                ## rows carry ItemType so the GSI stays tight.
+                ## rows ("call") and consents given in advance
+                ## ("advance_consent") carry ItemType so the GSI stays tight.
                 "ItemType": $util.dynamodb.toDynamoDBJson("call")
               },
             },

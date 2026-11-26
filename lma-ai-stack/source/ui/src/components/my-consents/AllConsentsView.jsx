@@ -47,6 +47,8 @@ const logger = new ConsoleLogger('AllConsentsView');
 const errorText = (error, fallback) => error?.errors?.[0]?.message || error?.message || fallback;
 
 export const PAGE_SIZE = 50;
+/** The longest note an Admin's withdrawal takes (the server's limit). */
+export const MAX_NOTE_CHARS = 500;
 /** The most empty answers read on through before a page is shown empty. */
 export const MAX_EMPTY_READS = 20;
 /** The most pages a CSV export reads, at 100 consents a page. */
@@ -78,8 +80,9 @@ export const filterVariables = ({ person, scope, state, expiringBefore }) => {
 
 const csvCell = (value) => {
   const text = value === null || value === undefined ? '' : String(value);
-  // A leading =, +, - or @ would be read as a formula by a spreadsheet.
-  const safe = /^[=+\-@]/.test(text) ? `'${text}` : text;
+  // A text a spreadsheet would read as a formula gets a leading apostrophe, as
+  // the configuration comparison export does (configuration/config-text.js).
+  const safe = /^[=+@\t\r]|^-[^0-9.]/.test(text) ? `'${text}` : text;
   return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 };
 
@@ -506,7 +509,7 @@ const AllConsentsView = () => {
               <Button variant="link" onClick={() => setWithdrawing(null)} disabled={busy}>
                 Cancel
               </Button>
-              <Button variant="primary" onClick={withdraw} loading={busy}>
+              <Button variant="primary" onClick={withdraw} loading={busy} disabled={note.length > MAX_NOTE_CHARS}>
                 Withdraw
               </Button>
             </SpaceBetween>
@@ -526,7 +529,8 @@ const AllConsentsView = () => {
                   Note to the person <i>- optional</i>
                 </span>
               }
-              constraintText="At most 500 characters. Shown on their My consents page."
+              constraintText={`${note.length} of ${MAX_NOTE_CHARS} characters. Shown on their My consents page.`}
+              errorText={note.length > MAX_NOTE_CHARS ? `At most ${MAX_NOTE_CHARS} characters.` : undefined}
             >
               <Textarea value={note} onChange={({ detail }) => setNote(detail.value)} ariaLabel="Note to the person" />
             </FormField>

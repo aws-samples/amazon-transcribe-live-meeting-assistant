@@ -3756,7 +3756,8 @@ type AdvanceConsent @aws_cognito_user_pools {
 	ValidUntil: AWSDateTime!
 	WithdrawnAt: AWSDateTime
 	# "withdrawn", "replaced" by a later consent for the same thing,
-	# "account_deleted", or "withdrawn_by_admin" on the person's behalf.
+	# "account_deleted", "withdrawn_by_admin" on the person's behalf, or
+	# "erased" (withdrawn as an Admin's erasure began).
 	WithdrawnReason: String
 	# The note an Admin gave when withdrawing it on the person's behalf.
 	WithdrawnNote: String
