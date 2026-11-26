@@ -88,6 +88,9 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+/** The delete-all confirmation's first sentence. */
+const DELETE_ALL_TEXT = /^Every consent record kept under ana@example.com will be deleted, up to 1,000 at a time/;
+
 const selectFirst = async () => {
   const row = (await screen.findByText('Ana Silva')).closest('tr');
   fireEvent.click(within(row).getByRole('radio'));
@@ -160,7 +163,7 @@ describe('All consents (admin)', () => {
     await selectFirst();
     fireEvent.click(screen.getByRole('button', { name: 'Delete all for this person' }));
     const dialog = await screen.findByRole('dialog', { name: 'Permanently delete consent records' });
-    expect(within(dialog).getByText(/^Every consent record kept under ana@example.com will be deleted, up to 1,000 at a time/)).toBeTruthy();
+    expect(within(dialog).getByText(DELETE_ALL_TEXT)).toBeTruthy();
     const button = within(dialog).getByText('Delete permanently', { selector: 'button *' }).closest('button');
     expect(button.disabled).toBe(true);
     fireEvent.click(within(dialog).getByText('I understand this cannot be undone.'));
@@ -232,7 +235,7 @@ describe('a read or an erasure that does not finish', () => {
     expect(screen.getByText(/records this erasure as partial/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Delete the next ones' }));
     dialog = await screen.findByRole('dialog', { name: 'Permanently delete consent records' });
-    expect(within(dialog).getByText(/^Every consent record kept under ana@example.com will be deleted, up to 1,000 at a time/)).toBeTruthy();
+    expect(within(dialog).getByText(DELETE_ALL_TEXT)).toBeTruthy();
     fireEvent.click(within(dialog).getByText('I understand this cannot be undone.'));
     fireEvent.click(within(dialog).getByText('Delete permanently', { selector: 'button *' }));
     expect(

@@ -1293,7 +1293,9 @@ owner, the users it is shared with and Admins. The page says so before they ask.
   Participant creates its meeting, each one still waiting reaches the meeting
   too, as below.
 
-The owner adds them to the list as usual.
+The owner adds them to the list as usual. A person is asked for once per meeting
+in 30 days, however often they choose the button, and one person may ask at
+most 20 times a day.
 
 #### Asking to be added before the meeting exists
 
@@ -1318,13 +1320,6 @@ meeting is looked for again, and if it now exists the request is published to
 it as well. A publish that fails at either point is logged and the request
 stays on the Virtual Participant's page; it does not fail the meeting's
 creation or the request.
-
-This is the chosen design rather than having the meeting page read the Virtual
-Participant's requests: a notification reaches everyone who can see the
-meeting, in the notifications drawer as well as on the page, and needs nothing
-new on the page. A person is asked for once per meeting
-in 30 days, however often they choose the button, and one person may ask at
-most 20 times a day.
 
 ### What a consent covers
 
@@ -1675,8 +1670,8 @@ person** for an address with more removes the newest 1,000; its audit entry's
 the view says that more records remain and offers **Delete the next ones**,
 which deletes the next 1,000 with an audit entry of its own. Repeat until the
 result no longer says so. Deleting a user with the records ticked counts only
-the consents that account gave, and runs up to five such deletions within
-about 12 seconds; if records still remain, those in force are withdrawn, and
+the consents that account gave, and runs up to five such deletions, starting
+none after about 12 seconds; if records still remain, those in force are withdrawn, and
 it reports how many were deleted and that the rest are to be deleted on the
 **All consents** view.
 

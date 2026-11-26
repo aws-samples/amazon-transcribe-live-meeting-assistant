@@ -16,6 +16,10 @@ and the notifications show them and a later request from the same person
 updates the one notification. See
 docs/meeting-consent.md#asking-to-be-added-before-the-meeting-exists.
 
+The meeting page could instead read the Virtual Participant's requests; a
+notification is used because it reaches everyone who can see the meeting, in
+the notifications drawer as well as on the page, and needs nothing new there.
+
 Nothing here raises. A failure to read the row or to publish is logged; the
 START is not failed for it, because its meeting is already created and a
 redelivered START does not reach this again. The requests stay on the Virtual

@@ -601,6 +601,7 @@ def _erase_advance_consents(email, sub, erased_by):
     """
     if not EVENT_SOURCING_TABLE or not email or not sub:
         return 0
+    deleted = 0
     try:
         # pylint: disable-next=import-outside-toplevel,import-error
         from lma_consent import administration
@@ -608,7 +609,6 @@ def _erase_advance_consents(email, sub, erased_by):
         now = datetime.now(timezone.utc)
         lambda_client = boto3.client("lambda")
         dynamodb = boto3.client("dynamodb")
-        deleted = 0
         started = time.monotonic()
         # One erasure removes at most a bounded number; a few more rounds finish
         # an account with more, while time is left for them.
@@ -635,9 +635,10 @@ def _erase_advance_consents(email, sub, erased_by):
         logger.warning("Could not erase a deleted user's consent records", exc_info=True)
         # At least what a deletion without erasure leaves: none still in force.
         _withdraw_advance_consents(email, sub)
+        done = f" ({deleted} were erased first)" if deleted else ""
         raise ValidationError(
-            "The user was deleted, but their consent records could not be erased; erase them "
-            "on My consents › All consents (admin)"
+            f"The user was deleted, but their consent records could not all be erased{done}; "
+            "erase them on My consents › All consents (admin)"
         ) from exc
     logger.info("Erased %d consent records of a deleted user", deleted)
     if answer.get("MoreRemain"):

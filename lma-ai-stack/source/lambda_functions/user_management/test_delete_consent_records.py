@@ -131,3 +131,18 @@ def test_no_erasure_round_starts_once_its_time_is_spent(calls, monkeypatch) -> N
     with pytest.raises(Exception, match="more remain"):
         delete(deleteConsentRecords=True)
     assert len(rounds) == 1
+
+
+def test_a_round_that_fails_after_one_that_erased_says_how_many_were_erased(
+    calls, monkeypatch
+) -> None:
+    answers = [{"Deleted": 2, "Withdrawn": 0, "ConsentIds": [], "AuditId": "a", "MoreRemain": True}]
+
+    def erase(*_a, **_k):
+        if answers:
+            return answers.pop(0)
+        raise ClientError({"Error": {"Code": "ThrottlingException", "Message": "slow"}}, "Query")
+
+    monkeypatch.setattr(administration, "erase", erase)
+    with pytest.raises(Exception, match=r"could not all be erased \(2 were erased first\)"):
+        delete(deleteConsentRecords=True)
