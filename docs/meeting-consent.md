@@ -1671,7 +1671,7 @@ the view says that more records remain and offers **Delete the next ones**,
 which deletes the next 1,000 with an audit entry of its own. Repeat until the
 result no longer says so. Deleting a user with the records ticked counts only
 the consents that account gave, and runs up to five such deletions, starting
-none after about 12 seconds; if records still remain, those in force are withdrawn, and
+none after about 6 seconds; if records still remain, those in force are withdrawn, and
 it reports how many were deleted and that the rest are to be deleted on the
 **All consents** view.
 

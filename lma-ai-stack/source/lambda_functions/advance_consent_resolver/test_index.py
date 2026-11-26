@@ -991,3 +991,18 @@ def test_a_request_on_a_meeting_and_one_on_its_vp_share_one_notification_key(aws
         **advance.participant_list_request_notification(BO, ""),
         "timeout": 10,
     }
+
+
+def test_a_failed_second_look_for_the_meeting_still_answers_the_request_as_made(aws, monkeypatch):
+    aws["dynamo"].vps.items[(VP_ID, None)] = {"id": VP_ID, "Owner": OWNER, "CallId": "not yet"}
+    real_meeting_of = index.meeting_of
+
+    def failing_second_look(arguments, consistent=False):
+        if consistent:
+            raise ClientError({"Error": {"Code": "ProvisionedThroughputExceededException"}}, "Get")
+        return real_meeting_of(arguments)
+
+    monkeypatch.setattr(index, "meeting_of", failing_second_look)
+    answer = call("askToBeAddedToMeeting", BO, {"input": {"VirtualParticipantId": VP_ID}})
+    assert answer == {"Requested": True, "Listed": False}
+    assert aws["dynamo"].vps.items[(VP_ID, None)]["participantListRequests"][0]["email"] == BO

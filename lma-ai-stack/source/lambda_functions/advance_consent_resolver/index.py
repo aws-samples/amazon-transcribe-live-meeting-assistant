@@ -268,13 +268,14 @@ def _labels(value: Any) -> List[Dict[str, str]]:
     return out
 
 
-def _meeting_row(call_id: str) -> Optional[Dict[str, Any]]:
+def _meeting_row(call_id: str, consistent: bool = False) -> Optional[Dict[str, Any]]:
     item = (
         DYNAMODB.Table(EVENT_SOURCING_TABLE)
         .get_item(
             Key={"PK": f"c#{call_id}", "SK": f"c#{call_id}"},
             ProjectionExpression="CallId, #o, Participants, Labels, CreatedAt",
             ExpressionAttributeNames={"#o": "Owner"},
+            ConsistentRead=consistent,
         )
         .get("Item")
     )
@@ -305,7 +306,7 @@ def _ref_id(value: Any, name: str) -> str:
     return value
 
 
-def meeting_of(arguments: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+def meeting_of(arguments: Mapping[str, Any], consistent: bool = False) -> Optional[Dict[str, Any]]:
     """The meeting a consent link names, or None when there is none.
 
     Named by ``CallId`` or, for a Virtual Participant that may not have created
@@ -346,7 +347,7 @@ def meeting_of(arguments: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
         "ScheduledFor": vp.get("scheduledFor") or None,
     }
     linked = vp.get("CallId")
-    row = _meeting_row(linked) if isinstance(linked, str) and linked else None
+    row = _meeting_row(linked, consistent) if isinstance(linked, str) and linked else None
     if row and (row.get("Owner") or "") == meeting["Owner"]:
         meeting.update(
             {
@@ -975,9 +976,16 @@ def _notify_owner(meeting: Mapping[str, Any], email: str, name: str) -> bool:
         return _publish_request(meeting["CallId"], email, name)
     if not _keep_request_on_vp(meeting, email, name):
         return False
-    current = meeting_of({"VirtualParticipantId": meeting["VirtualParticipantId"]})
+    # Kept on the row either way, so a failure from here on is only logged.
+    try:
+        # A consistent read, so a meeting created moments ago is found.
+        current = meeting_of(
+            {"VirtualParticipantId": meeting["VirtualParticipantId"]}, consistent=True
+        )
+    except (ClientError, BotoCoreError):
+        LOGGER.exception("could not look for the Virtual Participant's meeting again")
+        return True
     if current is not None and current["Kind"] == "call" and listed_entry(current, email) is None:
-        # Kept on the row either way, so a failure here is only logged.
         _publish_request(current["CallId"], email, name)
     return True
 

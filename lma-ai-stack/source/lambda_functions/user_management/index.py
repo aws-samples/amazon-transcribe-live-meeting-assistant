@@ -589,8 +589,9 @@ def delete_user(event, args):
 
 #: The most erasures one account deletion runs, each removing up to MAX_ERASED consents.
 MAX_ERASURE_ROUNDS = 5
-#: No erasure round starts after this many seconds (the function has 30).
-ERASURE_SECONDS = 12.0
+#: No erasure round starts after this many seconds. The function has 30, and a
+#: round already started (up to MAX_ERASED deletes) runs to its end.
+ERASURE_SECONDS = 6.0
 
 
 def _erase_advance_consents(email, sub, erased_by):
