@@ -337,6 +337,7 @@ $(PACKAGE_RELEASE_OUT_FILE): $(PACKAGE_RELEASE_REPLACE_OUT_FILE) | $(OUT_DIR)
 
 	@echo '[INFO] sam packaging for release $(RELEASE_VERSION)'
 	sam package \
+		--region '$(AWS_REGION)' \
 		--s3-bucket '$(RELEASE_S3_BUCKET)' \
 		--s3-prefix '$(RELEASE_S3_PREFIX)/$(RELEASE_VERSION)' \
 		--output-template-file '$(@)' \
@@ -360,13 +361,13 @@ RELEASE_TEMPLATE_S3_URL := s3://$(RELEASE_S3_BUCKET)/$(RELEASE_S3_PREFIX)/$(RELE
 RELEASE_BUNDLE_S3_URL := s3://$(RELEASE_S3_BUCKET)/$(RELEASE_S3_PREFIX)/$(RELEASE_VERSION)/$(shell basename $(BUNDLE_RELEASE_FILE))
 $(RELEASE_UPLOAD_FILE): $(PACKAGE_RELEASE_OUT_FILE) $(BUNDLE_RELEASE_FILE) | $(OUT_DIR)
 	@echo '[INFO] uploading $(PACKAGE_RELEASE_OUT_FILE) to $(RELEASE_TEMPLATE_S3_URL)'
-	aws s3 cp '$(PACKAGE_RELEASE_OUT_FILE)' '$(RELEASE_TEMPLATE_S3_URL)' \
+	aws s3 cp --region '$(AWS_REGION)' '$(PACKAGE_RELEASE_OUT_FILE)' '$(RELEASE_TEMPLATE_S3_URL)' \
 	| tee '$(@)'
 	@echo '[INFO] uploading $(BUNDLE_RELEASE_FILE) to $(RELEASE_BUNDLE_S3_URL)'
-	aws s3 cp '$(BUNDLE_RELEASE_FILE)' '$(RELEASE_BUNDLE_S3_URL)' \
+	aws s3 cp --region '$(AWS_REGION)' '$(BUNDLE_RELEASE_FILE)' '$(RELEASE_BUNDLE_S3_URL)' \
 	| tee -a '$(@)'
-	@echo '[INFO] CloudFormation template URL: https://$(RELEASE_S3_BUCKET).s3.amazonaws.com/$(RELEASE_S3_PREFIX)/$(RELEASE_VERSION)/template.yaml'
-	@echo '[INFO] CloudFormation Console Launch URL: https://$(AWS_REGION).console.aws.amazon.com/cloudformation/home?region=$(AWS_REGION)#/stacks/create/review?templateURL=https://$(RELEASE_S3_BUCKET).s3.amazonaws.com/$(RELEASE_S3_PREFIX)/$(RELEASE_VERSION)/template.yaml'
+	@echo '[INFO] CloudFormation template URL: https://s3.$(AWS_REGION).amazonaws.com/$(RELEASE_S3_BUCKET)/$(RELEASE_S3_PREFIX)/$(RELEASE_VERSION)/template.yaml'
+	@echo '[INFO] CloudFormation Console Launch URL: https://$(AWS_REGION).console.aws.amazon.com/cloudformation/home?region=$(AWS_REGION)#/stacks/create/review?templateURL=https://s3.$(AWS_REGION).amazonaws.com/$(RELEASE_S3_BUCKET)/$(RELEASE_S3_PREFIX)/$(RELEASE_VERSION)/template.yaml'
 
 release: $(RELEASE_UPLOAD_FILE)
 .PHONY: release
