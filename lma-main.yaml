@@ -1382,7 +1382,6 @@ Mappings:
 
 Conditions:
   ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
-  ShouldDeleteDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "false"]
   ShouldCreateRecordingBucket: !Equals ["", ""]
   ShouldUseStrandsBedrock:
     !Equals [!Ref MeetingAssistService, "STRANDS_BEDROCK"]
@@ -2216,7 +2215,11 @@ Resources:
     DeletionPolicy: Delete
 
   ##########################################################################
-  # Custom Resource to empty S3 buckets before deletion
+  # Custom resource that empties and deletes the logging and recordings
+  # buckets when the stack is deleted with EnableDataRetentionOnDelete=false.
+  # It exists whatever that parameter says, so that the resources that use the
+  # buckets can name it in DependsOn; with EnableDataRetentionOnDelete=true its
+  # Delete leaves the buckets alone (they are retained by their DeletionPolicy).
   ##########################################################################
   S3BucketCleanupRole:
     Type: AWS::IAM::Role
@@ -2227,7 +2230,6 @@ Resources:
             reason: 'AWS-managed policies are used intentionally for standard Lambda execution; scope is narrow'
           - id: AwsSolutions-IAM5
             reason: 'Wildcards scoped by service/resource or PassedToService condition; standard CFN least-privilege pattern'
-    Condition: ShouldDeleteDataOnDelete
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -2277,7 +2279,6 @@ Resources:
   # would let Lambda create the group itself.
   S3BucketCleanupFunctionLogGroup:
     Type: AWS::Logs::LogGroup
-    Condition: ShouldDeleteDataOnDelete
     Properties:
       LogGroupName: !Sub "/${AWS::StackName}/lambda/S3BucketCleanupFunction"
       RetentionInDays: !Ref CloudWatchLogsExpirationInDays
@@ -2285,7 +2286,6 @@ Resources:
 
   S3BucketCleanupFunction:
     Type: AWS::Lambda::Function
-    Condition: ShouldDeleteDataOnDelete
     DependsOn:
       - S3BucketCleanupFunctionLogGroup
     Metadata:
@@ -2317,6 +2317,7 @@ Resources:
       Environment:
         Variables:
           LOG_LEVEL: !Ref LogLevel
+          RETAIN_DATA_ON_DELETE: !Ref EnableDataRetentionOnDelete
           LOGGING_BUCKET_NAME: !Ref LoggingBucket
           RECORDINGS_BUCKET_NAME: !If
             - ShouldCreateRecordingBucket
@@ -2324,160 +2325,114 @@ Resources:
             - ""
       Code:
         ZipFile: |
+          import logging
           import os
+          import time
+
           import boto3
           import cfnresponse
-          import logging
-          
+          from botocore.exceptions import ClientError
+
           logger = logging.getLogger()
           logger.setLevel(getattr(logging, os.environ.get('LOG_LEVEL', 'INFO')))
-          
+
           s3 = boto3.client('s3')
-          
+
+          # Error codes worth another attempt: objects still arriving (access logs
+          # are delivered asynchronously), and S3 reporting a conflicting operation
+          # or a transient fault.
+          RETRYABLE_CODES = {
+              'BucketNotEmpty', 'OperationAborted', 'SlowDown', 'InternalError',
+              'ServiceUnavailable', 'RequestTimeout', 'Throttling', 'ThrottlingException',
+          }
+          MAX_ATTEMPTS = 8
+          BASE_DELAY_SECONDS = 2
+          MAX_DELAY_SECONDS = 30
+
+
+          def error_code(error):
+              return error.response.get('Error', {}).get('Code', '')
+
+
           def empty_bucket(bucket_name):
-              """Empty all objects and versions from an S3 bucket"""
-              try:
-                  logger.info(f"Emptying bucket: {bucket_name}")
-                  
-                  # Check if bucket exists
+              """Delete every object version and delete marker in the bucket.
+
+              Listing versions covers unversioned buckets too (their objects have
+              the version ID "null") and buckets whose versioning is suspended."""
+              logger.info("Emptying bucket %s", bucket_name)
+              paginator = s3.get_paginator('list_object_versions')
+              for page in paginator.paginate(Bucket=bucket_name):
+                  objects = [
+                      {'Key': item['Key'], 'VersionId': item['VersionId']}
+                      for item in page.get('Versions', []) + page.get('DeleteMarkers', [])
+                  ]
+                  if objects:
+                      logger.info("Deleting %d object versions from %s", len(objects), bucket_name)
+                      result = s3.delete_objects(
+                          Bucket=bucket_name, Delete={'Objects': objects, 'Quiet': True}
+                      )
+                      for failure in result.get('Errors', []):
+                          logger.warning("Could not delete %s: %s", failure.get('Key'), failure.get('Code'))
+
+
+          def delete_bucket_with_retry(bucket_name, max_attempts=MAX_ATTEMPTS, sleep=time.sleep):
+              """Empty and delete the bucket, retrying transient S3 errors with backoff."""
+              for attempt in range(1, max_attempts + 1):
                   try:
-                      s3.head_bucket(Bucket=bucket_name)
-                  except s3.exceptions.NoSuchBucket:
-                      logger.info(f"Bucket {bucket_name} does not exist, skipping")
-                      return
-                  except Exception as e:
-                      logger.warning(f"Error checking bucket {bucket_name}: {e}")
-                      return
-                  
-                  # Check if versioning is enabled
-                  try:
-                      versioning = s3.get_bucket_versioning(Bucket=bucket_name)
-                      is_versioned = versioning.get('Status') == 'Enabled'
-                  except Exception as e:
-                      logger.warning(f"Could not get versioning status: {e}")
-                      is_versioned = False
-                  
-                  # Delete all object versions
-                  if is_versioned:
-                      logger.info(f"Bucket {bucket_name} has versioning enabled, deleting all versions")
-                      paginator = s3.get_paginator('list_object_versions')
-                      
-                      for page in paginator.paginate(Bucket=bucket_name):
-                          # Delete versions
-                          versions = page.get('Versions', [])
-                          if versions:
-                              objects_to_delete = [{'Key': obj['Key'], 'VersionId': obj['VersionId']} 
-                                                 for obj in versions]
-                              if objects_to_delete:
-                                  logger.info(f"Deleting {len(objects_to_delete)} object versions")
-                                  s3.delete_objects(
-                                      Bucket=bucket_name,
-                                      Delete={'Objects': objects_to_delete, 'Quiet': True}
-                                  )
-                          
-                          # Delete delete markers
-                          delete_markers = page.get('DeleteMarkers', [])
-                          if delete_markers:
-                              markers_to_delete = [{'Key': obj['Key'], 'VersionId': obj['VersionId']} 
-                                                 for obj in delete_markers]
-                              if markers_to_delete:
-                                  logger.info(f"Deleting {len(markers_to_delete)} delete markers")
-                                  s3.delete_objects(
-                                      Bucket=bucket_name,
-                                      Delete={'Objects': markers_to_delete, 'Quiet': True}
-                                  )
-                  else:
-                      # Delete all objects (non-versioned bucket)
-                      logger.info(f"Bucket {bucket_name} is not versioned, deleting all objects")
-                      paginator = s3.get_paginator('list_objects_v2')
-                      
-                      for page in paginator.paginate(Bucket=bucket_name):
-                          objects = page.get('Contents', [])
-                          if objects:
-                              objects_to_delete = [{'Key': obj['Key']} for obj in objects]
-                              if objects_to_delete:
-                                  logger.info(f"Deleting {len(objects_to_delete)} objects")
-                                  s3.delete_objects(
-                                      Bucket=bucket_name,
-                                      Delete={'Objects': objects_to_delete, 'Quiet': True}
-                                  )
-                  
-                  logger.info(f"Successfully emptied bucket: {bucket_name}")
-                  
-              except Exception as e:
-                  logger.error(f"Error emptying bucket {bucket_name}: {e}", exc_info=True)
-                  raise
-          
-          def delete_bucket_with_retry(bucket_name, max_retries=5):
-              """Delete bucket with retry logic to handle async writes"""
-              for attempt in range(max_retries):
-                  try:
-                      logger.info(f"Attempt {attempt + 1}/{max_retries}: Emptying and deleting bucket {bucket_name}")
-                      
-                      # Empty the bucket
+                      logger.info("Attempt %d/%d: emptying and deleting bucket %s", attempt, max_attempts, bucket_name)
                       empty_bucket(bucket_name)
-                      
-                      # Immediately try to delete the bucket
-                      logger.info(f"Deleting bucket: {bucket_name}")
                       s3.delete_bucket(Bucket=bucket_name)
-                      logger.info(f"Successfully deleted bucket: {bucket_name}")
-                      return True
-                      
-                  except s3.exceptions.NoSuchBucket:
-                      logger.info(f"Bucket {bucket_name} already deleted")
-                      return True
-                      
-                  except Exception as e:
-                      error_msg = str(e)
-                      if 'BucketNotEmpty' in error_msg or 'not empty' in error_msg.lower():
-                          logger.warning(f"Bucket {bucket_name} not empty after cleanup (attempt {attempt + 1}/{max_retries})")
-                          if attempt < max_retries - 1:
-                              logger.info("Waiting 3 seconds before retry...")
-                              import time
-                              time.sleep(3)
-                          else:
-                              logger.error(f"Failed to delete bucket {bucket_name} after {max_retries} attempts")
-                              raise
-                      else:
-                          logger.error(f"Error deleting bucket {bucket_name}: {e}")
+                      logger.info("Deleted bucket %s", bucket_name)
+                      return
+                  except ClientError as error:
+                      code = error_code(error)
+                      if code == 'NoSuchBucket':
+                          logger.info("Bucket %s does not exist", bucket_name)
+                          return
+                      if code not in RETRYABLE_CODES or attempt == max_attempts:
+                          logger.error("Could not delete bucket %s: %s", bucket_name, error)
                           raise
-              
-              return False
-          
+                      delay = min(MAX_DELAY_SECONDS, BASE_DELAY_SECONDS * 2 ** (attempt - 1))
+                      logger.warning("Deleting bucket %s returned %s; retrying in %d s", bucket_name, code, delay)
+                      sleep(delay)
+
+
           def handler(event, context):
-              logger.info(f"Event: {event}")
+              logger.info("Event: %s", event)
               request_type = event['RequestType']
-              
+              # Keep the physical ID CloudFormation already has: a different one on
+              # Update would make CloudFormation send a Delete for the old one.
+              physical_id = event.get('PhysicalResourceId') or 'S3BucketCleanup-' + event['LogicalResourceId']
               try:
-                  if request_type == 'Delete':
-                      # Get exact bucket names from environment variables
-                      import os
-                      logging_bucket = os.environ.get('LOGGING_BUCKET_NAME', '')
-                      recordings_bucket = os.environ.get('RECORDINGS_BUCKET_NAME', '')
-                      
-                      bucket_names = [b for b in [logging_bucket, recordings_bucket] if b]
-                      logger.info(f"Deleting buckets: {bucket_names}")
-                      
-                      # Delete each bucket with retry logic
+                  if request_type != 'Delete':
+                      logger.info("Request type is %s, nothing to do", request_type)
+                  elif os.environ.get('RETAIN_DATA_ON_DELETE', 'true') != 'false':
+                      logger.info("EnableDataRetentionOnDelete is not false; leaving the buckets in place")
+                  else:
+                      # Recordings first: it writes access logs to the logging bucket.
+                      bucket_names = [
+                          name for name in (
+                              os.environ.get('RECORDINGS_BUCKET_NAME', ''),
+                              os.environ.get('LOGGING_BUCKET_NAME', ''),
+                          ) if name
+                      ]
+                      logger.info("Deleting buckets: %s", bucket_names)
                       for bucket_name in bucket_names:
                           delete_bucket_with_retry(bucket_name)
-                      
-                      logger.info("All buckets deleted successfully")
-                  else:
-                      logger.info(f"Request type is {request_type}, no action needed")
-                  
-                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
-                  
-              except Exception as e:
-                  logger.error(f"Error handling bucket cleanup: {e}", exc_info=True)
-                  cfnresponse.send(event, context, cfnresponse.FAILED, {}, reason=str(e))
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {}, physicalResourceId=physical_id)
+              except Exception as error:
+                  logger.error("Bucket cleanup failed: %s", error, exc_info=True)
+                  cfnresponse.send(
+                      event, context, cfnresponse.FAILED, {}, physicalResourceId=physical_id, reason=str(error)[:1024]
+                  )
 
-  # Note: This custom resource intentionally has NO dependencies on the buckets
-  # Bucket names are passed via Lambda environment variables to avoid implicit dependencies
-  # This ensures the handler is deleted LAST during stack deletion
+  # CloudFormation deletes a resource only after every resource that depends on
+  # it, so each resource that uses the logging or recordings bucket (the nested
+  # stacks that receive their names) lists this handler in DependsOn: the
+  # handler's Delete, which empties and deletes the buckets, then runs after
+  # they are gone. lma-ai-stack/test/test_stack_bucket_cleanup.py checks this.
   S3BucketCleanupHandler:
     Type: Custom::S3BucketCleanup
-    Condition: ShouldDeleteDataOnDelete
     DeletionPolicy: Delete
     Properties:
       ServiceToken: !GetAtt S3BucketCleanupFunction.Arn
@@ -2864,6 +2819,7 @@ Resources:
     Condition: ShouldCreateRecordingBucket
     DependsOn:
       - RecordingsBucketPolicy
+      - S3BucketCleanupHandler
     Properties:
       ServiceToken: !GetAtt RecordingsBucketNotificationFunction.Arn
       Bucket: !Ref RecordingsBucket
@@ -2964,6 +2920,7 @@ Resources:
     DependsOn:
       - IsStacknameLengthOK
       - ValidateParameters
+      - S3BucketCleanupHandler
     Properties:
       # yamllint disable rule:line-length
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-cognito-stack/template.yaml
@@ -2992,6 +2949,7 @@ Resources:
     DependsOn:
       - IsStacknameLengthOK
       - ValidateParameters
+      - S3BucketCleanupHandler
     Properties:
       # yamllint disable rule:line-length
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-ai-stack/<VERSION_TOKEN>/template.yaml
@@ -3130,6 +3088,7 @@ Resources:
     DependsOn:
       - IsStacknameLengthOK
       - ValidateParameters
+      - S3BucketCleanupHandler
     Properties:
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-bedrockkb-stack/template.yaml
       Parameters:
@@ -3236,6 +3195,7 @@ Resources:
     DependsOn:
       - IsStacknameLengthOK
       - ValidateParameters
+      - S3BucketCleanupHandler
     Properties:
       # yamllint disable rule:line-length
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-asr-microvm-stack/template.yaml
@@ -3260,6 +3220,8 @@ Resources:
 
   WEBSOCKETTRANSCRIBERSTACK:
     Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - S3BucketCleanupHandler
     Properties:
       # yamllint disable rule:line-length
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-websocket-transcriber-stack/<VERSION_TOKEN>/template.yaml
@@ -3354,6 +3316,7 @@ Resources:
     DependsOn:
       - AISTACK
       - MEETINGASSISTSETUP
+      - S3BucketCleanupHandler
     Properties:
       # yamllint disable rule:line-length
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-virtual-participant-stack/template.yaml
