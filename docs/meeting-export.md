@@ -93,7 +93,7 @@ The meeting page always offers its download as a link of this kind.
   ],
   "consent": {"meetingId": "...", "mode": "opt_in", "rule": "each_participant", "status": "granted", "captureAllowed": true,
               "noticePostedAt": "...", "notices": [{"channel": "chat", "postedAt": "..."}],
-              "events": [{"participantName": "Priya Shah", "decision": "consent", "source": "chat", "at": "...", "speakerId": null, "speakerLinkBasis": null, "speakerLinkedAt": null, "matchBasis": null, "givenInAdvance": null}],
+              "events": [{"participantName": "Priya Shah", "decision": "consent", "source": "chat", "at": "...", "speakerId": null, "speakerLinkBasis": null, "speakerLinkedAt": null, "matchBasis": null, "matchedNameSource": null, "givenInAdvance": null}],
               "attestation": null, "hasEvidence": true, "startedAt": "...", "updatedAt": "..."},
   "agenda": {"text": "...", "source": "mcp"},
   "context": "...",
@@ -219,9 +219,15 @@ tool, which is built by the same code:
   [consent given in advance](meeting-consent.md#in-the-meeting) counted for an
   attendee, or the objection recorded when it was withdrawn during the meeting:
   `matchBasis` says how the attendee was matched to the participant list
-  (`display_name`), and `givenInAdvance` gives the consent's `scope`,
-  `grantedAt`, `validUntil`, `noticeHash`, `noticeVersion` and `withdrawn`,
-  never the person's address. Both are null on every other event.
+  (`display_name`), `matchedNameSource` which of the listed person's names it
+  was (`list`, the list entry's name; `display_name` or `short_name`, a name
+  their LMA account goes by; see
+  [The match is by display name](meeting-consent.md#the-match-is-by-display-name)),
+  and `givenInAdvance` gives the consent's `scope`, `grantedAt`, `validUntil`,
+  `noticeHash`, `noticeVersion` and `withdrawn`, never the person's address.
+  They are null on every other event, and `matchedNameSource` is also null on
+  an event recorded before it was noted; it is not required by the schema, so
+  an export without it still validates.
   `speakerLinkBasis` says how the event was linked to the speaker who gave it,
   and `speakerLinkedAt` when; both are null for an event that was never linked.
   The basis is `same_segment`, the reply is that speaker's own line of the

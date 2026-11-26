@@ -34,8 +34,10 @@ import {
   getAdvanceConsentInvitation,
   giveAdvanceConsent,
   listMyAdvanceConsents,
+  updateMyAccountNames,
   withdrawAdvanceConsent,
 } from '../../graphql/queries/advanceConsent';
+import { namesInput, namesProblem, parseShortNames, shortNamesText } from '../common/account-names';
 import {
   consentLinkMeeting,
   consentScopeLabel,
@@ -658,6 +660,124 @@ MyConsentsList.propTypes = {
 };
 
 /**
+ * The names the signed-in person goes by in meetings: a display name and short
+ * names, by which LMA matches them among a meeting's attendees to their entry
+ * on its participant list, for their consent given in advance. A name typed on
+ * a meeting's participant list counts for that meeting as well.
+ */
+export const MyNamesInMeetings = ({ answer = null, onSaved }) => {
+  const names = answer?.Names || null;
+  const [displayName, setDisplayName] = useState('');
+  const [shortNames, setShortNames] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [result, setResult] = useState(null);
+
+  useEffect(() => {
+    setDisplayName(names?.DisplayName || '');
+    setShortNames(shortNamesText(names?.ShortNames));
+  }, [names?.DisplayName, (names?.ShortNames || []).join('|')]);
+
+  const problem = namesProblem(displayName, parseShortNames(shortNames));
+  const unchanged =
+    (names?.DisplayName || '') === namesInput(displayName, shortNames).displayName &&
+    shortNamesText(names?.ShortNames) === shortNamesText(parseShortNames(shortNames));
+
+  const save = async () => {
+    setSaving(true);
+    setResult(null);
+    try {
+      const { displayName: DisplayName, shortNames: ShortNames } = namesInput(displayName, shortNames);
+      await client.graphql({ query: updateMyAccountNames, variables: { input: { DisplayName, ShortNames } } });
+      setResult({ type: 'success', text: 'Your names are saved. They apply in meetings from now on.' });
+      onSaved();
+    } catch (error) {
+      logger.error('could not save your names', error);
+      setResult({ type: 'error', text: errorText(error, 'Your names could not be saved.') });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Container
+      header={
+        <Header
+          variant="h2"
+          description={
+            'These names are how LMA recognises you among a meeting’s attendees, for the consent you give in ' +
+            'advance, in every meeting whose participant list has your address.'
+          }
+        >
+          Your names in meetings
+        </Header>
+      }
+    >
+      <SpaceBetween size="m">
+        {result && (
+          <Alert type={result.type} dismissible onDismiss={() => setResult(null)}>
+            {result.text}
+          </Alert>
+        )}
+        <FormField
+          label="Display name"
+          description="The name you usually show in meetings, as the meeting platform displays it."
+          constraintText={
+            names?.AccountName && !displayName.trim()
+              ? `Without one, your account's name applies: ${names.AccountName}`
+              : 'At most 100 characters.'
+          }
+        >
+          <Input
+            value={displayName}
+            onChange={({ detail }) => setDisplayName(detail.value)}
+            placeholder={names?.AccountName || 'For example, Ana Silva'}
+            ariaLabel="Display name"
+            disabled={!answer}
+          />
+        </FormField>
+        <FormField
+          label={
+            <span>
+              Short names <i>- optional</i>
+            </span>
+          }
+          description="Other names you show in meetings, separated by commas."
+          constraintText="At most 5, each at most 50 characters."
+          errorText={problem || undefined}
+        >
+          <Input
+            value={shortNames}
+            onChange={({ detail }) => setShortNames(detail.value)}
+            placeholder="For example, Ana, A. Silva"
+            ariaLabel="Short names"
+            disabled={!answer}
+          />
+        </FormField>
+        <Box>
+          LMA counts your consent given in advance for an attendee only when exactly one person on the meeting&apos;s
+          list goes by the name the attendee shows, and nobody else present shows one of that person&apos;s names. A
+          name the organizer types for you on a meeting&apos;s participant list also counts for that meeting.
+        </Box>
+        <Button onClick={save} loading={saving} disabled={!answer || Boolean(problem) || unchanged}>
+          Save names
+        </Button>
+      </SpaceBetween>
+    </Container>
+  );
+};
+
+MyNamesInMeetings.propTypes = {
+  answer: PropTypes.shape({
+    Names: PropTypes.shape({
+      DisplayName: PropTypes.string,
+      ShortNames: PropTypes.arrayOf(PropTypes.string),
+      AccountName: PropTypes.string,
+    }),
+  }),
+  onSaved: PropTypes.func.isRequired,
+};
+
+/**
  * My consents: the signed-in person's consents given in advance, whatever
  * their role, with a standing consent they can give without a link; opened
  * from a meeting's consent link, that meeting's consent page instead.
@@ -708,6 +828,7 @@ const MyConsentsPage = ({ offerPrompt = false }) => {
           <StandingConsentForm answer={answer} onGiven={loadConsents} />
         )}
         <MyConsentsList answer={answer} error={error} onWithdrawn={loadConsents} />
+        <MyNamesInMeetings answer={answer} onSaved={loadConsents} />
       </SpaceBetween>
     </ContentLayout>
   );

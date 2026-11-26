@@ -93,6 +93,7 @@ def test_the_consent_values_are_lma_s_own_and_unchanged(meeting):
                 "speakerLinkBasis": None,
                 "speakerLinkedAt": None,
                 "matchBasis": None,
+                "matchedNameSource": None,
                 "givenInAdvance": None,
             },
             {
@@ -104,6 +105,7 @@ def test_the_consent_values_are_lma_s_own_and_unchanged(meeting):
                 "speakerLinkBasis": None,
                 "speakerLinkedAt": None,
                 "matchBasis": None,
+                "matchedNameSource": None,
                 "givenInAdvance": None,
             },
             {
@@ -115,6 +117,7 @@ def test_the_consent_values_are_lma_s_own_and_unchanged(meeting):
                 "speakerLinkBasis": None,
                 "speakerLinkedAt": None,
                 "matchBasis": None,
+                "matchedNameSource": None,
                 "givenInAdvance": None,
             },
             {
@@ -126,6 +129,7 @@ def test_the_consent_values_are_lma_s_own_and_unchanged(meeting):
                 "speakerLinkBasis": None,
                 "speakerLinkedAt": None,
                 "matchBasis": None,
+                "matchedNameSource": None,
                 "givenInAdvance": None,
             },
         ],

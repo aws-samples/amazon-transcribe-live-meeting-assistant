@@ -204,7 +204,8 @@ describe('a meeting’s consent page', () => {
     renderAt('/consents?meeting=Weekly%20sync');
     expect(await screen.findByText('You are not on this meeting’s list'.replace('’', "'"))).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Give consent' })).toBeNull();
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Bo Chen' } });
+    // The first field on the page; Your names in meetings has its own below it.
+    fireEvent.change(screen.getAllByRole('textbox')[0], { target: { value: 'Bo Chen' } });
     fireEvent.click(screen.getByRole('button', { name: 'Ask to be added' }));
     await waitFor(() => expect(calls('askToBeAddedToMeeting')).toHaveLength(1));
     expect(calls('askToBeAddedToMeeting')[0].variables).toEqual({
@@ -419,5 +420,51 @@ describe('the prompt a Participant lands on', () => {
     renderPrompt({});
     await screen.findByText('Give a standing consent');
     expect(screen.queryByText(CONSENT_PROMPT_TEXT)).toBeNull();
+  });
+});
+
+describe('Your names in meetings', () => {
+  const withNames = (names) => ({
+    listMyAdvanceConsents: () => ({
+      Enabled: true,
+      MaxDays: 365,
+      Email: 'ana@example.com',
+      Consents: [],
+      Names: names,
+    }),
+    updateMyAccountNames: (variables) => ({ ...variables.input, AccountName: null, UpdatedAt: null }),
+  });
+
+  it('shows the person’s names and saves the ones they change', async () => {
+    answer(withNames({ DisplayName: 'Ana Silva', ShortNames: ['Ana'], AccountName: null }));
+    renderAt('/consents');
+    expect(await screen.findByText('Your names in meetings')).toBeTruthy();
+    expect(screen.getByText(/how LMA recognises you among a meeting’s attendees/)).toBeTruthy();
+    const display = await screen.findByLabelText('Display name');
+    await waitFor(() => expect(display.value).toBe('Ana Silva'));
+    expect(screen.getByLabelText('Short names').value).toBe('Ana');
+    fireEvent.change(screen.getByLabelText('Short names'), { target: { value: 'Ana, A. Silva, ana' } });
+    fireEvent.click(screen.getByText('Save names').closest('button'));
+    await waitFor(() => expect(calls('updateMyAccountNames')).toHaveLength(1));
+    expect(calls('updateMyAccountNames')[0].variables).toEqual({
+      input: { DisplayName: 'Ana Silva', ShortNames: ['Ana', 'A. Silva'] },
+    });
+    expect(await screen.findByText(/Your names are saved/)).toBeTruthy();
+  });
+
+  it('says the account’s own name applies when no display name is kept', async () => {
+    answer(withNames({ DisplayName: null, ShortNames: [], AccountName: 'Ana S.' }));
+    renderAt('/consents');
+    expect(await screen.findByText("Without one, your account's name applies: Ana S.")).toBeTruthy();
+  });
+
+  it('does not send names the server would refuse', async () => {
+    answer(withNames({ DisplayName: null, ShortNames: [], AccountName: null }));
+    renderAt('/consents');
+    const shorts = await screen.findByLabelText('Short names');
+    fireEvent.change(shorts, { target: { value: 'a, b, c, d, e, f' } });
+    expect(await screen.findByText('At most 5 short names.')).toBeTruthy();
+    const save = screen.getByText('Save names').closest('button');
+    expect(save.disabled || save.getAttribute('aria-disabled') === 'true').toBe(true);
   });
 });

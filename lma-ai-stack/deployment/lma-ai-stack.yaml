@@ -6183,6 +6183,8 @@ Resources:
           CONSENT_EVIDENCE_PREFIX: "lma-consent-evidence/"
           VERIFIER_FUNCTION_NAME: !Ref ConsentEvidenceVerifierFunction
           ADMIN_GROUP: "Admin"
+          # Read for the account holding each listed address and its names.
+          USER_POOL_ID: !Ref UserPoolId
           LOG_LEVEL: !Ref LogLevel
       # Carries lma_consent (the consent rules) and lma_config (the deployment's
       # consent settings). Pure Python, so it does not pin an architecture.
@@ -6254,16 +6256,25 @@ Resources:
                       - "c#*"
               # Consent given in advance (pmc# partitions): read for the
               # attendees a Virtual Participant lists, and noted with the
-              # meetings that counted each one (AppliedAt).
+              # meetings that counted each one (AppliedAt); and the names the
+              # listed addresses' accounts go by, read with them.
               - Effect: Allow
                 Action:
                   - dynamodb:Query
                   - dynamodb:UpdateItem
+                  - dynamodb:BatchGetItem
                 Resource: !GetAtt EventSourcingTable.Arn
                 Condition:
                   ForAllValues:StringLike:
                     "dynamodb:LeadingKeys":
                       - "pmc#*"
+              # The account holding each listed address, for its sub and its
+              # standard name attribute.
+              - Effect: Allow
+                Action:
+                  - cognito-idp:AdminGetUser
+                  - cognito-idp:ListUsers
+                Resource: !Sub "arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}"
               # Which meeting a Virtual Participant created, before its id is
               # used to count a consent given through its link.
               - Effect: Allow
@@ -6769,8 +6780,11 @@ Resources:
   LambdaResolversStack:
     Type: AWS::CloudFormation::Stack
     # Ten of the functions read the configuration table, and none may go live
-    # before the seeder has written the configuration they read.
-    DependsOn: SeedConfiguration
+    # before the seeder has written the configuration they read. It also
+    # declares a few resolvers, which need the schema's fields to exist.
+    DependsOn:
+      - SeedConfiguration
+      - AppSyncSchema
     Properties:
       TemplateURL: ../deployment/lma-ai-lambda-resolvers.yaml
       Parameters:
@@ -6794,6 +6808,7 @@ Resources:
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         RecordingsBucketName: !Ref S3BucketName
         TranscriptionExpirationInDays: !Ref TranscriptionExpirationInDays
+        UserManagementDataSourceName: !GetAtt UserManagementDataSource.Name
         UserPoolId: !Ref UserPoolId
         VirtualParticipantTable: !Ref VirtualParticipantTable
         VirtualParticipantTableArn: !GetAtt VirtualParticipantTable.Arn
@@ -11695,16 +11710,25 @@ Resources:
                     "dynamodb:LeadingKeys":
                       - "usr#*"
               # A deleted user's consents given in advance, read and marked
-              # withdrawn: only under the pmc# partitions.
+              # withdrawn, and the names accounts go by in meetings (pmc#
+              # <address>, account-names), read, set by an Admin and deleted
+              # with the account, with their search entries (acn#), which the
+              # account search reads. The names and their entries are written
+              # in one transaction.
               - Effect: Allow
                 Action:
                   - "dynamodb:Query"
                   - "dynamodb:UpdateItem"
+                  - "dynamodb:GetItem"
+                  - "dynamodb:BatchGetItem"
+                  - "dynamodb:PutItem"
+                  - "dynamodb:DeleteItem"
                 Resource: !GetAtt EventSourcingTable.Arn
                 Condition:
                   ForAllValues:StringLike:
                     "dynamodb:LeadingKeys":
                       - "pmc#*"
+                      - "acn#*"
               # A meeting's owner and participant list, read to decide who may
               # see its attendees' account status or create their accounts,
               # and appended to when an Admin creates a user for the meeting

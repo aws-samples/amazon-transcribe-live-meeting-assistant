@@ -60,10 +60,12 @@ def consent_events(consent: Mapping[str, Any], speakers: Any = None) -> List[Dic
     otherwise, and always null without ``speakers``. A name is never matched
     to a speaker.
 
-    ``matchBasis`` and ``givenInAdvance`` are set on an event of source
-    ``pre_meeting``: how the attendee was matched to the participant list
-    (``display_name``) and the consent given in advance it counted
-    (:func:`given_in_advance`); null on every other event.
+    ``matchBasis``, ``matchedNameSource`` and ``givenInAdvance`` are set on an
+    event of source ``pre_meeting``: how the attendee was matched to the
+    participant list (``display_name``), which of the listed person's names
+    matched (``list``, ``display_name`` or ``short_name``; null on an event
+    recorded before the names were noted) and the consent given in advance it
+    counted (:func:`given_in_advance`); null on every other event.
     """
     out = []
     for event in consent.get("Events") or []:
@@ -81,6 +83,7 @@ def consent_events(consent: Mapping[str, Any], speakers: Any = None) -> List[Dic
                 "speakerLinkBasis": link.get("Basis") if link else None,
                 "speakerLinkedAt": link.get("LinkedAt") if link else None,
                 "matchBasis": pre.get("MatchBasis") if pre else None,
+                "matchedNameSource": pre.get("MatchedNameSource") if pre else None,
                 "givenInAdvance": given_in_advance(pre),
             }
         )

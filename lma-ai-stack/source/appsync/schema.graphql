@@ -545,6 +545,11 @@ type Mutation @aws_iam {
 	giveAdvanceConsent(input: GiveAdvanceConsentInput!): AdvanceConsent @aws_cognito_user_pools(cognito_groups: ["Admin", "User", "Participant"])
 	withdrawAdvanceConsent(input: WithdrawAdvanceConsentInput!): AdvanceConsent @aws_cognito_user_pools(cognito_groups: ["Admin", "User", "Participant"])
 	askToBeAddedToMeeting(input: AskToBeAddedToMeetingInput!): AskToBeAddedToMeetingOutput @aws_cognito_user_pools(cognito_groups: ["Admin", "User", "Participant"])
+	# The caller's own display name and short names, by which a meeting's
+	# attendees are matched to them on its participant list
+	# (advance_consent_resolver). Replaces the names kept before; with neither,
+	# they are removed. See docs/meeting-consent.md#the-match-is-by-display-name.
+	updateMyAccountNames(input: UpdateMyAccountNamesInput!): AccountNames @aws_cognito_user_pools(cognito_groups: ["Admin", "User", "Participant"])
 	addCallSummaryText(input: AddCallSummaryTextInput!): Call @aws_iam
 	addTranscriptSegment(input: AddTranscriptSegmentInput!): TranscriptSegment @aws_iam
 	# Written by the call event processor for an ADD_VIDEO_KEYFRAME event; IAM only,
@@ -659,6 +664,8 @@ type Mutation @aws_iam {
 	# the last Admin. Takes effect at the user's next sign-in or token refresh.
 	setUserRole(input: SetUserRoleInput!): User @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	deleteUser(input: DeleteUserInput!): DeleteUserOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	# Sets any user's display name and short names in meetings (Admin only).
+	setUserAccountNames(input: SetUserAccountNamesInput!): User @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	# Creates Participant accounts, and only Participant accounts, for people on
 	# a meeting's (or a Virtual Participant's) participant list who have no
 	# account. For the meeting's owner and Admins; each address must be on the
@@ -796,6 +803,12 @@ type Query @aws_iam {
 	# (VirtualParticipantId), has an LMA account, and its role. For the
 	# meeting's owner and Admins; nothing else about the accounts is returned.
 	getMeetingParticipantAccounts(CallId: ID, VirtualParticipantId: ID): [MeetingParticipantAccount] @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
+	# The participant list's account search: at most 10 accounts whose display
+	# name, short name or email address starts with text (at least 3
+	# characters, ignoring case and spacing), each with its display name and
+	# address only. A User searches at most 200 times a day. See
+	# docs/virtual-participant.md#participant-list.
+	searchAccounts(text: String!): [AccountMatch] @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	getMyZoomCredentialsStatus: ZoomCredentialsStatus @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	getMyChromeProfileStatus(platform: String): ChromeProfileStatus @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	# A Participant's read-only view of the meetings shared with them
@@ -2222,6 +2235,10 @@ type MeetingConsentPreMeeting @aws_cognito_user_pools
 	NoticeVersion: String
 	# How the attendee was matched to the participant list: "display_name".
 	MatchBasis: String
+	# Which of the person's names the attendee's display name was: "list" (the
+	# name their list entry gives), "display_name" (their LMA account's display
+	# name) or "short_name" (one of their account's short names).
+	MatchedNameSource: String
 	# The name the participant list gives the person matched.
 	ListedName: String
 	# True on the objection recorded when the consent was withdrawn.
@@ -3375,6 +3392,13 @@ type User @aws_cognito_user_pools {
 	# key authorizer), each written at most once per 15 minutes. Null as for
 	# lastSignInAt.
 	lastActiveAt: AWSDateTime
+	# The user pool's standard name attribute, when set: the display name in
+	# meetings of an account that has none of its own.
+	accountName: String
+	# The names the account goes by in meetings, kept in LMA. See
+	# docs/meeting-consent.md#the-match-is-by-display-name.
+	displayName: String
+	shortNames: [String]
 }
 
 type UserList @aws_cognito_user_pools {
@@ -3391,6 +3415,24 @@ input CreateUserInput {
 	# then names that meeting and links to its consent page, and the address is
 	# added to the meeting's participant list if it is not on it.
 	inviteToMeeting: String
+	# Optional: the names the account goes by in meetings. displayName at most
+	# 100 characters; shortNames at most 5, each at most 50.
+	displayName: String
+	shortNames: [String!]
+}
+
+input SetUserAccountNamesInput {
+	username: String!
+	# Both replace the names kept before; with neither, they are removed.
+	displayName: String
+	shortNames: [String!]
+}
+
+# An account the participant list's search found: its display name (null when
+# it has none) and its email address, nothing else.
+type AccountMatch @aws_cognito_user_pools {
+	name: String
+	email: String!
 }
 
 input DeleteUserInput {
@@ -3720,6 +3762,25 @@ type AdvanceConsentList @aws_cognito_user_pools {
 	MaxDays: Int
 	# The address the consents are kept under: the caller's, as the user pool holds it.
 	Email: String
+	# The names the caller goes by in meetings.
+	Names: AccountNames
+}
+
+# The names an account goes by in meetings, by which a meeting's attendees are
+# matched to its participant list. AccountName is the user pool's standard name
+# attribute, the display name when DisplayName is not set.
+type AccountNames @aws_cognito_user_pools {
+	DisplayName: String
+	ShortNames: [String]
+	AccountName: String
+	UpdatedAt: AWSDateTime
+}
+
+# DisplayName at most 100 characters; ShortNames at most 5, each at most 50.
+# Trimmed; control characters, < and > are refused; repeats are kept once.
+input UpdateMyAccountNamesInput {
+	DisplayName: String
+	ShortNames: [String!]
 }
 
 type AdvanceConsentInvitation @aws_cognito_user_pools {

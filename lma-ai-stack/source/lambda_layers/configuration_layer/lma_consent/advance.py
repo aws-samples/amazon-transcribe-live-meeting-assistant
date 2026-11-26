@@ -326,37 +326,62 @@ def same_scope(a: Mapping[str, Any], b: Mapping[str, Any]) -> bool:
 
 
 def match_listed(
-    present: Iterable[Any], listed: Iterable[Mapping[str, Any]]
+    present: Iterable[Any],
+    listed: Iterable[Mapping[str, Any]],
+    accounts: Optional[Mapping[str, Mapping[str, Any]]] = None,
 ) -> Dict[str, Dict[str, str]]:
     """The attendees present matched to the participant list, by display name.
 
-    Answers each present display name that matches exactly one listed person,
-    with that person's ``name`` and ``email``. Names are compared as replies
-    are (:func:`lma_consent.rules.normalize_name`), so case and spacing do not
-    matter. Nobody is matched when the name is empty, when two listed people
-    have that name, or when two attendees present show it: a display name is
-    what the platform shows, and a name shared by two people says nothing about
-    which of them is which. The basis of every match is
+    Each listed person (one per address, compared ignoring case) goes by the
+    name their list entry gives them and, when ``accounts`` has their address
+    in lower case, by their account's names
+    (:func:`lma_consent.account_names.account_names`: ``display_name`` and
+    ``short_names``). Answers each present display name that equals a name of
+    exactly one listed person, with that person's list ``name``, ``email`` and
+    ``source``, which of their names it was (``list``, ``display_name`` or
+    ``short_name``, in that order when several are the same). Names are
+    compared as replies are (:func:`lma_consent.rules.normalize_name`), so case
+    and spacing do not matter. Nobody is matched when the name is empty, when
+    two listed people go by that name, when two attendees present show it, or
+    when two attendees each show one of the same person's names:
+    a display name is what the platform shows, and a name shared by two people
+    says nothing about which of them is which. The basis of every match is
     :data:`lma_consent.rules.MATCH_DISPLAY_NAME`.
     """
-    by_name: Dict[str, List[Dict[str, str]]] = {}
+    people: Dict[str, Dict[str, str]] = {}
     for person in listed or []:
         if not isinstance(person, Mapping):
             continue
         email = person.get("email")
-        key = normalize_name(person.get("name"))
-        if key and isinstance(email, str) and email.strip():
-            by_name.setdefault(key, []).append(
-                {"name": str(person.get("name") or "").strip(), "email": email.strip()}
+        if isinstance(email, str) and email.strip():
+            people.setdefault(
+                email.strip().casefold(),
+                {"name": str(person.get("name") or "").strip(), "email": email.strip()},
             )
+    by_name: Dict[str, Dict[str, str]] = {}
+    for address, person in people.items():
+        account = (accounts or {}).get(address) or {}
+        names = [(person["name"], "list"), (account.get("display_name"), "display_name")]
+        names += [(short, "short_name") for short in account.get("short_names") or []]
+        for name, source in names:
+            key = normalize_name(name)
+            if key:
+                # The first of the person's names with this key decides the source.
+                by_name.setdefault(key, {}).setdefault(address, source)
     seen: Dict[str, List[str]] = {}
     for name in present or []:
         key = normalize_name(name)
         if key:
             seen.setdefault(key, []).append(str(name))
-    matches: Dict[str, Dict[str, str]] = {}
+    matched: Dict[str, List[tuple]] = {}
     for key, names in seen.items():
-        people = by_name.get(key) or []
-        if len(people) == 1 and len(names) == 1:
-            matches[names[0]] = people[0]
-    return matches
+        holders = by_name.get(key) or {}
+        if len(holders) == 1 and len(names) == 1:
+            [(address, source)] = holders.items()
+            matched.setdefault(address, []).append((names[0], source))
+    # Two attendees showing two names of one person: neither is that person.
+    return {
+        found[0][0]: {**people[address], "source": found[0][1]}
+        for address, found in matched.items()
+        if len(found) == 1
+    }

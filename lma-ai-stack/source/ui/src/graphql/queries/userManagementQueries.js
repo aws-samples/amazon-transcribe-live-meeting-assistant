@@ -17,6 +17,9 @@ export const listUsers = /* GraphQL */ `
         createdAt
         lastSignInAt
         lastActiveAt
+        accountName
+        displayName
+        shortNames
       }
       lastSignInAvailable
     }
@@ -32,6 +35,21 @@ export const createUser = /* GraphQL */ `
       status
       enabled
       createdAt
+      displayName
+      shortNames
+    }
+  }
+`;
+
+// A user's names in meetings, set by an Admin.
+export const setUserAccountNames = /* GraphQL */ `
+  mutation SetUserAccountNames($input: SetUserAccountNamesInput!) {
+    setUserAccountNames(input: $input) {
+      username
+      email
+      accountName
+      displayName
+      shortNames
     }
   }
 `;

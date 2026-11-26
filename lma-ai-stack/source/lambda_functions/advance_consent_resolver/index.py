@@ -5,11 +5,12 @@
 
 """AppSync resolver for consent given in advance, by the signed-in person themselves.
 
-Five operations, each admitted to every signed-in role (Admin, User and
+Six operations, each admitted to every signed-in role (Admin, User and
 Participant) and each acting on the caller's own records only:
 
 =================================== ==============================================
-``listMyAdvanceConsents``           The caller's consents given in advance.
+``listMyAdvanceConsents``           The caller's consents given in advance, and
+                                    the names their account goes by in meetings.
 ``getAdvanceConsentInvitation``     A meeting's consent page, as the caller sees
                                     it: whether they are on its participant list
                                     and, when they are, the meeting, the text they
@@ -30,6 +31,10 @@ Participant) and each acting on the caller's own records only:
                                     in LMA, the people who see the meeting's
                                     participant list that they asked to be added.
                                     Nothing about consent is recorded.
+``updateMyAccountNames``            The caller's display name and short names, by
+                                    which a meeting's attendees are matched to
+                                    them on its participant list
+                                    (lma_consent.account_names).
 =================================== ==============================================
 
 Who the caller is comes from the verified AppSync identity only: the username
@@ -76,7 +81,7 @@ from lma_config import (  # configuration layer
     ConfigurationTableNotConfigured,
     offered_settings,
 )
-from lma_consent import advance  # configuration layer
+from lma_consent import account_names, advance  # configuration layer
 from lma_consent import rules as consent  # configuration layer
 
 # pylint: enable=import-error
@@ -113,6 +118,7 @@ MAX_WITHDRAWAL_MEETINGS = 50
 MAX_SUPERSEDED = 20
 
 DYNAMODB = boto3.resource("dynamodb", config=CLIENT_CONFIG)
+DYNAMODB_CLIENT = boto3.client("dynamodb", config=CLIENT_CONFIG)
 COGNITO = boto3.client("cognito-idp", config=CLIENT_CONFIG)
 LAMBDA = boto3.client("lambda", config=CLIENT_CONFIG)
 
@@ -155,8 +161,8 @@ def caller_of(event: Mapping[str, Any]) -> Dict[str, Any]:
     }
 
 
-def account_email(caller: Mapping[str, Any]) -> str:
-    """The caller's verified email address, as the user pool holds it, in lower case.
+def account_attributes(caller: Mapping[str, Any]) -> Dict[str, Any]:
+    """The caller's user pool attributes, with ``email`` their verified address in lower case.
 
     Read from the user pool by the token's username, and only when its sub is
     the token's, so an address changed or an account replaced since the token
@@ -172,7 +178,12 @@ def account_email(caller: Mapping[str, Any]) -> str:
     email = (attributes.get("email") or "").strip()
     if not email or str(attributes.get("email_verified")).lower() != "true":
         raise Refused("your account has no verified email address")
-    return email.casefold()
+    return {**attributes, "email": email.casefold()}
+
+
+def account_email(caller: Mapping[str, Any]) -> str:
+    """The caller's verified email address, as the user pool holds it, in lower case."""
+    return account_attributes(caller)["email"]
 
 
 # ── settings ────────────────────────────────────────────────────────────────
@@ -536,16 +547,58 @@ def _covering_meeting(meeting: Mapping[str, Any]) -> Dict[str, Any]:
 # ── the operations ──────────────────────────────────────────────────────────
 
 
+def names_out(profile: Optional[Mapping[str, Any]], attributes: Mapping[str, Any]) -> Dict:
+    """The ``AccountNames`` GraphQL shape: the names kept for this account, and its user pool name.
+
+    Names kept for another account that held the address are not this
+    account's, and are answered as none.
+    """
+    mine = profile if profile and profile.get("Subject") == attributes.get("sub") else {}
+    return {
+        "DisplayName": mine.get("DisplayName") or None,
+        "ShortNames": list(mine.get("ShortNames") or []),
+        "AccountName": attributes.get("name") or None,
+        "UpdatedAt": mine.get("UpdatedAt") or None,
+    }
+
+
 def list_my_advance_consents(caller: Mapping[str, Any], _arguments: Mapping[str, Any]) -> Dict:
-    email = account_email(caller)
+    attributes = account_attributes(caller)
+    email = attributes["email"]
     settings = consent_settings()
     now = datetime.now(timezone.utc)
+    profile = account_names.read_profile(DYNAMODB_CLIENT, EVENT_SOURCING_TABLE, email)
     return {
         "Consents": [consent_out(item, now) for item in my_consents(email)],
         "Enabled": bool(settings.get("advanceConsentEnabled")),
         "MaxDays": advance.max_days(settings.get("advanceConsentMaxDays")),
         "Email": email,
+        "Names": names_out(profile, attributes),
     }
+
+
+def update_my_account_names(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict:
+    """Keep the caller's display name and short names, replacing the ones before.
+
+    Each is optional; with neither, the names are removed and the user pool's
+    ``name``, when set, is the display name again.
+    """
+    attributes = account_attributes(caller)
+    try:
+        profile = account_names.save_profile(
+            DYNAMODB_CLIENT,
+            EVENT_SOURCING_TABLE,
+            email=attributes["email"],
+            display_name=data.get("DisplayName"),
+            short_names=data.get("ShortNames"),
+            subject=caller["sub"],
+            updated_by=caller["username"],
+            now=advance.iso(datetime.now(timezone.utc)),
+        )
+    except (account_names.InvalidNames, account_names.NamesChanged) as error:
+        raise BadRequest(str(error)) from error
+    LOGGER.info("account names updated by their owner")
+    return names_out(profile, attributes)
 
 
 def _request_key(meeting: Optional[Mapping[str, Any]], arguments: Mapping[str, Any]) -> str:
@@ -990,6 +1043,7 @@ OPERATIONS = {
     "giveAdvanceConsent": give_advance_consent,
     "withdrawAdvanceConsent": withdraw_advance_consent,
     "askToBeAddedToMeeting": ask_to_be_added_to_meeting,
+    "updateMyAccountNames": update_my_account_names,
 }
 
 

@@ -488,6 +488,7 @@ def test_the_export_s_consent_is_the_record_as_get_meeting_consent_gives_it(fake
                 "speakerLinkBasis": None,
                 "speakerLinkedAt": None,
                 "matchBasis": None,
+                "matchedNameSource": None,
                 "givenInAdvance": None,
             },
             {
@@ -499,6 +500,7 @@ def test_the_export_s_consent_is_the_record_as_get_meeting_consent_gives_it(fake
                 "speakerLinkBasis": None,
                 "speakerLinkedAt": None,
                 "matchBasis": None,
+                "matchedNameSource": None,
                 "givenInAdvance": None,
             },
             {
@@ -510,6 +512,7 @@ def test_the_export_s_consent_is_the_record_as_get_meeting_consent_gives_it(fake
                 "speakerLinkBasis": None,
                 "speakerLinkedAt": None,
                 "matchBasis": None,
+                "matchedNameSource": None,
                 "givenInAdvance": None,
             },
         ],
@@ -601,6 +604,7 @@ def test_a_consent_given_in_advance_is_exported_with_its_basis_and_never_the_add
         "NoticeHash": "a" * 64,
         "NoticeVersion": "abcdefabcdef",
         "MatchBasis": "display_name",
+        "MatchedNameSource": "short_name",
         "ListedName": "Priya Shah",
     }
     from lma_consent import summary as consent_summary  # pylint: disable=import-outside-toplevel
@@ -621,6 +625,7 @@ def test_a_consent_given_in_advance_is_exported_with_its_basis_and_never_the_add
     )
     assert events[0]["source"] == "pre_meeting"
     assert events[0]["matchBasis"] == "display_name"
+    assert events[0]["matchedNameSource"] == "short_name"
     assert events[0]["givenInAdvance"] == {
         "scope": "organizer",
         "grantedAt": "2026-11-25T12:00:00Z",

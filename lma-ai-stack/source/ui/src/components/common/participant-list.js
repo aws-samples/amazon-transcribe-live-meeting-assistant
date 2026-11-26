@@ -100,6 +100,28 @@ export const participantsToText = (participants) =>
 export const participantsInput = (participants) =>
   (participants || []).filter((p) => p && p.email).map(({ name, email }) => ({ name: name || '', email }));
 
+/**
+ * The editor's text with one more person at the end, as "Name <email>" (or the
+ * address alone when the person has no name); unchanged when the address is
+ * already in it, compared ignoring case. For the account picker.
+ */
+export const withParticipant = (text, person) => {
+  const email = (person?.email || '').trim();
+  if (!email) return text || '';
+  const listed = parseParticipantsText(text).participants.some((p) => p.email.toLowerCase() === email.toLowerCase());
+  if (listed) return text || '';
+  const name = collapse((person.name || '').replace(/[<>]/g, ' '));
+  const line = name ? `${name} <${email}>` : email;
+  const current = (text || '').replace(/\s+$/, '');
+  return current ? `${current}\n${line}` : line;
+};
+
+/** The fewest characters the account picker searches with. */
+export const MIN_ACCOUNT_SEARCH_CHARS = 3;
+
+/** Whether the typed text is long enough to search accounts with: 3 characters, ignoring spacing. */
+export const searchableText = (text) => collapse(text).length >= MIN_ACCOUNT_SEARCH_CHARS;
+
 /** Whether two lists are the same people, names and order. */
 export const sameParticipants = (a, b) => JSON.stringify(participantsInput(a)) === JSON.stringify(participantsInput(b));
 

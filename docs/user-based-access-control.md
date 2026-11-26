@@ -60,10 +60,11 @@ below are tested against it, so the table and the deployed behaviour agree.
 | Enrolling your own voice | Yes | Yes | Yes | Each person their own voice only: enrolling it, and deleting it. |
 | Configuration: settings, profiles and their history, prompt templates, chat buttons, voice assistant, transcription engine and cost prices | Yes | No | No |  |
 | Installing and changing MCP servers and skills, and importing or exporting their libraries | Yes | No | No |  |
-| Consent given in advance: your own consents, a meeting's consent page, and asking to be added to its participant list | Yes | Yes | Yes | Each person their own consents only, kept under the email address the user pool holds for them. Giving consent needs that address on the meeting's participant list, whose people see the meeting's name, organizer and labels on its consent page; someone not on it is told only that, and may ask to be added, which is shown in LMA to the people who see the meeting's participant list. |
+| Consent given in advance: your own consents, your names in meetings, a meeting's consent page, and asking to be added to its participant list | Yes | Yes | Yes | Each person their own consents and their own names in meetings only, kept under the email address the user pool holds for them. Giving consent needs that address on the meeting's participant list, whose people see the meeting's name, organizer and labels on its consent page; someone not on it is told only that, and may ask to be added, which is shown in LMA to the people who see the meeting's participant list. |
 | A meeting's participant list: changing it and reading whether each person on it has an LMA account | Yes | Yes | No | Admin: every meeting. User: their own meetings only, not those shared with them, and at most 1,000 different addresses looked up a day. The list can be changed at any time, before, during and after the meeting; named by a Virtual Participant's id, the change is to its meeting's list once the meeting exists, and to the Virtual Participant's own list until then, on the Virtual Participant's owner. The list itself is part of the meeting record, read with it; the account answer is none or the account's role, nothing else about it. |
+| Finding an LMA account by name or address to add to a participant list | Yes | Yes | No | At least 3 characters, matched as the start of an account's display name, short name or email address; at most 10 accounts, each answered with its display name and address only, and no way to page further. A User searches at most 200 times a day. |
 | Creating Participant accounts for the people on a meeting's participant list | Yes | Yes | No | Admin: any meeting. User: their own meetings only, at most 25 accounts a day. Only addresses on the meeting's list without an account, and only ever the Participant role; other roles and role changes stay with User Management. |
-| User Management: adding and deleting users and choosing their roles | Yes | No | No | A new user may be invited to any meeting: the invitation then links to its consent page, and the address is added to its participant list. |
+| User Management: adding and deleting users, choosing their roles and setting their names in meetings | Yes | No | No | A new user may be invited to any meeting: the invitation then links to its consent page, and the address is added to its participant list. An Admin may set any user's display name and short names. |
 | Troubleshooting agent | Yes | No | No |  |
 <!-- role-table:end -->
 
@@ -135,6 +136,12 @@ Non-admin users:
 - Only see meetings they **own** or that have been **shared with them**
 - Can share and delete only their own meetings
 - Cannot access admin configuration pages
+- Can find an LMA account to add to their own meeting's participant list by
+  the start of its display name, short name or email address: at least three
+  characters, at most 10 accounts answered, each with its display name and
+  address only, and at most 200 searches a day. The search is refused to a
+  Participant. See
+  [Adding a person who has an LMA account](virtual-participant.md#adding-a-person-who-has-an-lma-account).
 
 Each transcript line a meeting stores, whether speech, a meeting-chat line or a
 meeting-assistant answer, carries the meeting's owner and its sharing list, as
@@ -170,8 +177,11 @@ A Participant signs in to a home page with four pages beside it:
 - **My consents**: the consents they gave before meetings, a meeting's
   consent page opened from its consent link, a standing consent given without
   a link (for an organizer they name by email address, or for every meeting on
-  the deployment, until a date), and withdrawal, as every role has; see
-  [Consent given in advance](meeting-consent.md#consent-given-in-advance).
+  the deployment, until a date), withdrawal, and **Your names in meetings**,
+  the display name and short names LMA matches them by among a meeting's
+  attendees, as every role has; see
+  [Consent given in advance](meeting-consent.md#consent-given-in-advance) and
+  [The match is by display name](meeting-consent.md#the-match-is-by-display-name).
   Signing in from a consent link opens that page. Signing in without one opens
   My consents, with a banner they can dismiss with **Not now**, while the
   deployment takes consent given in advance and they have no consent on

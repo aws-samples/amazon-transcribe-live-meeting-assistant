@@ -3,12 +3,13 @@
  * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
 import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import {
   Alert,
+  Autosuggest,
   Box,
   Button,
   Container,
@@ -21,15 +22,22 @@ import {
   Textarea,
 } from '@cloudscape-design/components';
 
-import { createParticipantAccounts, getMeetingParticipantAccounts } from '../../graphql/queries/meetingParticipants';
+import {
+  createParticipantAccounts,
+  getMeetingParticipantAccounts,
+  searchAccounts,
+} from '../../graphql/queries/meetingParticipants';
 import { appBase, consentInvitation, consentLink } from '../common/advance-consent';
 import {
   MAX_PARTICIPANTS,
+  MIN_ACCOUNT_SEARCH_CHARS,
   accountCreationSummary,
   accountLabel,
   parseParticipantsText,
   participantsInput,
   participantsToText,
+  searchableText,
+  withParticipant,
 } from '../common/participant-list';
 
 const client = generateClient();
@@ -43,6 +51,105 @@ const accountCellContent = (accounts, accountsError, email) => {
 };
 
 const errorText = (error, fallback) => error?.errors?.[0]?.message || error?.message || fallback;
+
+/** How long the picker waits after the last key before it searches. */
+const SEARCH_DELAY_MS = 300;
+
+/**
+ * Find an LMA account by the start of its display name, short name or email
+ * address, and add the person to the list being edited. The server answers at
+ * most 10 accounts for at least 3 characters, to the meeting's owner and
+ * Admins only; `listed` holds the addresses already on the list, in lower case.
+ */
+export const AccountPicker = ({ listed, onPick }) => {
+  const [value, setValue] = useState('');
+  const [options, setOptions] = useState([]);
+  const [status, setStatus] = useState('finished');
+  const [error, setError] = useState('');
+  const latest = useRef('');
+  const timer = useRef(null);
+
+  useEffect(() => () => clearTimeout(timer.current), []);
+
+  const search = async (typed) => {
+    try {
+      const response = await client.graphql({ query: searchAccounts, variables: { text: typed } });
+      if (latest.current !== typed) return;
+      const found = response?.data?.searchAccounts || [];
+      setOptions(
+        found.map((account) => ({
+          value: account.email,
+          label: account.name || account.email,
+          description: account.name ? account.email : undefined,
+          disabled: listed.has(account.email.toLowerCase()),
+          tags: listed.has(account.email.toLowerCase()) ? ['On the list'] : undefined,
+          name: account.name || '',
+        })),
+      );
+      setStatus('finished');
+    } catch (e) {
+      if (latest.current !== typed) return;
+      logger.error('could not search the accounts', e);
+      setError(errorText(e, 'The accounts could not be searched.'));
+      setStatus('error');
+    }
+  };
+
+  const load = (text) => {
+    const typed = (text || '').trim();
+    latest.current = typed;
+    clearTimeout(timer.current);
+    if (!searchableText(typed)) {
+      setOptions([]);
+      setStatus('finished');
+      return;
+    }
+    setStatus('loading');
+    timer.current = setTimeout(() => search(typed), SEARCH_DELAY_MS);
+  };
+
+  const pick = (email) => {
+    const option = options.find((o) => o.value === email);
+    if (!option || option.disabled) return;
+    onPick({ name: option.name, email: option.value });
+    setValue('');
+    setOptions([]);
+    latest.current = '';
+  };
+
+  return (
+    <FormField
+      label="Add a person with an LMA account"
+      description={
+        `Type at least ${MIN_ACCOUNT_SEARCH_CHARS} characters of the start of their name or email address. ` +
+        'The person is added below as Name <email>. The names their account goes by in meetings also count ' +
+        'when LMA matches attendees to the list.'
+      }
+    >
+      <Autosuggest
+        value={value}
+        onChange={({ detail }) => setValue(detail.value)}
+        onLoadItems={({ detail }) => load(detail.filteringText)}
+        onSelect={({ detail }) => pick(detail.value)}
+        options={options}
+        filteringType="manual"
+        statusType={status}
+        loadingText="Searching accounts"
+        errorText={error}
+        recoveryText="Retry"
+        empty={searchableText(value) ? 'No account found' : `Type at least ${MIN_ACCOUNT_SEARCH_CHARS} characters`}
+        enteredTextLabel={(text) => `Search for "${text}"`}
+        placeholder="Name or email address"
+        ariaLabel="Find an LMA account to add"
+      />
+    </FormField>
+  );
+};
+
+AccountPicker.propTypes = {
+  listed: PropTypes.instanceOf(Set).isRequired,
+  onPick: PropTypes.func.isRequired,
+};
 
 /**
  * The invitation to consent in advance: one email to everyone on the list,
@@ -323,6 +430,10 @@ const MeetingParticipants = ({
         )}
         {editing ? (
           <SpaceBetween size="s">
+            <AccountPicker
+              listed={new Set(parsed.participants.map((p) => p.email.toLowerCase()))}
+              onPick={(person) => setDraft((text) => withParticipant(text, person))}
+            />
             <FormField
               label="Participants"
               description={`One per line as Name <email> or an email address; at most ${MAX_PARTICIPANTS}.`}

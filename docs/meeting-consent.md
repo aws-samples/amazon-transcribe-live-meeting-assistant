@@ -1396,6 +1396,22 @@ defaults and in every preset; decide it with whoever advises your organisation
 on consent records, since an IP address is personal data. My consents and the
 API say whether device details were kept with a consent, and never return them.
 
+The names an account goes by in meetings are kept in the same partition as its
+consents (`PK = pmc#<address>`, `SK = account-names`):
+
+| Field | Meaning |
+|---|---|
+| `Email`, `Subject` | The account's address in lower case and its Cognito sub; the names count only while that account holds the address |
+| `DisplayName`, `ShortNames` | The names, as described in [The match is by display name](#the-match-is-by-display-name) |
+| `UpdatedAt`, `UpdatedBy` | When they were last changed, and the username that changed them (the person or an Admin) |
+
+Each name of at least three characters also has a search entry for the
+participant list's account search (`PK = acn#<its first three characters>`),
+holding the name, the address and the display name, written and removed with
+the names. The names are not part of any meeting: a meeting's record keeps only
+which kind of name matched (`MatchedNameSource`), never the name's owner's
+address.
+
 ### Withdrawing
 
 **Withdraw** on My consents ends a consent at once: from then on it is no
@@ -1421,17 +1437,23 @@ Opt-in:
 2. **The attendees are matched to the participant list.** Each time the
    Virtual Participant lists who is present (`setMeetingConsentParticipants`),
    the meeting consent resolver takes each attendee with no reply on the record
-   yet and compares their display name with the names on the meeting's
-   participant list, ignoring case and spacing, as replies are matched. An
-   attendee matches only when exactly one listed person has that name and only
-   one attendee shows it.
+   yet and compares their display name with the names each listed person goes
+   by, ignoring case and spacing, as replies are matched: the name their list
+   entry gives them, and, when an LMA account holds the listed address, that
+   account's display name and short names (see
+   [The match is by display name](#the-match-is-by-display-name)). An attendee
+   matches only when exactly one listed person goes by that name, only one
+   attendee shows it, and no other attendee shows another name of the same
+   person.
 3. **A matched attendee with a consent that covers the meeting is recorded as
    consented** (a `meeting` consent for this meeting, an `organizer` consent
    for its owner and, when it names one, its label, or a `deployment`
    consent), source `pre_meeting`, with the basis of the match
-   (`MatchBasis: display_name`), the consent's scope, when it was given and
-   until when, and the hash and version of its text (`PreMeeting` on the
-   event). The person's address is not copied to the meeting's record. In
+   (`MatchBasis: display_name`), which of the person's names matched
+   (`MatchedNameSource`: `list`, `display_name` or `short_name`), the
+   consent's scope, when it was given and until when, and the hash and version
+   of its text (`PreMeeting` on the event). The person's address is not copied
+   to the meeting's record. In
    Opt-in under the each-participant rule, capture starts once everyone present
    is covered, by a consent given in advance or a reply in the meeting.
 4. **The Virtual Participant says who is covered.** Once the notice is in the
@@ -1478,11 +1500,52 @@ extension and the Desktop Capture App have no participant roster to match, so
 their meetings are decided by the LMA user's attestation or notice as before;
 consents given in advance are not looked up for them.
 
-**The match is by display name.** It is the weak link that remains: someone
-showing a listed person's name in the meeting would be counted under that
-person's consent. The record says so (`MatchBasis: display_name`), the notice is
-still posted with the names it counted, evidence screenshots are kept as usual,
-and anyone, including the person whose name is shown, can object at any time.
+### The match is by display name
+
+A meeting platform shows each attendee by a display name, so that is what LMA
+matches against the participant list. Each listed person goes by up to three
+kinds of name, all of which count:
+
+| Name | Where it comes from | `MatchedNameSource` |
+|---|---|---|
+| The list entry's name | The `Name` of a `Name <email>` entry on the meeting's participant list, typed by the organizer or added with the list editor's account search | `list` |
+| The account's display name | **Your names in meetings** on My consents, or an Admin in User Management. When the account has none, the user pool's standard `name` attribute, when set | `display_name` |
+| The account's short names | Up to five other names the person shows in meetings ("Bob" for "Robert Chen"), set in the same places | `short_name` |
+
+The account's names apply in every meeting whose participant list has the
+account's address, so a list entry with no name, `ana@example.com` alone, can
+still match. A name typed on a meeting's list counts for that meeting in
+addition to the account's names, and the record says it was the list's name
+when the attendee showed that one.
+
+The same safety rule applies across all of them: an attendee is matched to a
+listed person only when exactly one person on the list goes by the name the
+attendee shows (in any of the three ways), only one attendee shows it, and no
+other attendee present shows another of that person's names. When two people
+on the list go by "Sam", nobody showing "Sam" is matched, and both are asked in
+the meeting as usual.
+
+**The names belong to the account.** They are kept with the account's
+consents given in advance, under its email address, with the account's Cognito
+sub, and they count only while the account that set them still holds that
+address. Deleting the account in User Management deletes its names. Each name
+is trimmed; control characters, `<` and `>` are refused; a display name is at
+most 100 characters, each short name at most 50; a name repeated, ignoring case
+and spacing, is kept once.
+
+**Who sets them.** Each person sets their own on My consents, whatever their
+role. An Admin sets them for any user in User Management, when creating the
+user or later with **Edit names**. A Participant account created from a
+meeting's list (**Create accounts for participants without one**) goes by the
+name its list entry gives it.
+
+**It is the weak link that remains.** Someone showing a listed person's name in
+the meeting would be counted under that person's consent. The record says so
+(`MatchBasis: display_name`, with the `MatchedNameSource`), the notice is still
+posted with the names it counted, evidence screenshots are kept as usual, and
+anyone, including the person whose name is shown, can object at any time. A
+short name that many people use ("Sam") makes a match less likely, not more:
+the safety rule refuses a name two listed people go by.
 
 ## What is stored
 
@@ -1497,7 +1560,7 @@ holds:
 | `NoticeText` | The notice or request for this meeting, placeholders filled |
 | `NoticePostedAt`, `Notices` | When the notice was first posted; each posting, with its channel (`chat`, `voice`, `banner` or `invite`), text, time and who recorded it. The first posting and the latest 9 are kept |
 | `Participants`, `ParticipantsSeen` | Who is present now, as last listed, and everyone ever listed (the first 500) |
-| `Events` | Every reply and attestation in the order recorded: the participant's display name, `consent` or `objection`, where it was read (`chat`, `voice`, `ui` for an entry a signed-in user made, `attestation`, or `pre_meeting` for a consent given in advance and the objection recorded when it is withdrawn, with the consent's scope, times, text hash and version and the match's basis in `PreMeeting`), the words when sent, when it happened, when it was recorded and by whom, and, for a reply linked to the transcript speaker who gave it, that speaker: the transcript line a reply said aloud was read from, or, for a chat reply on a join whose platform gives participant ids, the sender's platform participant id and the speaker last written with it (`SpeakerLink`; see [Which speaker gave a reply](#which-speaker-gave-a-reply)) |
+| `Events` | Every reply and attestation in the order recorded: the participant's display name, `consent` or `objection`, where it was read (`chat`, `voice`, `ui` for an entry a signed-in user made, `attestation`, or `pre_meeting` for a consent given in advance and the objection recorded when it is withdrawn, with the consent's scope, times, text hash and version, the match's basis and which of the person's names matched in `PreMeeting`), the words when sent, when it happened, when it was recorded and by whom, and, for a reply linked to the transcript speaker who gave it, that speaker: the transcript line a reply said aloud was read from, or, for a chat reply on a join whose platform gives participant ids, the sender's platform participant id and the speaker last written with it (`SpeakerLink`; see [Which speaker gave a reply](#which-speaker-gave-a-reply)) |
 | `Attestation` | Who attested, how (`verbal`, `chat` or `invite_terms`), what they said, and when |
 | `Evidence` | The images kept: each one's id, kind (`screenshot` or `invitation`), where it is stored, when it was taken, a note, the vision model's check of it (`Verification`) when one ran, and when the image was deleted after its check (`ImageDeletedAt`) when screenshots are not kept |
 | `StatusHistory` | Each change of status or of `CaptureAllowed`, with the time and reason; the latest 100 are kept |

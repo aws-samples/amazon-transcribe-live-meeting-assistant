@@ -7,6 +7,8 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
+import createWrapper from '@cloudscape-design/components/test-utils/dom';
+
 import MeetingParticipants from './MeetingParticipants';
 
 const { graphqlMock } = vi.hoisted(() => ({ graphqlMock: vi.fn() }));
@@ -218,5 +220,58 @@ describe('the invitation to consent', () => {
     const alert = await screen.findByText(/Cy Diaz <cy@example.net>/);
     expect(alert.textContent).not.toContain('BO@example.org');
     expect(alert.textContent).toMatch(/^This person/);
+  });
+});
+
+describe('the account picker in the list editor', () => {
+  const answerSearch = (found) => {
+    graphqlMock.mockReset();
+    graphqlMock.mockImplementation((request) => {
+      const query = request?.query || '';
+      if (query.includes('getMeetingParticipantAccounts(')) {
+        return Promise.resolve({ data: { getMeetingParticipantAccounts: [] } });
+      }
+      if (query.includes('searchAccounts(')) return Promise.resolve({ data: { searchAccounts: found } });
+      return Promise.reject(new Error(`unexpected ${query}`));
+    });
+  };
+
+  const openEditor = () => {
+    render(<MeetingParticipants participants={PEOPLE} callId="c1" canManage onSave={vi.fn()} />);
+    fireEvent.click(screen.getByText('Edit'));
+    return screen.getByLabelText('Find an LMA account to add');
+  };
+
+  it('searches only once three characters are typed', async () => {
+    answerSearch([]);
+    const input = openEditor();
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'ro' } });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 400);
+    });
+    expect(calls('searchAccounts')).toHaveLength(0);
+    fireEvent.change(input, { target: { value: 'rob' } });
+    await waitFor(() => expect(calls('searchAccounts')).toHaveLength(1));
+    expect(calls('searchAccounts')[0].variables).toEqual({ text: 'rob' });
+  });
+
+  it('adds the account picked to the list as Name <email>', async () => {
+    answerSearch([{ name: 'Robert Chen', email: 'robert@example.com' }]);
+    openEditor();
+    const picker = createWrapper(screen.getByTestId('meeting-participants')).findAutosuggest();
+    picker.focus();
+    picker.setInputValue('rob');
+    await waitFor(() => expect(picker.findDropdown().findOptionByValue('robert@example.com')).toBeTruthy());
+    picker.selectSuggestionByValue('robert@example.com');
+    const field = screen.getByLabelText('Participants, one Name <email> per line');
+    await waitFor(() =>
+      expect(field.value).toBe('Ana Lima <ana@example.com>\nbo@example.org\nRobert Chen <robert@example.com>'),
+    );
+  });
+
+  it('is not offered to someone who can only view the list', () => {
+    render(<MeetingParticipants participants={PEOPLE} callId="c1" />);
+    expect(screen.queryByLabelText('Find an LMA account to add')).toBeNull();
   });
 });

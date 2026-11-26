@@ -33,6 +33,13 @@ const CONSENT_FIELDS = `
   DeviceDetailsKept
 `;
 
+const NAMES_FIELDS = `
+  DisplayName
+  ShortNames
+  AccountName
+  UpdatedAt
+`;
+
 export const listMyAdvanceConsents = /* GraphQL */ `
   query ListMyAdvanceConsents {
     listMyAdvanceConsents {
@@ -42,6 +49,22 @@ export const listMyAdvanceConsents = /* GraphQL */ `
       Consents {
         ${CONSENT_FIELDS}
       }
+      Names {
+        ${NAMES_FIELDS}
+      }
+    }
+  }
+`;
+
+/**
+ * The caller's own names in meetings: how LMA recognises them among a
+ * meeting's attendees for their consent given in advance. See
+ * docs/meeting-consent.md#the-match-is-by-display-name.
+ */
+export const updateMyAccountNames = /* GraphQL */ `
+  mutation UpdateMyAccountNames($input: UpdateMyAccountNamesInput!) {
+    updateMyAccountNames(input: $input) {
+      ${NAMES_FIELDS}
     }
   }
 `;

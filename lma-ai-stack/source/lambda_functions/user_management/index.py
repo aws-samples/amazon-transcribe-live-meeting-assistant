@@ -3,12 +3,15 @@
 
 """AppSync Lambda resolver for user management operations.
 
-Handles the admin-only `listUsers`, `createUser`, `setUserRole` and
-`deleteUser` fields, and the two participant list operations a meeting's owner
-may also call, `getMeetingParticipantAccounts` and `createParticipantAccounts`
-(see "Participant accounts for a meeting" below for their own checks). Cognito
-is the single source of truth. Users have one of
-three roles (appsync/role-matrix.json, effectiveRole):
+Handles the admin-only `listUsers`, `createUser`, `setUserRole`,
+`deleteUser` and `setUserAccountNames` fields, the two participant list
+operations a meeting's owner may also call, `getMeetingParticipantAccounts` and
+`createParticipantAccounts` (see "Participant accounts for a meeting" below for
+their own checks), and `searchAccounts`, the participant list's account search
+for Admins and Users (see "Finding an account for a participant list"). Cognito
+is the single source of truth for accounts and roles; the names an account goes
+by in meetings are kept in LMA (lma_consent.account_names in the configuration
+layer). Users have one of three roles (appsync/role-matrix.json, effectiveRole):
   - Admin:       member of the "Admin" Cognito group
   - Participant: member of the "Participant" Cognito group and not of "Admin"
   - User:        in neither group
@@ -202,6 +205,59 @@ def _attr(user, name, default=None):
     return default
 
 
+def _names_module():
+    """lma_consent.account_names from the configuration layer.
+
+    Imported when first needed, as the Meeting Consent settings are, so the
+    operations that do not use the names do not depend on the layer.
+    """
+    try:
+        # pylint: disable-next=import-outside-toplevel,import-error
+        from lma_consent import account_names
+    except ImportError as exc:
+        raise ValidationError("Account names are not available on this deployment") from exc
+    return account_names
+
+
+def _clean_names(payload):
+    """(display name, short names) from a request, or None when it names neither."""
+    if payload.get("displayName") is None and payload.get("shortNames") is None:
+        return None
+    names = _names_module()
+    try:
+        return names.clean_names(payload.get("displayName"), payload.get("shortNames"))
+    except names.InvalidNames as exc:
+        raise ValidationError(str(exc)) from exc
+
+
+def _save_names(email, sub, names, updated_by):
+    """Keep an account's names (a _clean_names answer) under its address."""
+    module = _names_module()
+    if not EVENT_SOURCING_TABLE:
+        raise ValidationError("Account names are not available on this deployment")
+    try:
+        return module.save_profile(
+            boto3.client("dynamodb"),
+            EVENT_SOURCING_TABLE,
+            email=email,
+            display_name=names[0],
+            short_names=names[1],
+            subject=sub,
+            updated_by=updated_by or "LMA",
+            now=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        )
+    except (module.InvalidNames, module.NamesChanged) as exc:
+        raise ValidationError(str(exc)) from exc
+
+
+def _with_names(user, profile, sub):
+    """The GraphQL `User` with the names kept for it, when they were kept for this account."""
+    mine = profile if profile and profile.get("Subject") == sub else {}
+    user["displayName"] = mine.get("DisplayName") or None
+    user["shortNames"] = list(mine.get("ShortNames") or [])
+    return user
+
+
 def _format_cognito_user(user):
     """Shape a Cognito user dict into the GraphQL `User` type."""
     username = user.get("Username")
@@ -220,6 +276,9 @@ def _format_cognito_user(user):
         "createdAt": created_iso,
         "lastSignInAt": None,
         "lastActiveAt": None,
+        "accountName": _attr(user, "name") or None,
+        "displayName": None,
+        "shortNames": [],
     }
 
 
@@ -295,10 +354,26 @@ def list_users(_event, _args):
     if sign_ins is not None:
         for user, sub in zip(users, subs):
             user.update(sign_ins.get(sub) or {})
+    profiles = _read_names([user["email"] for user in users])
+    for user, sub in zip(users, subs):
+        _with_names(user, profiles.get((user["email"] or "").casefold()), sub)
     # Sort newest first
     users.sort(key=lambda u: u.get("createdAt") or "", reverse=True)
     logger.info("Listed %d users", len(users))
     return {"users": users, "lastSignInAvailable": sign_ins is not None}
+
+
+def _read_names(emails):
+    """The names kept for each address, by the address in lower case; {} when unreadable."""
+    if not EVENT_SOURCING_TABLE or not emails:
+        return {}
+    try:
+        module = _names_module()
+        return module.read_profiles(boto3.client("dynamodb"), EVENT_SOURCING_TABLE, emails)
+    except Exception:  # pylint: disable=broad-except
+        # The listing and the search answer without the names rather than failing.
+        logger.warning("Could not read the accounts' names", exc_info=True)
+        return {}
 
 
 def _meeting_to_invite_to(value):
@@ -336,6 +411,7 @@ def create_user(event, args):
 
     _validate_email(email)
     _validate_role(role)
+    names = _clean_names(payload)
     meeting_ref, meeting = _meeting_to_invite_to(payload.get("inviteToMeeting"))
 
     logger.info(
@@ -385,7 +461,40 @@ def create_user(event, args):
             raise
 
     resp = cognito.admin_get_user(UserPoolId=USER_POOL_ID, Username=email)
-    return _format_cognito_user(resp)
+    user = _format_cognito_user(resp)
+    if names is None:
+        return user
+    sub = _attr(resp, "sub") or ""
+    try:
+        profile = _save_names(email, sub, names, _get_caller_identity(event)["username"])
+    except (ValidationError, ClientError, BotoCoreError) as exc:
+        logger.warning("The new user's names could not be kept", exc_info=True)
+        raise ValidationError(
+            f"User {email} was created, but their names could not be saved ({exc}); "
+            "edit them on the User Management page"
+        ) from exc
+    return _with_names(user, profile, sub)
+
+
+def set_user_account_names(event, args):
+    """An Admin sets the display name and short names of any account."""
+    caller = _get_caller_identity(event)
+    payload = args.get("input") or {}
+    username = (payload.get("username") or "").strip()
+    if not username:
+        raise ValidationError("username is required")
+    names = _clean_names(payload) or ("", [])
+    try:
+        resp = cognito.admin_get_user(UserPoolId=USER_POOL_ID, Username=username)
+    except cognito.exceptions.UserNotFoundException as exc:
+        raise ValidationError(f"User {username} not found") from exc
+    email = (_attr(resp, "email") or "").strip()
+    if not email:
+        raise ValidationError("This user has no email address, which the names are kept with")
+    sub = _attr(resp, "sub") or ""
+    profile = _save_names(email, sub, names, caller["username"])
+    logger.info("An Admin changed the names of %s", username)
+    return _with_names(_format_cognito_user(resp), profile, sub)
 
 
 def set_user_role(event, args):
@@ -460,6 +569,7 @@ def delete_user(event, args):
     _delete_notification_preferences(username)
     _delete_last_sign_in(sub)
     _withdraw_advance_consents(email, sub)
+    _delete_account_names(email, sub)
     return {"username": username, "success": True}
 
 
@@ -530,6 +640,25 @@ def _withdraw_advance_consents(email, sub):
         logger.warning(
             "Could not withdraw the consents given in advance by a deleted user", exc_info=True
         )
+
+
+def _delete_account_names(email, sub):
+    """Delete the names kept for the deleted account. Best effort: the user is gone.
+
+    Only names kept for that account (its sub): names another account now holds
+    for the address are left.
+    """
+    if not EVENT_SOURCING_TABLE or not email or not sub:
+        return
+    try:
+        module = _names_module()
+        client = boto3.client("dynamodb")
+        profile = module.read_profile(client, EVENT_SOURCING_TABLE, email)
+        if profile and profile.get("Subject") == sub:
+            module.delete_profile(client, EVENT_SOURCING_TABLE, email)
+    except Exception:  # pylint: disable=broad-except
+        # The account is gone; its names no longer count for anyone (their sub).
+        logger.warning("Could not delete the names of a deleted user", exc_info=True)
 
 
 def _delete_last_sign_in(sub):
@@ -1024,6 +1153,24 @@ def _create_participant_account(email, client_metadata=None):
     return "created"
 
 
+def _name_new_participant(email, name, created_by):
+    """Give a new Participant account the name its list entry gives it. Best effort.
+
+    The account then goes by that name in every meeting that lists its address,
+    not only this one. A name that is not a valid display name is not kept.
+    """
+    if not name or not EVENT_SOURCING_TABLE:
+        return
+    try:
+        names = _clean_names({"displayName": name})
+        sub = _attr(cognito.admin_get_user(UserPoolId=USER_POOL_ID, Username=email), "sub") or ""
+        if names and sub:
+            _save_names(email, sub, names, created_by)
+    except Exception:  # pylint: disable=broad-except
+        # The account was created and invited; only its name is missing.
+        logger.warning("Could not keep a new participant account's name", exc_info=True)
+
+
 def create_participant_accounts(event, args):
     """Participant accounts for the listed people without one (see the rules above)."""
     caller = _get_caller_identity(event)
@@ -1031,6 +1178,7 @@ def create_participant_accounts(event, args):
     meeting = _meeting_for_caller(caller, payload)
     invitation = _invitation_metadata(PARTICIPANT_ROLE, _meeting_ref(payload), meeting)
     listed = {p["email"].casefold(): p["email"] for p in meeting["participants"]}
+    listed_names = {p["email"].casefold(): p["name"] for p in meeting["participants"]}
 
     requested = payload.get("emails")
     if requested is None:
@@ -1092,6 +1240,8 @@ def create_participant_accounts(event, args):
         except ClientError as exc:
             logger.warning("Could not create a participant account: %s", exc)
             outcome = "failed"
+        if outcome == "created":
+            _name_new_participant(email, listed_names.get(email.casefold()), caller["username"])
         if outcome != "created" and limited:
             _release_daily_slot(caller["username"], now)
         results.append(
@@ -1117,6 +1267,114 @@ def create_participant_accounts(event, args):
 
 
 # ---------------------------------------------------------------------------
+# Finding an account for a participant list
+# ---------------------------------------------------------------------------
+#
+# searchAccounts answers the accounts whose display name, short name or email
+# address starts with the text typed, for the participant list editor's
+# picker. Its own checks:
+#   1. Admin and User only (the directive and the dispatcher); never Participant.
+#   2. At least MIN_SEARCH_LENGTH characters, compared ignoring case and
+#      spacing; at most MAX_SEARCH_RESULTS accounts, with no way to ask for more.
+#   3. Each account is answered with its display name and address, nothing else,
+#      and only an enabled account whose address is verified.
+#   4. A User searches at most ACCOUNT_SEARCHES_PER_DAY times a UTC day (counted
+#      under usr#<username>), as their account lookups are limited.
+
+ACCOUNT_SEARCHES_PER_DAY = int(os.environ.get("ACCOUNT_SEARCHES_PER_DAY", "200"))
+
+
+def _reserve_search(caller, now):
+    """Count one search against a User's day; refuse past the limit. Admins are not counted."""
+    if caller["is_admin"]:
+        return
+    try:
+        boto3.client("dynamodb").update_item(
+            TableName=EVENT_SOURCING_TABLE,
+            Key=_daily_count_key(caller["username"], now, "account-searches"),
+            UpdateExpression="ADD SearchCount :one SET ExpiresAfter = :ttl",
+            ConditionExpression="attribute_not_exists(SearchCount) OR SearchCount < :limit",
+            ExpressionAttributeValues={
+                ":one": {"N": "1"},
+                ":limit": {"N": str(ACCOUNT_SEARCHES_PER_DAY)},
+                ":ttl": {"N": str(int(now) + DAILY_COUNT_TTL_SECONDS)},
+            },
+        )
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            raise ValidationError(
+                f"You have searched for accounts {ACCOUNT_SEARCHES_PER_DAY} times today, the most "
+                "a day; type the address instead, or try again tomorrow (UTC)"
+            ) from exc
+        raise
+
+
+def _account_for_address(email):
+    """The user pool's record of the account holding this address, or None."""
+    username = _find_account(email)
+    if username is None:
+        return None
+    try:
+        return cognito.admin_get_user(UserPoolId=USER_POOL_ID, Username=username)
+    except cognito.exceptions.UserNotFoundException:
+        return None
+
+
+def _pool_matches(text, typed, limit):
+    """Accounts the user pool finds by email or name prefix, as its records."""
+    words = " ".join(typed.split())
+    filters = [("email", text), ("name", words), ("name", words.title()), ("name", text)]
+    found = []
+    for attribute, value in dict.fromkeys(filters):
+        found += cognito.list_users(
+            UserPoolId=USER_POOL_ID, Filter=f'{attribute} ^= "{value}"', Limit=limit
+        ).get("Users", [])
+    return found
+
+
+def search_accounts(event, args):
+    """At most MAX_SEARCH_RESULTS accounts whose names or address start with the text."""
+    caller = _get_caller_identity(event)
+    module = _names_module()
+    typed = args.get("text")
+    try:
+        text = module.search_text(typed)
+    except module.InvalidNames as exc:
+        raise ValidationError(str(exc)) from exc
+    if not EVENT_SOURCING_TABLE:
+        raise ValidationError("Account search is not available on this deployment")
+    limit = module.MAX_SEARCH_RESULTS
+    _reserve_search(caller, time.time())
+    client = boto3.client("dynamodb")
+    records = {}
+    for user in _pool_matches(text, typed, limit):
+        email = (_attr(user, "email") or "").strip().casefold()
+        if email:
+            records.setdefault(email, user)
+    for entry in module.search_index(client, EVENT_SOURCING_TABLE, text, limit):
+        if entry["email"] not in records:
+            record = _account_for_address(entry["email"])
+            if record is not None:
+                records[entry["email"]] = record
+    profiles = _read_names(list(records))
+    results = []
+    for email, record in records.items():
+        verified = str(_attr(record, "email_verified")).lower() == "true"
+        if record.get("Enabled") is False or not verified:
+            continue
+        names = module.account_names(
+            profiles.get(email), {"sub": _attr(record, "sub"), "name": _attr(record, "name")}
+        )
+        candidates = [email, _attr(record, "name") or ""]
+        candidates += [names["display_name"]] + names["short_names"] if names else []
+        if any(module.normalize_name(c).startswith(text) for c in candidates):
+            results.append({"name": (names or {}).get("display_name") or None, "email": email})
+    results.sort(key=lambda r: ((r["name"] or r["email"]).casefold(), r["email"]))
+    logger.info("Account search answered %d accounts", min(len(results), limit))
+    return results[:limit]
+
+
+# ---------------------------------------------------------------------------
 # Dispatcher
 # ---------------------------------------------------------------------------
 
@@ -1131,6 +1389,8 @@ OPERATIONS = {
     "createUser": (create_user, (ADMIN_ROLE,)),
     "setUserRole": (set_user_role, (ADMIN_ROLE,)),
     "deleteUser": (delete_user, (ADMIN_ROLE,)),
+    "setUserAccountNames": (set_user_account_names, (ADMIN_ROLE,)),
+    "searchAccounts": (search_accounts, (ADMIN_ROLE, USER_ROLE)),
     "getMeetingParticipantAccounts": (get_meeting_participant_accounts, (ADMIN_ROLE, USER_ROLE)),
     "createParticipantAccounts": (create_participant_accounts, (ADMIN_ROLE, USER_ROLE)),
 }

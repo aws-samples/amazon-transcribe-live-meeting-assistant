@@ -305,15 +305,16 @@
     },
     {
       "id": "advance-consent",
-      "title": "Consent given in advance: your own consents, a meeting's consent page, and asking to be added to its participant list",
+      "title": "Consent given in advance: your own consents, your names in meetings, a meeting's consent page, and asking to be added to its participant list",
       "roles": ["Admin", "User", "Participant"],
-      "notes": "Each person their own consents only, kept under the email address the user pool holds for them. Giving consent needs that address on the meeting's participant list, whose people see the meeting's name, organizer and labels on its consent page; someone not on it is told only that, and may ask to be added, which is shown in LMA to the people who see the meeting's participant list.",
+      "notes": "Each person their own consents and their own names in meetings only, kept under the email address the user pool holds for them. Giving consent needs that address on the meeting's participant list, whose people see the meeting's name, organizer and labels on its consent page; someone not on it is told only that, and may ask to be added, which is shown in LMA to the people who see the meeting's participant list.",
       "appsync": [
         "Query.listMyAdvanceConsents",
         "Query.getAdvanceConsentInvitation",
         "Mutation.giveAdvanceConsent",
         "Mutation.withdrawAdvanceConsent",
-        "Mutation.askToBeAddedToMeeting"
+        "Mutation.askToBeAddedToMeeting",
+        "Mutation.updateMyAccountNames"
       ],
       "surfaces": [],
       "uiRoutes": ["/consents"]
@@ -328,6 +329,15 @@
       "uiRoutes": []
     },
     {
+      "id": "account-search",
+      "title": "Finding an LMA account by name or address to add to a participant list",
+      "roles": ["Admin", "User"],
+      "notes": "At least 3 characters, matched as the start of an account's display name, short name or email address; at most 10 accounts, each answered with its display name and address only, and no way to page further. A User searches at most 200 times a day.",
+      "appsync": ["Query.searchAccounts"],
+      "surfaces": [],
+      "uiRoutes": []
+    },
+    {
       "id": "participant-accounts",
       "title": "Creating Participant accounts for the people on a meeting's participant list",
       "roles": ["Admin", "User"],
@@ -338,10 +348,16 @@
     },
     {
       "id": "user-management",
-      "title": "User Management: adding and deleting users and choosing their roles",
+      "title": "User Management: adding and deleting users, choosing their roles and setting their names in meetings",
       "roles": ["Admin"],
-      "notes": "A new user may be invited to any meeting: the invitation then links to its consent page, and the address is added to its participant list.",
-      "appsync": ["Query.listUsers", "Mutation.createUser", "Mutation.setUserRole", "Mutation.deleteUser"],
+      "notes": "A new user may be invited to any meeting: the invitation then links to its consent page, and the address is added to its participant list. An Admin may set any user's display name and short names.",
+      "appsync": [
+        "Query.listUsers",
+        "Mutation.createUser",
+        "Mutation.setUserRole",
+        "Mutation.deleteUser",
+        "Mutation.setUserAccountNames"
+      ],
       "surfaces": [],
       "uiRoutes": ["/configuration/user-management"]
     },
