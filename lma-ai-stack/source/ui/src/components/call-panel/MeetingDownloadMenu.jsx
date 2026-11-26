@@ -48,7 +48,8 @@ const ATTACHMENTS_REFRESH_MS = 60_000;
 /**
  * How long an archive's link stays on the page: the server signs it for an
  * hour (the meeting export for ten minutes), less a minute's margin for the
- * time it took to reach the page.
+ * time it took to reach the page. Kept in step by hand with LINK_SECONDS and
+ * EXPORT_LINK_SECONDS in lambda_functions/meeting_archive/index.py.
  */
 export const ARCHIVE_LINK_VISIBLE_MS = 59 * 60 * 1000;
 export const EXPORT_LINK_VISIBLE_MS = 9 * 60 * 1000;
@@ -124,14 +125,22 @@ const MeetingDownloadMenu = ({
     if (archive?.Status !== 'READY' || !archive.DownloadUrl) return undefined;
     const shown = archive;
     const visibleMs = shown.contents === 'EXPORT' ? EXPORT_LINK_VISIBLE_MS : ARCHIVE_LINK_VISIBLE_MS;
-    const timer = setTimeout(
-      () =>
-        setArchive((current) =>
-          current === shown ? { label: shown.label, FileName: shown.FileName, Status: 'LAPSED' } : current,
-        ),
-      visibleMs,
-    );
-    return () => clearTimeout(timer);
+    const shownAt = Date.now();
+    const lapse = () =>
+      setArchive((current) =>
+        current === shown ? { label: shown.label, FileName: shown.FileName, Status: 'LAPSED' } : current,
+      );
+    const timer = setTimeout(lapse, visibleMs);
+    // A timer can fire late after the computer sleeps or the tab is in the
+    // background, so the time is read again when the page is shown.
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && Date.now() - shownAt >= visibleMs) lapse();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [archive]);
 
   const hasSummary = Boolean(item.callSummaryText);

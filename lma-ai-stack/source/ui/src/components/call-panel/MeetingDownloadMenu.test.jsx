@@ -217,6 +217,20 @@ describe('a lapsed archive link', () => {
     expect(prepareArchive).toHaveBeenCalledTimes(2);
   });
 
+  it('takes the link off when the page is shown again after its time has passed', async () => {
+    await readyAfterChoosing('Everything (.zip)', {
+      FileName: 'Meeting-A.zip',
+      DownloadUrl: 'https://signed.example.com/a.zip',
+    });
+    // As after the computer slept: the clock moved on, and the timer has not fired.
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now() + ARCHIVE_LINK_VISIBLE_MS);
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    expect(screen.queryByRole('link', { name: /Download Meeting-A.zip/ })).toBeNull();
+    expect(screen.getByText(/The link to Meeting-A.zip has lapsed/)).toBeTruthy();
+  });
+
   it("takes the meeting export's ten-minute link off sooner", async () => {
     await readyAfterChoosing('Meeting export (.json)', {
       FileName: 'Meeting-A-export.json',
