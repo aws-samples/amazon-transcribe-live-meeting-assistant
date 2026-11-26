@@ -59,6 +59,7 @@ import {
 import {
     MEET_HOST,
     MEET_IN_PAGE_SELECTORS,
+    MEET_PEOPLE_COUNT_TEXT,
     MEET_SELECTORS,
     MeetScreen,
     MeetTileReading,
@@ -855,24 +856,44 @@ export default class GoogleMeet {
     /** One reading of the People count, corroborated by the Leave call button when absent. */
     private async readAttendees(page: Page): Promise<AttendeeReading> {
         try {
+            // Every control that could carry the count, labelled ones first. The
+            // first that gives a count is read, so a labelled button with no
+            // number in it does not hide the current page's control.
             const raw = await page.evaluate(
-                (sels: { people: readonly string[]; leaveCall: readonly string[] }) => {
+                (sels: { people: readonly string[]; leaveCall: readonly string[]; countText: string }) => {
                     const visible = (el: Element | null): boolean => {
                         if (!el) return false;
                         const r = (el as HTMLElement).getBoundingClientRect();
                         return r.width > 0 && r.height > 0;
                     };
                     const inMeeting = sels.leaveCall.some((sel) => visible(document.querySelector(sel)));
+                    const candidates: Array<{ text: string; label: string }> = [];
                     for (const sel of sels.people) {
                         const el = document.querySelector(sel);
-                        if (el) return { text: el.textContent || '', label: el.getAttribute('aria-label') || '', inMeeting };
+                        if (el) candidates.push({ text: el.textContent || '', label: el.getAttribute('aria-label') || '' });
                     }
-                    return { text: null, label: null, inMeeting };
+                    // The current page: an unlabelled role="button" whose text is
+                    // "People" and the count (MEET_PEOPLE_COUNT_TEXT).
+                    const countText = new RegExp(sels.countText, 'i');
+                    for (const el of Array.from(document.querySelectorAll('[role="button"]'))) {
+                        const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+                        if (countText.test(text) && visible(el)) {
+                            candidates.push({ text, label: el.getAttribute('aria-label') || '' });
+                            break;
+                        }
+                    }
+                    return { candidates, inMeeting };
                 },
-                { people: MEET_IN_PAGE_SELECTORS.peopleButton, leaveCall: MEET_IN_PAGE_SELECTORS.leaveCall },
+                {
+                    people: MEET_IN_PAGE_SELECTORS.peopleButton,
+                    leaveCall: MEET_IN_PAGE_SELECTORS.leaveCall,
+                    countText: MEET_PEOPLE_COUNT_TEXT,
+                },
             );
-            const count = parseMeetParticipantCount(raw.text, raw.label);
-            if (count !== null) return { state: 'OK', count };
+            for (const candidate of raw.candidates) {
+                const count = parseMeetParticipantCount(candidate.text, candidate.label);
+                if (count !== null) return { state: 'OK', count };
+            }
             return raw.inMeeting ? { state: 'BADGE_MISSING_IN_MEETING' } : { state: 'BADGE_MISSING' };
         } catch {
             return { state: 'BADGE_MISSING' };

@@ -32,6 +32,8 @@ import {
     normalizeMeetText,
     parseGoogleMeetMeeting,
     parseMeetParticipantCount,
+    isMeetPeopleCountText,
+    MEET_PEOPLE_COUNT_TEXT,
     pickMeetActiveSpeaker,
     senderFromMeetGroupHeader,
     timeFromMeetGroupHeader,
@@ -167,6 +169,29 @@ test('the participant count is read from the People button', () => {
     assert.equal(parseMeetParticipantCount('people 3'), 3);
     assert.equal(parseMeetParticipantCount('people', 'People - 12 participants'), 12);
     assert.equal(parseMeetParticipantCount(' 1 '), 1);
+});
+
+test("the count is read from the current page's unlabelled People control", () => {
+    // Measured in a live meeting (2026-11-25): a role="button" div, no aria-label,
+    // whose text is "People" and the count, VP included.
+    assert.equal(isMeetPeopleCountText('People5'), true);
+    assert.equal(isMeetPeopleCountText(' People  12 '), true);
+    assert.equal(parseMeetParticipantCount('People5', ''), 5);
+    for (const text of ['People', 'Chat with everyone', 'More options for People 5', 'People 5 6', '', null]) {
+        assert.equal(isMeetPeopleCountText(text), false, String(text));
+    }
+});
+
+test('the People panel opener also matches the unlabelled People control', () => {
+    // Built from the reader's own pattern, so the two cannot drift apart. The
+    // argument is a CSS string, so its backslashes are doubled; unescaping it
+    // gives the pattern back.
+    const opener = MEET_SELECTORS.peopleButton.find((sel) => sel.startsWith('[role="button"]:text-matches('));
+    assert.ok(opener, 'a Playwright text match for the role="button" control');
+    const quoted = /:text-matches\(("(?:[^"\\]|\\.)*"), "i"\)$/.exec(opener ?? '');
+    assert.ok(quoted, opener);
+    assert.equal(JSON.parse(quoted[1]), MEET_PEOPLE_COUNT_TEXT);
+    assert.equal(new RegExp(JSON.parse(quoted[1]), 'i').test('People5'), true);
 });
 
 test('an unreadable or ambiguous count is null, never a guess', () => {

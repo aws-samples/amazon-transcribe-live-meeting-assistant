@@ -96,6 +96,17 @@ function meetUrlFor(code: string): string {
 // ---------------------------------------------------------------------------
 
 /**
+ * The text of the control that shows the participant count on Meet's current
+ * page, as a RegExp source (matched ignoring case, on the text with its spaces
+ * collapsed). Checked live (2026-11-25): the count is on a `div` with
+ * `role="button"` and no `aria-label`, in the "Call feature notifications
+ * and actions" region, whose text is "People" followed by the count
+ * ("People5"); no `button` element is labelled "People". The VP is included in
+ * the count.
+ */
+export const MEET_PEOPLE_COUNT_TEXT = '^people\\s*\\d{1,4}$';
+
+/**
  * Selectors for the pre-join screen and the meeting, each a list tried in order.
  *
  * `:has-text("text")` is not CSS: it is Playwright's case-insensitive match on
@@ -145,11 +156,16 @@ export const MEET_SELECTORS = {
      */
     chatButton: ['button[aria-label^="Chat with everyone" i]', 'button[aria-label*="in-call messages" i]'],
     /**
-     * The toolbar button that opens the People panel.
-     * ASSUMPTION (verify live): labelled "People" (or "Show everyone" in older
-     * releases), with the number of participants shown inside it.
+     * The control that opens the People panel: a button labelled "People" (or
+     * "Show everyone") in earlier releases, and on the current page the
+     * unlabelled control MEET_PEOPLE_COUNT_TEXT describes, matched on the same
+     * pattern the count reader uses.
      */
-    peopleButton: ['button[aria-label^="People" i]', 'button[aria-label^="Show everyone" i]'],
+    peopleButton: [
+        'button[aria-label^="People" i]',
+        'button[aria-label^="Show everyone" i]',
+        `[role="button"]:text-matches(${JSON.stringify(MEET_PEOPLE_COUNT_TEXT)}, "i")`,
+    ],
     /** A visible element in the People panel, for the consent screenshot. */
     peopleList: ['[role="list"][aria-label="Participants" i]', '[aria-label="Participants" i] [role="listitem"]'],
 } as const;
@@ -167,7 +183,11 @@ export const MEET_IN_PAGE_SELECTORS = {
     leaveCall: ['button[aria-label="Leave call" i]', 'button[aria-label^="Leave call" i]', '[role="button"][aria-label^="Leave call" i]'],
     /** The pre-join join buttons, by the jsname of the current release only (text is checked separately). */
     prejoinJoin: ['button[jsname="Qx7uuf"]'],
-    /** The People button, whose text carries the participant count. */
+    /**
+     * The People button, whose text carries the participant count. When none of
+     * these match, the count is read from the control MEET_PEOPLE_COUNT_TEXT
+     * describes.
+     */
     peopleButton: ['button[aria-label^="People" i]', 'button[aria-label^="Show everyone" i]'],
     /** The chat composer, to tell whether the chat panel is open. */
     chatInput: [
@@ -354,14 +374,19 @@ export function classifyMeetScreenText(text: string | null | undefined): { scree
 // Participant count, names and chat senders
 // ---------------------------------------------------------------------------
 
+/** Whether a control's text is the participant count control's (MEET_PEOPLE_COUNT_TEXT). */
+export function isMeetPeopleCountText(text: string | null | undefined): boolean {
+    return new RegExp(MEET_PEOPLE_COUNT_TEXT, 'i').test((text || '').replace(/\s+/g, ' ').trim());
+}
+
 /**
  * The participant count shown on the People button, or null when none can be read.
  *
  * The button's text is the icon's ligature name followed by the count (Meet's
  * icons are font ligatures, so the text reads like "people 3"); the label is
  * checked second in case a release moves the count there. A value of 0 is
- * treated as unreadable, since the VP itself is always in the meeting.
- * ASSUMPTION (verify live): the count includes the VP.
+ * treated as unreadable, since the VP itself is always in the meeting. The
+ * count includes the VP (checked live on 2026-11-25).
  */
 export function parseMeetParticipantCount(text: string | null | undefined, label?: string | null): number | null {
     for (const source of [text, label]) {

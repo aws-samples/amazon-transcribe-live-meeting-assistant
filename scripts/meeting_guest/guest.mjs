@@ -19,6 +19,7 @@
 //   chat <text>  send <text> in the meeting chat
 //   present      share a tab of synthetic slides
 //   shot         upload a screenshot to SHOT_URL
+//   probe        log the controls that could carry the participant count
 //   leave        leave the meeting and exit
 //
 // The log lines "IN CALL" and "GAVE UP" are read by meeting_guest.py. "CALL ENDED"
@@ -225,6 +226,24 @@ while (Date.now() < deadline) {
         log('present', ok ? 'clicked' : 'button not found');
       } else if (cmd === 'shot') {
         await shot(page);
+      } else if (cmd === 'probe') {
+        // Logs the controls that could carry the participant count, for
+        // checking the Virtual Participant's Meet selectors against the
+        // current page.
+        const found = await page.evaluate(() =>
+          [...document.querySelectorAll('button, [role="button"], [aria-label], [data-tooltip]')]
+            .map((el) => ({
+              tag: el.tagName.toLowerCase(),
+              role: el.getAttribute('role'),
+              label: el.getAttribute('aria-label'),
+              tooltip: el.getAttribute('data-tooltip'),
+              text: (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 80),
+              visible: el.getBoundingClientRect().width > 0,
+            }))
+            .filter((e) => /people|participant|everyone|contributor|\b\d{1,3}\b/i.test(`${e.label} ${e.tooltip} ${e.text}`))
+            .slice(0, 60),
+        );
+        for (const e of found) log('probe', JSON.stringify(e));
       } else if (cmd === 'leave') {
         await clickFirst(page, [page.getByRole('button', { name: /leave call/i })]);
         log('left');
