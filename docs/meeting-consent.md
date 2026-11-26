@@ -1663,19 +1663,22 @@ before anything is removed, with who deleted them, when, the address, the
 consent ids, how many there were and how many were withdrawn first, and nothing
 of their content: not the text, the scope or the dates. Its `Status` is
 `pending` until every item is removed, then `complete`, so an erasure that
-stops part way is still on record.
+stops part way is still on record. Audit entries are not removed by the
+table's time to live. Deleting a user in User Management with **Also
+permanently delete their consent records** ticked does the same for the
+consents that account gave, after the account is deleted, with the audit
+entry's reason `account_deleted`.
 
 One deletion removes at most 1,000 consent records. **Delete all for this
 person** for an address with more removes the newest 1,000; its audit entry's
 `Status` is `partial` (with `MoreRemain` set and the `Count` it removed), and
 the view says that more records remain and offers **Delete the next ones**,
 which deletes the next 1,000 with an audit entry of its own. Repeat until the
-result no longer says so. Deleting a user with the records ticked runs up to
-five such deletions; if records still remain, it reports how many were
-deleted and that the rest are to be deleted on the **All consents** view. Audit entries are not removed by the table's time to
-live. Deleting a user in User Management with **Also permanently delete their
-consent records** ticked does the same for the consents that account gave,
-after the account is deleted, with the audit entry's reason `account_deleted`.
+result no longer says so. Deleting a user with the records ticked counts only
+the consents that account gave, and runs up to five such deletions within
+about 12 seconds; if records still remain, those in force are withdrawn, and
+it reports how many were deleted and that the rest are to be deleted on the
+**All consents** view.
 
 **Each meeting's own record is not changed.** A meeting that counted a consent
 keeps its consent events (its `Consent` record, with the consent's scope,

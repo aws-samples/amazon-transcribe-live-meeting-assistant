@@ -111,10 +111,23 @@ def test_an_erasure_that_leaves_some_says_so_and_where_to_finish(calls, monkeypa
     assert len(rounds) == index.MAX_ERASURE_ROUNDS
 
 
-def test_an_erasure_that_finds_none_of_the_accounts_left_is_complete(calls, monkeypatch) -> None:
-    answers = [
-        {"Deleted": 2, "Withdrawn": 0, "ConsentIds": [], "AuditId": "a1", "MoreRemain": True},
-        {"Deleted": 0, "Withdrawn": 0, "ConsentIds": [], "AuditId": "a2", "MoreRemain": True},
-    ]
-    monkeypatch.setattr(administration, "erase", lambda *_a, **_k: answers.pop(0))
-    assert delete(deleteConsentRecords=True)["consentRecordsDeleted"] == 2
+def test_consents_left_after_the_last_round_are_withdrawn(calls, monkeypatch) -> None:
+    more = {"Deleted": 2, "Withdrawn": 0, "ConsentIds": [], "AuditId": "a", "MoreRemain": True}
+    monkeypatch.setattr(administration, "erase", lambda *_a, **_k: dict(more))
+    with pytest.raises(Exception, match="more remain"):
+        delete(deleteConsentRecords=True)
+    assert calls["withdraw"] == [(USER, f"sub-{USER}")]
+
+
+def test_no_erasure_round_starts_once_its_time_is_spent(calls, monkeypatch) -> None:
+    rounds = []
+
+    def erase(*_a, **_k):
+        rounds.append(1)
+        return {"Deleted": 2, "Withdrawn": 0, "ConsentIds": [], "AuditId": "a", "MoreRemain": True}
+
+    monkeypatch.setattr(administration, "erase", erase)
+    monkeypatch.setattr(index, "ERASURE_SECONDS", -1.0)
+    with pytest.raises(Exception, match="more remain"):
+        delete(deleteConsentRecords=True)
+    assert len(rounds) == 1

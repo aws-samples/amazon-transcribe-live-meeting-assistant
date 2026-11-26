@@ -133,7 +133,10 @@ async def publish_vp_requests(message: Mapping[str, Any], appsync_session: Any, 
             asyncio.gather(*publishes, return_exceptions=True), timeout=PUBLISH_BUDGET_SECONDS
         )
     except asyncio.TimeoutError:
-        logger.warning("START: the requests to be added are slow to publish; not waiting for them")
+        logger.warning(
+            "START: the requests to be added are slow to publish; some may not have been "
+            "published, and the rest are not waited for"
+        )
         return 0
     failed = [r for r in results if isinstance(r, BaseException)]
     for error in failed:

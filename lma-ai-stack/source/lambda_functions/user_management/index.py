@@ -589,6 +589,8 @@ def delete_user(event, args):
 
 #: The most erasures one account deletion runs, each removing up to MAX_ERASED consents.
 MAX_ERASURE_ROUNDS = 5
+#: No erasure round starts after this many seconds (the function has 30).
+ERASURE_SECONDS = 12.0
 
 
 def _erase_advance_consents(email, sub, erased_by):
@@ -607,9 +609,12 @@ def _erase_advance_consents(email, sub, erased_by):
         lambda_client = boto3.client("lambda")
         dynamodb = boto3.client("dynamodb")
         deleted = 0
+        started = time.monotonic()
         # One erasure removes at most a bounded number; a few more rounds finish
-        # an address with more, while each one still removes some.
+        # an account with more, while time is left for them.
         for _round in range(MAX_ERASURE_ROUNDS):
+            if _round and time.monotonic() - started >= ERASURE_SECONDS:
+                break
             answer = administration.erase(
                 dynamodb,
                 EVENT_SOURCING_TABLE,
@@ -624,7 +629,7 @@ def _erase_advance_consents(email, sub, erased_by):
                 ),
             )
             deleted += answer["Deleted"]
-            if not answer.get("MoreRemain") or not answer["Deleted"]:
+            if not answer.get("MoreRemain"):
                 break
     except (ImportError, ClientError, BotoCoreError) as exc:
         logger.warning("Could not erase a deleted user's consent records", exc_info=True)
@@ -635,7 +640,9 @@ def _erase_advance_consents(email, sub, erased_by):
             "on My consents › All consents (admin)"
         ) from exc
     logger.info("Erased %d consent records of a deleted user", deleted)
-    if answer.get("MoreRemain") and answer["Deleted"]:
+    if answer.get("MoreRemain"):
+        # Those left are at least withdrawn, as a deletion without erasure leaves them.
+        _withdraw_advance_consents(email, sub)
         raise ValidationError(
             f"The user was deleted and {deleted} of their consent records were erased, but more "
             "remain; erase them on My consents › All consents (admin)"

@@ -49,6 +49,8 @@ const errorText = (error, fallback) => error?.errors?.[0]?.message || error?.mes
 export const PAGE_SIZE = 50;
 /** The longest note an Admin's withdrawal takes (the server's limit). */
 export const MAX_NOTE_CHARS = 500;
+/** The most consent records one deletion removes (the server's limit). */
+export const MAX_ERASED_RECORDS = 1000;
 /** The most empty answers read on through before a page is shown empty. */
 export const MAX_EMPTY_READS = 20;
 /** The most pages a CSV export reads, at 100 consents a page. */
@@ -607,7 +609,8 @@ const AllConsentsView = () => {
           <SpaceBetween size="m">
             <Box>
               {deleting.all
-                ? `Every consent record kept under ${deleting.consent.Email} will be deleted.`
+                ? `Every consent record kept under ${deleting.consent.Email} will be deleted, up to ` +
+                  `${MAX_ERASED_RECORDS.toLocaleString('en-US')} at a time; if more remain, you can continue.`
                 : `The consent record ${deleting.consent.ConsentId} of ${deleting.consent.Email} ` +
                   `(${consentScopeLabel(deleting.consent)}) will be deleted.`}
             </Box>
