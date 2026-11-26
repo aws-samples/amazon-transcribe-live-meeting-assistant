@@ -23,8 +23,9 @@ Parameters:
     Default: ""
     Description: >-
       Name of the AI stack's transcript knowledge base query function, which
-      is in its Lambda resolvers nested stack. Empty looks the function up in
-      the AI stack itself, as stacks before that nested stack were laid out.
+      is in its Lambda resolvers nested stack; lma-main.yaml always passes it.
+      Empty only when this template is deployed outside lma-main.yaml, and the
+      function is then looked up in the AI stack by its logical ID.
 
   COGNITOSTACK:
     Type: String

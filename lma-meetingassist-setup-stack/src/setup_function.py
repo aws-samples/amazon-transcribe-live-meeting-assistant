@@ -30,8 +30,9 @@ def queryKnowledgeBaseResolverFunctionName(props):
     """The transcript knowledge base query function's name.
 
     The function is in the AI stack's Lambda resolvers nested stack, whose
-    output the main template passes in. Without it, the function is looked up
-    in the AI stack itself, as stacks before that nested stack were laid out.
+    output lma-main.yaml always passes in. The name is empty only when this
+    template is deployed outside lma-main.yaml without the parameter; the
+    function is then looked up in the AI stack by its logical ID.
     """
     name = props.get("QueryKnowledgeBaseResolverFunction", "")
     if name:
