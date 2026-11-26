@@ -212,7 +212,9 @@ def test_a_second_name_of_a_person_who_has_left_matches_nobody(named) -> None:
     assert [e["ParticipantName"] for e in record["Events"]] == ["Bo Chen"]
 
 
-def test_a_full_account_cache_is_pruned_safely_while_lookups_run_together(named, monkeypatch) -> None:
+def test_a_full_account_cache_is_pruned_safely_while_lookups_run_together(
+    named, monkeypatch
+) -> None:
     monkeypatch.setattr(index, "MAX_CACHED_ACCOUNTS", 50)
     for n in range(50):
         index._ACCOUNTS[f"old{n}@example.com"] = (0.0, None)
