@@ -77,7 +77,6 @@ docs/meeting-consent.md#consent-given-in-advance.
 from __future__ import annotations
 
 import base64
-import hashlib
 import json
 import logging
 import os
@@ -148,7 +147,6 @@ COGNITO = boto3.client("cognito-idp", config=CLIENT_CONFIG)
 LAMBDA = boto3.client("lambda", config=CLIENT_CONFIG)
 
 _STORE: Optional[ConfigurationStore] = None
-_MARKDOWN_SPECIAL = re.compile(r"([\\`*_{}\[\]()#+\-.!|<>~])")
 
 
 class Refused(Exception):
@@ -270,13 +268,14 @@ def _labels(value: Any) -> List[Dict[str, str]]:
     return out
 
 
-def _meeting_row(call_id: str) -> Optional[Dict[str, Any]]:
+def _meeting_row(call_id: str, consistent: bool = False) -> Optional[Dict[str, Any]]:
     item = (
         DYNAMODB.Table(EVENT_SOURCING_TABLE)
         .get_item(
             Key={"PK": f"c#{call_id}", "SK": f"c#{call_id}"},
             ProjectionExpression="CallId, #o, Participants, Labels, CreatedAt",
             ExpressionAttributeNames={"#o": "Owner"},
+            ConsistentRead=consistent,
         )
         .get("Item")
     )
@@ -307,7 +306,7 @@ def _ref_id(value: Any, name: str) -> str:
     return value
 
 
-def meeting_of(arguments: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+def meeting_of(arguments: Mapping[str, Any], consistent: bool = False) -> Optional[Dict[str, Any]]:
     """The meeting a consent link names, or None when there is none.
 
     Named by ``CallId`` or, for a Virtual Participant that may not have created
@@ -348,7 +347,7 @@ def meeting_of(arguments: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
         "ScheduledFor": vp.get("scheduledFor") or None,
     }
     linked = vp.get("CallId")
-    row = _meeting_row(linked) if isinstance(linked, str) and linked else None
+    row = _meeting_row(linked, consistent) if isinstance(linked, str) and linked else None
     if row and (row.get("Owner") or "") == meeting["Owner"]:
         meeting.update(
             {
@@ -922,10 +921,6 @@ def pass_withdrawal_on(consent: Mapping[str, Any], now: datetime) -> int:
     return administration.pass_withdrawal_on(LAMBDA, MEETING_CONSENT_FUNCTION, consent, now)
 
 
-def _markdown_text(value: str) -> str:
-    return _MARKDOWN_SPECIAL.sub(r"\\\1", value)
-
-
 def _reserve_ask(username: str, now: float) -> bool:
     day = time.strftime("%Y-%m-%d", time.gmtime(now))
     try:
@@ -943,42 +938,56 @@ def _reserve_ask(username: str, now: float) -> bool:
     return True
 
 
+def _publish_request(call_id: str, email: str, name: str) -> bool:
+    """The request as the meeting's ``participant_list_request`` notification.
+
+    One notification per address (advance.request_dedup_key): a later request,
+    or the same one published again, updates it.
+    """
+    # pylint: disable-next=import-outside-toplevel
+    from lma_notifications import NotificationError, publish_meeting_notification
+
+    try:
+        publish_meeting_notification(
+            call_id,
+            **advance.participant_list_request_notification(email, name),
+            # Well inside the function's own 30 seconds, so a request that
+            # reached nobody is still forgotten and can be made again.
+            timeout=10,
+        )
+    except (NotificationError, OSError, ValueError):
+        LOGGER.exception("could not notify the meeting's owner")
+        return False
+    return True
+
+
 def _notify_owner(meeting: Mapping[str, Any], email: str, name: str) -> bool:
     """Show the request in LMA: a meeting notification, which reaches everyone who can
     see the meeting, or the Virtual Participant's row, which its page shows to its
-    owner and Admins."""
-    who = f"{name} <{email}>" if name else email
-    if meeting["Kind"] == "call":
-        # pylint: disable-next=import-outside-toplevel
-        from lma_notifications import NotificationError, publish_meeting_notification
+    owner and Admins.
 
-        try:
-            publish_meeting_notification(
-                meeting["CallId"],
-                category="meeting",
-                type="participant_list_request",
-                title="Asked to be added to the participant list",
-                body=(
-                    f"**{_markdown_text(who)}** opened this meeting's consent link and is not on "
-                    "its participant list. To let them give consent in advance, add them in the "
-                    "meeting's **Participants** section. Nothing about their consent is recorded "
-                    "until then."
-                ),
-                severity="suggestion",
-                dedup_key=f"participant_list_request:{hashlib.sha256(email.encode()).hexdigest()[:16]}",
-                actions=[
-                    {"label": "Copy name and address", "kind": "copy", "payload": {"text": who}}
-                ],
-                source="advance-consent",
-                # Well inside the function's own 30 seconds, so a request that
-                # reached nobody is still forgotten and can be made again.
-                timeout=10,
-            )
-        except (NotificationError, OSError, ValueError):
-            LOGGER.exception("could not notify the meeting's owner")
-            return False
+    A request kept on the row is published to the meeting when the Virtual
+    Participant creates it (the call event processor's START, see
+    call_event_processor/participant_list_requests.py). A request kept while
+    that happens could be read by neither, so once it is kept the meeting is
+    looked for again, and the request published to it if it now exists.
+    """
+    if meeting["Kind"] == "call":
+        return _publish_request(meeting["CallId"], email, name)
+    if not _keep_request_on_vp(meeting, email, name):
+        return False
+    # Kept on the row either way, so a failure from here on is only logged.
+    try:
+        # A consistent read, so a meeting created moments ago is found.
+        current = meeting_of(
+            {"VirtualParticipantId": meeting["VirtualParticipantId"]}, consistent=True
+        )
+    except (ClientError, BotoCoreError):
+        LOGGER.exception("could not look for the Virtual Participant's meeting again")
         return True
-    return _keep_request_on_vp(meeting, email, name)
+    if current is not None and current["Kind"] == "call" and listed_entry(current, email) is None:
+        _publish_request(current["CallId"], email, name)
+    return True
 
 
 def _keep_request_on_vp(meeting: Mapping[str, Any], email: str, name: str) -> bool:
@@ -1236,9 +1245,15 @@ def list_all_advance_consents(caller: Mapping[str, Any], arguments: Mapping[str,
         next_key = key
         if not key:
             break
-    profiles = account_names.read_profiles(
-        DYNAMODB_CLIENT, EVENT_SOURCING_TABLE, {str(i.get("Email") or "") for i in found}
-    )
+    try:
+        profiles = account_names.read_profiles(
+            DYNAMODB_CLIENT, EVENT_SOURCING_TABLE, {str(i.get("Email") or "") for i in found}
+        )
+    except account_names.NamesChanged as error:
+        # The names are read for the page as a whole; another read usually succeeds.
+        raise BadRequest(
+            "The names of the people on this page could not be read; try again"
+        ) from error
     LOGGER.info("an Admin listed %d consents given in advance", len(found))
     return {
         "Consents": [admin_consent_out(item, now, profiles) for item in found],
@@ -1293,22 +1308,27 @@ def delete_advance_consent_records(caller: Mapping[str, Any], data: Mapping[str,
     ):
         raise BadRequest("ConsentIds must be consents given in advance")
     now = datetime.now(timezone.utc)
-    answer = administration.erase(
-        DYNAMODB_CLIENT,
-        EVENT_SOURCING_TABLE,
-        email=email,
-        erased_by=caller["username"],
-        now=now,
-        expires_after=_expires_after(now),
-        consent_ids=None if every else ids,
-        pass_on=lambda written: pass_withdrawal_on(written, now),
-    )
+    try:
+        answer = administration.erase(
+            DYNAMODB_CLIENT,
+            EVENT_SOURCING_TABLE,
+            email=email,
+            erased_by=caller["username"],
+            now=now,
+            expires_after=_expires_after(now),
+            consent_ids=None if every else ids,
+            pass_on=lambda written: pass_withdrawal_on(written, now),
+        )
+    except administration.ConsentsUnreadable as error:
+        # Raised before anything is withdrawn or removed.
+        raise BadRequest(str(error)) from error
     LOGGER.info(
-        "an Admin erased %d consents given in advance (%d withdrawn first)",
+        "an Admin erased %d consents given in advance (%d withdrawn first, more remain: %s)",
         answer["Deleted"],
         answer["Withdrawn"],
+        answer["MoreRemain"],
     )
-    return {k: answer[k] for k in ("Deleted", "Withdrawn", "ConsentIds", "AuditId")}
+    return {k: answer[k] for k in ("Deleted", "Withdrawn", "ConsentIds", "AuditId", "MoreRemain")}
 
 
 OPERATIONS = {

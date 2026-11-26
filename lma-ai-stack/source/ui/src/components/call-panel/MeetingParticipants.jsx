@@ -47,7 +47,9 @@ const logger = new ConsoleLogger('MeetingParticipants');
 const accountCellContent = (accounts, accountsError, email) => {
   if (!accounts) return accountsError ? '-' : <StatusIndicator type="loading">Checking</StatusIndicator>;
   const account = accounts.get(email.toLowerCase());
-  return <StatusIndicator type={account === 'none' ? 'stopped' : 'success'}>{accountLabel(account)}</StatusIndicator>;
+  // "unknown": the lookup was throttled; reading the list again checks it again.
+  const type = { none: 'stopped', unknown: 'warning' }[account] || 'success';
+  return <StatusIndicator type={type}>{accountLabel(account)}</StatusIndicator>;
 };
 
 const errorText = (error, fallback) => error?.errors?.[0]?.message || error?.message || fallback;

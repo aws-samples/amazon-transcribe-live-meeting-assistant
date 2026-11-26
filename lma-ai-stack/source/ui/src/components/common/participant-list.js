@@ -128,6 +128,7 @@ export const sameParticipants = (a, b) => JSON.stringify(participantsInput(a)) =
 /** What an account answer reads as in the list. */
 export const ACCOUNT_LABELS = {
   none: 'No account',
+  unknown: 'Could not be checked',
   Participant: 'Participant',
   User: 'User',
   Admin: 'Admin',

@@ -117,3 +117,37 @@ describe('invitableMeetingOptions', () => {
     expect(invitableMeetingOptions(null, undefined)).toEqual([]);
   });
 });
+
+describe('Create user: the email address', () => {
+  const typeEmail = (dialog, value) =>
+    fireEvent.change(within(dialog).getByPlaceholderText('user@example.com'), { target: { value } });
+
+  it('refuses an address longer than 254 characters with a field error, and sends nothing', async () => {
+    const dialog = await openForm();
+    const long = `${'a'.repeat(64)}@${'b'.repeat(185)}.com`;
+    expect(long).toHaveLength(254);
+    typeEmail(dialog, `a${long}`);
+    expect(await within(dialog).findByText(/is 255 characters long; it can be at most 254/)).toBeTruthy();
+    submit(dialog);
+    await waitFor(() => expect(calls('mutation CreateUser')).toHaveLength(0));
+  });
+
+  it('accepts an address of exactly 254 characters', async () => {
+    const dialog = await openForm();
+    const long = `${'a'.repeat(64)}@${'b'.repeat(185)}.com`;
+    typeEmail(dialog, long);
+    expect(within(dialog).queryByText(/characters long/)).toBeNull();
+    submit(dialog);
+    await waitFor(() => expect(calls('mutation CreateUser')).toHaveLength(1));
+    expect(calls('mutation CreateUser')[0].variables.input.email).toBe(long);
+  });
+
+  it('shows a malformed address as a field error once Create is chosen', async () => {
+    const dialog = await openForm();
+    typeEmail(dialog, 'not-an-address');
+    expect(within(dialog).queryByText('Enter a valid email address.')).toBeNull();
+    submit(dialog);
+    expect(await within(dialog).findByText('Enter a valid email address.')).toBeTruthy();
+    expect(calls('mutation CreateUser')).toHaveLength(0);
+  });
+});

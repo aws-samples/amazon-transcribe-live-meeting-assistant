@@ -42,6 +42,7 @@ import {
   shortNamesProblem,
   shortNamesText,
 } from '../common/account-names';
+import { MAX_PARTICIPANT_EMAIL_CHARS } from '../common/participant-list';
 import useAppContext from '../../contexts/app';
 import { INVITABLE_MEETING_DAYS, invitableMeetingOptions, meetingRefFromText } from './invite-meeting';
 
@@ -62,6 +63,20 @@ export const ROLE_OPTIONS = [
 const ROLE_BADGE_COLORS = { Admin: 'red', User: 'blue', Participant: 'grey' };
 
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+
+/**
+ * What is wrong with an address typed for a new user, or null. Held to the
+ * participant list's limit (the longest address a mailbox can have), so a user
+ * created here can be put on a meeting's participant list.
+ */
+export const newUserEmailProblem = (text) => {
+  const email = (text || '').trim();
+  if (email.length > MAX_PARTICIPANT_EMAIL_CHARS) {
+    return `The email address is ${email.length} characters long; it can be at most ${MAX_PARTICIPANT_EMAIL_CHARS}.`;
+  }
+  if (!EMAIL_REGEX.test(email)) return 'Enter a valid email address.';
+  return null;
+};
 
 const formatError = (err) => {
   if (!err) return 'Unknown error';
@@ -225,6 +240,8 @@ const UserManagementPage = () => {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [newEmail, setNewEmail] = useState('');
+  // The address is checked once Create is chosen, and at once when it is too long.
+  const [emailChecked, setEmailChecked] = useState(false);
   const [newRole, setNewRole] = useState(ROLE_OPTIONS[0]);
   const [createBusy, setCreateBusy] = useState(false);
   const [createErr, setCreateErr] = useState(null);
@@ -310,6 +327,7 @@ const UserManagementPage = () => {
 
   const handleOpenCreate = () => {
     setNewEmail('');
+    setEmailChecked(false);
     setNewRole(ROLE_OPTIONS[0]);
     setNewDisplayName('');
     setNewShortNames('');
@@ -327,8 +345,9 @@ const UserManagementPage = () => {
   const handleCreate = async () => {
     setCreateErr(null);
     const email = (newEmail || '').trim();
-    if (!EMAIL_REGEX.test(email)) {
-      setCreateErr('Please enter a valid email address.');
+    const emailProblem = newUserEmailProblem(email);
+    if (emailProblem) {
+      setEmailChecked(true);
       return;
     }
     const names = namesInput(newDisplayName, newShortNames);
@@ -577,7 +596,15 @@ const UserManagementPage = () => {
       >
         <SpaceBetween size="m">
           {createErr && <Alert type="error">{createErr}</Alert>}
-          <FormField label="Email" description="Used as the Cognito username. An invitation email will be sent.">
+          <FormField
+            label="Email"
+            description="Used as the Cognito username. An invitation email will be sent."
+            errorText={
+              (emailChecked || (newEmail || '').trim().length > MAX_PARTICIPANT_EMAIL_CHARS
+                ? newUserEmailProblem(newEmail)
+                : null) || undefined
+            }
+          >
             <Input
               value={newEmail}
               onChange={({ detail }) => setNewEmail(detail.value)}

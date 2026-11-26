@@ -33,6 +33,7 @@ import boto3
 # Meeting Started, Meeting Ended and Summary Ready, published to the stack's
 # meeting event bus (docs/meeting-events.md). Never raises.
 import meeting_event_publisher  # noqa: E402
+import participant_list_requests  # noqa: E402
 
 # custom utils/helpers imports from Lambda layer
 # pylint: disable=import-error
@@ -2264,6 +2265,11 @@ async def execute_process_event_api_mutation(
                 METRICS.count(metric_names.MEETINGS_STARTED)
                 await meeting_event_publisher.meeting_started(
                     message, session_number_of(message), appsync_session, LOGGER
+                )
+                # Requests to be added kept on the Virtual Participant before
+                # its meeting existed, now shown on the meeting.
+                await participant_list_requests.publish_vp_requests(
+                    message, appsync_session, LOGGER
                 )
 
         # A later capture session of a meeting that already exists: its owner or

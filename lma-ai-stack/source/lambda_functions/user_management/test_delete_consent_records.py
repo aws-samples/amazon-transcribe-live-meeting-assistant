@@ -86,3 +86,63 @@ def test_a_failed_erasure_says_the_user_was_deleted(calls, monkeypatch) -> None:
         delete(deleteConsentRecords=True)
     # At least withdrawn, as without the option.
     assert calls["withdraw"] == [(USER, f"sub-{USER}")]
+
+
+def test_an_erasure_with_more_remaining_runs_again_until_none_remain(calls, monkeypatch) -> None:
+    answers = [
+        {"Deleted": 2, "Withdrawn": 0, "ConsentIds": [], "AuditId": "a1", "MoreRemain": True},
+        {"Deleted": 1, "Withdrawn": 0, "ConsentIds": [], "AuditId": "a2", "MoreRemain": False},
+    ]
+    monkeypatch.setattr(administration, "erase", lambda *_a, **_k: answers.pop(0))
+    answer = delete(deleteConsentRecords=True)
+    assert answer["consentRecordsDeleted"] == 3 and answers == []
+
+
+def test_an_erasure_that_leaves_some_says_so_and_where_to_finish(calls, monkeypatch) -> None:
+    rounds = []
+
+    def erase(*_a, **_k):
+        rounds.append(1)
+        return {"Deleted": 2, "Withdrawn": 0, "ConsentIds": [], "AuditId": "a", "MoreRemain": True}
+
+    monkeypatch.setattr(administration, "erase", erase)
+    with pytest.raises(Exception, match="consent records were erased, but more remain"):
+        delete(deleteConsentRecords=True)
+    assert len(rounds) == index.MAX_ERASURE_ROUNDS
+
+
+def test_consents_left_after_the_last_round_are_withdrawn(calls, monkeypatch) -> None:
+    more = {"Deleted": 2, "Withdrawn": 0, "ConsentIds": [], "AuditId": "a", "MoreRemain": True}
+    monkeypatch.setattr(administration, "erase", lambda *_a, **_k: dict(more))
+    with pytest.raises(Exception, match="more remain"):
+        delete(deleteConsentRecords=True)
+    assert calls["withdraw"] == [(USER, f"sub-{USER}")]
+
+
+def test_no_erasure_round_starts_once_its_time_is_spent(calls, monkeypatch) -> None:
+    rounds = []
+
+    def erase(*_a, **_k):
+        rounds.append(1)
+        return {"Deleted": 2, "Withdrawn": 0, "ConsentIds": [], "AuditId": "a", "MoreRemain": True}
+
+    monkeypatch.setattr(administration, "erase", erase)
+    monkeypatch.setattr(index, "ERASURE_SECONDS", -1.0)
+    with pytest.raises(Exception, match="more remain"):
+        delete(deleteConsentRecords=True)
+    assert len(rounds) == 1
+
+
+def test_a_round_that_fails_after_one_that_erased_says_how_many_were_erased(
+    calls, monkeypatch
+) -> None:
+    answers = [{"Deleted": 2, "Withdrawn": 0, "ConsentIds": [], "AuditId": "a", "MoreRemain": True}]
+
+    def erase(*_a, **_k):
+        if answers:
+            return answers.pop(0)
+        raise ClientError({"Error": {"Code": "ThrottlingException", "Message": "slow"}}, "Query")
+
+    monkeypatch.setattr(administration, "erase", erase)
+    with pytest.raises(Exception, match=r"could not all be erased \(2 were erased first\)"):
+        delete(deleteConsentRecords=True)

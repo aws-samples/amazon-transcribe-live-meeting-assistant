@@ -3063,3 +3063,25 @@ def test_a_new_meeting_gets_its_whiteboards_choice_else_the_deployments(
         event["WhiteboardsEnabled"] = event_value
     process_event(session, event, monkeypatch)
     assert expected in print_ast(session.queries[0])
+
+
+def test_a_start_event_with_an_empty_participant_list_creates_the_meeting_with_an_empty_list(
+    schema, emitted, monkeypatch
+):
+    """A Virtual Participant started with no one on its list sends an empty list:
+    the meeting is created, with an empty list rather than none at all."""
+    created = {"createCall": {"CallId": "call-1", "Owner": "someone@example.com"}}
+    session = FakeSession(schema, created)
+    process_event(
+        session,
+        {
+            "EventType": "START",
+            "CallId": "call-1",
+            "AgentId": "someone@example.com",
+            "Participants": [],
+        },
+        monkeypatch,
+    )
+    sent = print_ast(session.queries[0])
+    assert "Participants: []" in sent
+    assert emitted.counts.get(metric_names.MEETINGS_STARTED) == 1

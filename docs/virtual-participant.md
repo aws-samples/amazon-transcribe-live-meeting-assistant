@@ -815,7 +815,7 @@ found by "mcd"); a display name set in LMA is found in any case.
 
 ### Who has an LMA account
 
-The **Participants** section of the meeting page, and of a Virtual Participant's page, lists each person with their name and email address. The meeting's owner and Admins also see, for each person, whether they have an LMA account and with which role: **No account**, **Participant**, **User** or **Admin**. The account is matched by email address, ignoring case. The lookup is made by the server (`getMeetingParticipantAccounts`), which answers only that status and nothing else about the account. A user the meeting is shared with sees the list without the status, and cannot change it.
+The **Participants** section of the meeting page, and of a Virtual Participant's page, lists each person with their name and email address. The meeting's owner and Admins also see, for each person, whether they have an LMA account and with which role: **No account**, **Participant**, **User** or **Admin**. The account is matched by email address, ignoring case. The lookup is made by the server (`getMeetingParticipantAccounts`), which answers only that status and nothing else about the account. A lookup the user pool throttles is tried again a few times with a pause between; an address still throttled after that, or not reached within the 15 seconds one answer spends on lookups, shows **Could not be checked**, and the others are answered as usual. **Create accounts for participants without one** offers only the addresses shown as **No account**, so to retry one that could not be checked, open the page again (which reads the list again); if the server's own lookup is throttled when the accounts are created, it creates no account for that address and reports it as not checked. A user the meeting is shared with sees the list without the status, and cannot change it.
 
 ### Creating accounts for the people on the list
 
@@ -1432,9 +1432,10 @@ meeting that redacts.
 A chat line with attachments shows each under the message: an image as a
 thumbnail, a file as a file chip with its size, each with its AI title and
 summary marked *AI-generated from the attachment*. Clicking one reads it again
-through the `getChatAttachments` query, which answers the same people who can
-see the meeting (its owner, the people it is shared with, and Admins), and
-opens a link valid for an hour that serves the file as a download
+through the `getChatAttachments` query, which answers the meeting's owner, the
+Users it is shared with, and Admins. A Participant the meeting is shared with
+is not included: the query is open to the Admin and User roles only. It opens a
+link valid for an hour that serves the file as a download
 (`Content-Disposition: attachment`). Only PNG, JPEG, GIF and WebP images are
 ever shown in the page, as thumbnails; nothing else is rendered inline. The
 embedded transcript does not show attachments.

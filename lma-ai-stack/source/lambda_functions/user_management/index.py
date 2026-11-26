@@ -587,6 +587,13 @@ def delete_user(event, args):
     return {"username": username, "success": True, "consentRecordsDeleted": erased}
 
 
+#: The most erasures one account deletion runs, each removing up to MAX_ERASED consents.
+MAX_ERASURE_ROUNDS = 5
+#: No erasure round starts after this many seconds. The function has 30, and a
+#: round already started (up to MAX_ERASED deletes) runs to its end.
+ERASURE_SECONDS = 6.0
+
+
 def _erase_advance_consents(email, sub, erased_by):
     """Erase the consents the deleted account gave in advance; how many were removed.
 
@@ -595,35 +602,54 @@ def _erase_advance_consents(email, sub, erased_by):
     """
     if not EVENT_SOURCING_TABLE or not email or not sub:
         return 0
+    deleted = 0
     try:
         # pylint: disable-next=import-outside-toplevel,import-error
         from lma_consent import administration
 
         now = datetime.now(timezone.utc)
         lambda_client = boto3.client("lambda")
-        answer = administration.erase(
-            boto3.client("dynamodb"),
-            EVENT_SOURCING_TABLE,
-            email=email,
-            subject=sub,
-            erased_by=erased_by or "LMA",
-            now=now,
-            expires_after=int(now.timestamp() + MEETING_RECORD_EXPIRATION_DAYS * 86400),
-            reason="account_deleted",
-            pass_on=lambda consent: administration.pass_withdrawal_on(
-                lambda_client, MEETING_CONSENT_FUNCTION, consent, now
-            ),
-        )
+        dynamodb = boto3.client("dynamodb")
+        started = time.monotonic()
+        # One erasure removes at most a bounded number; a few more rounds finish
+        # an account with more, while time is left for them.
+        for _round in range(MAX_ERASURE_ROUNDS):
+            if _round and time.monotonic() - started >= ERASURE_SECONDS:
+                break
+            answer = administration.erase(
+                dynamodb,
+                EVENT_SOURCING_TABLE,
+                email=email,
+                subject=sub,
+                erased_by=erased_by or "LMA",
+                now=now,
+                expires_after=int(now.timestamp() + MEETING_RECORD_EXPIRATION_DAYS * 86400),
+                reason="account_deleted",
+                pass_on=lambda consent: administration.pass_withdrawal_on(
+                    lambda_client, MEETING_CONSENT_FUNCTION, consent, now
+                ),
+            )
+            deleted += answer["Deleted"]
+            if not answer.get("MoreRemain"):
+                break
     except (ImportError, ClientError, BotoCoreError) as exc:
         logger.warning("Could not erase a deleted user's consent records", exc_info=True)
         # At least what a deletion without erasure leaves: none still in force.
         _withdraw_advance_consents(email, sub)
+        done = f" ({deleted} were erased first)" if deleted else ""
         raise ValidationError(
-            "The user was deleted, but their consent records could not be erased; erase them "
-            "on My consents › All consents (admin)"
+            f"The user was deleted, but their consent records could not all be erased{done}; "
+            "erase them on My consents › All consents (admin)"
         ) from exc
-    logger.info("Erased %d consent records of a deleted user", answer["Deleted"])
-    return answer["Deleted"]
+    logger.info("Erased %d consent records of a deleted user", deleted)
+    if answer.get("MoreRemain"):
+        # Those left are at least withdrawn, as a deletion without erasure leaves them.
+        _withdraw_advance_consents(email, sub)
+        raise ValidationError(
+            f"The user was deleted and {deleted} of their consent records were erased, but more "
+            "remain; erase them on My consents › All consents (admin)"
+        )
+    return deleted
 
 
 def _sub_and_email_of(username):
@@ -768,6 +794,14 @@ def _delete_notification_preferences(username):
 # condition and the web UI compare it.
 
 NO_ACCOUNT = "none"
+#: An address whose account could not be looked up (the user pool kept throttling).
+UNKNOWN_ACCOUNT = "unknown"
+THROTTLE_CODES = ("TooManyRequestsException", "ThrottlingException")
+LOOKUP_ATTEMPTS = 4
+LOOKUP_BACKOFF_SECONDS = 0.2
+#: Seconds one answer spends on lookups (the function has 30); an address not
+#: looked up by then, or throttled past it, is answered "unknown" at once.
+LOOKUP_DEADLINE_SECONDS = 15.0
 #: A meeting lists at most this many people (normalize_participants in the
 #: configuration layer's lma_meeting_preparation/rules.py).
 MAX_PARTICIPANTS = 100
@@ -896,18 +930,47 @@ def _find_account(email):
     return None
 
 
-def _account_of(email):
-    """ "none" or the role of the account with this address."""
-    username = _find_account(email)
-    if username is None:
-        return NO_ACCOUNT
-    return effective_role(_group_names(username))
+def _throttled(exc):
+    return isinstance(exc, ClientError) and exc.response.get("Error", {}).get("Code") in (
+        THROTTLE_CODES
+    )
+
+
+def _account_of(email, deadline=None):
+    """ "none", the role of the account with this address, or "unknown".
+
+    A lookup the user pool throttles is tried again after a pause, up to
+    LOOKUP_ATTEMPTS times; an address still throttled is answered "unknown",
+    so one busy moment does not fail the answer for the whole list. Past
+    ``deadline`` (a time.monotonic() value) no lookup or pause is started.
+    """
+    for attempt in range(LOOKUP_ATTEMPTS):
+        if deadline is not None and time.monotonic() >= deadline:
+            break
+        try:
+            username = _find_account(email)
+            if username is None:
+                return NO_ACCOUNT
+            return effective_role(_group_names(username))
+        except ClientError as exc:
+            if not _throttled(exc):
+                raise
+            pause = LOOKUP_BACKOFF_SECONDS * 2**attempt
+            if attempt + 1 < LOOKUP_ATTEMPTS and (
+                deadline is None or time.monotonic() + pause < deadline
+            ):
+                time.sleep(pause)
+            else:
+                break
+    logger.warning("An account lookup could not be made; answered unknown")
+    return UNKNOWN_ACCOUNT
 
 
 def _accounts_of(emails):
-    """Each address's account answer, looked up a few at a time."""
+    """Each address's account answer, looked up a few at a time, within LOOKUP_DEADLINE_SECONDS."""
+    deadline = time.monotonic() + LOOKUP_DEADLINE_SECONDS
     with ThreadPoolExecutor(max_workers=LOOKUP_WORKERS) as pool:
-        return dict(zip(emails, pool.map(_account_of, emails)))
+        return dict(zip(emails, pool.map(lambda email: _account_of(email, deadline), emails)))
 
 
 def _address_key(email):
@@ -1255,6 +1318,15 @@ def create_participant_accounts(event, args):
     results = []
     attempts = 0
     for email in wanted:
+        if accounts[email] == UNKNOWN_ACCOUNT:
+            results.append(
+                {
+                    "email": email,
+                    "outcome": "failed",
+                    "message": "Whether this person has an account could not be checked; try again",
+                }
+            )
+            continue
         if accounts[email] != NO_ACCOUNT:
             results.append({"email": email, "outcome": "exists", "message": None})
             continue
