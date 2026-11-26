@@ -18,6 +18,14 @@ Parameters:
     Type: String
     Description: AISTACK Stack ARN
 
+  QueryKnowledgeBaseResolverFunction:
+    Type: String
+    Default: ""
+    Description: >-
+      Name of the AI stack's transcript knowledge base query function, which
+      is in its Lambda resolvers nested stack. Empty looks the function up in
+      the AI stack itself, as stacks before that nested stack were laid out.
+
   COGNITOSTACK:
     Type: String
     Description: COGNITOSTACK Stack ARN
@@ -1005,6 +1013,7 @@ Resources:
     Properties:
       ServiceToken: !GetAtt SetupFunction.Arn
       AISTACK: !Ref AISTACK
+      QueryKnowledgeBaseResolverFunction: !Ref QueryKnowledgeBaseResolverFunction
       COGNITOSTACK: !Ref COGNITOSTACK
       MeetingAssistService: !Ref MeetingAssistService
       StrandsMeetingAssistFunction: !If
