@@ -2348,6 +2348,9 @@ Resources:
           MAX_ATTEMPTS = 8
           BASE_DELAY_SECONDS = 2
           MAX_DELAY_SECONDS = 30
+          # Time kept back for answering CloudFormation; without an answer it waits
+          # an hour before failing the deletion.
+          RESPONSE_MARGIN_SECONDS = 30
 
 
           def error_code(error):
@@ -2375,8 +2378,11 @@ Resources:
                           logger.warning("Could not delete %s: %s", failure.get('Key'), failure.get('Code'))
 
 
-          def delete_bucket_with_retry(bucket_name, max_attempts=MAX_ATTEMPTS, sleep=time.sleep):
-              """Empty and delete the bucket, retrying transient S3 errors with backoff."""
+          def delete_bucket_with_retry(bucket_name, max_attempts=MAX_ATTEMPTS, sleep=time.sleep, seconds_left=None):
+              """Empty and delete the bucket, retrying transient S3 errors with backoff.
+
+              `seconds_left` reports the invocation's remaining time; a retry that
+              would leave too little to answer CloudFormation raises instead."""
               for attempt in range(1, max_attempts + 1):
                   try:
                       logger.info("Attempt %d/%d: emptying and deleting bucket %s", attempt, max_attempts, bucket_name)
@@ -2393,6 +2399,9 @@ Resources:
                           logger.error("Could not delete bucket %s: %s", bucket_name, error)
                           raise
                       delay = min(MAX_DELAY_SECONDS, BASE_DELAY_SECONDS * 2 ** (attempt - 1))
+                      if seconds_left and seconds_left() < delay + RESPONSE_MARGIN_SECONDS:
+                          logger.error("Not enough time left to retry deleting bucket %s", bucket_name)
+                          raise
                       logger.warning("Deleting bucket %s returned %s; retrying in %d s", bucket_name, code, delay)
                       sleep(delay)
 
@@ -2400,6 +2409,9 @@ Resources:
           def handler(event, context):
               logger.info("Event: %s", event)
               request_type = event['RequestType']
+              seconds_left = None
+              if context is not None and hasattr(context, 'get_remaining_time_in_millis'):
+                  seconds_left = lambda: context.get_remaining_time_in_millis() / 1000
               # Keep the physical ID CloudFormation already has: a different one on
               # Update would make CloudFormation send a Delete for the old one.
               physical_id = event.get('PhysicalResourceId') or 'S3BucketCleanup-' + event['LogicalResourceId']
@@ -2418,7 +2430,7 @@ Resources:
                       ]
                       logger.info("Deleting buckets: %s", bucket_names)
                       for bucket_name in bucket_names:
-                          delete_bucket_with_retry(bucket_name)
+                          delete_bucket_with_retry(bucket_name, seconds_left=seconds_left)
                   cfnresponse.send(event, context, cfnresponse.SUCCESS, {}, physicalResourceId=physical_id)
               except Exception as error:
                   logger.error("Bucket cleanup failed: %s", error, exc_info=True)
@@ -2428,7 +2440,8 @@ Resources:
 
   # CloudFormation deletes a resource only after every resource that depends on
   # it, so each resource that uses the logging or recordings bucket (the nested
-  # stacks that receive their names) lists this handler in DependsOn: the
+  # stacks that receive their names, and RecordingsBucketNotification) lists
+  # this handler in DependsOn, directly or through another resource: the
   # handler's Delete, which empties and deletes the buckets, then runs after
   # they are gone. lma-ai-stack/test/test_stack_bucket_cleanup.py checks this.
   S3BucketCleanupHandler:

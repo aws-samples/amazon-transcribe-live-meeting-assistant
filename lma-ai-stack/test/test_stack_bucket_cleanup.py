@@ -19,6 +19,8 @@ The function's inline code is run against a fake S3 client:
 - with retention off, a Delete empties and deletes both buckets, recordings first;
 - OperationAborted, BucketNotEmpty and other transient errors are retried with
   backoff, other errors fail the request, NoSuchBucket counts as done;
+- a retry that would leave too little time to answer CloudFormation fails
+  the request instead;
 - Create and Update do nothing and keep the physical ID CloudFormation has.
 """
 
@@ -253,6 +255,8 @@ def run(resources, monkeypatch):
         retain: str = "false",
         physical_id: Optional[str] = "existing-id",
         recordings: str = "recordings",
+        context: Any = None,
+        sleeps: Optional[List[float]] = None,
     ):
         responses: List[Dict[str, Any]] = []
         cfnresponse = types.ModuleType("cfnresponse")
@@ -273,12 +277,11 @@ def run(resources, monkeypatch):
         monkeypatch.setenv("RECORDINGS_BUCKET_NAME", recordings)
 
         module = types.ModuleType("s3_bucket_cleanup")
-        exec(
-            compile(_function_source(resources), "S3BucketCleanupFunction", "exec"), module.__dict__
-        )  # noqa: S102
-        sleeps: List[float] = []
+        source = compile(_function_source(resources), "S3BucketCleanupFunction", "exec")
+        exec(source, module.__dict__)  # noqa: S102
+        sleeps = [] if sleeps is None else sleeps
         # `sleep` defaults to time.sleep, bound when the function was defined.
-        module.delete_bucket_with_retry.__defaults__ = (module.MAX_ATTEMPTS, sleeps.append)
+        module.delete_bucket_with_retry.__defaults__ = (module.MAX_ATTEMPTS, sleeps.append, None)
         event = {
             "RequestType": request_type,
             "LogicalResourceId": HANDLER,
@@ -286,7 +289,7 @@ def run(resources, monkeypatch):
         }
         if physical_id:
             event["PhysicalResourceId"] = physical_id
-        module.handler(event, None)
+        module.handler(event, context)
         assert len(responses) == 1, "the custom resource must answer CloudFormation exactly once"
         return responses[0], sleeps, module
 
@@ -340,6 +343,29 @@ def test_backoff_is_capped_and_gives_up_after_the_last_attempt(run):
     assert len(sleeps) == module.MAX_ATTEMPTS - 1
     assert max(sleeps) == module.MAX_DELAY_SECONDS
     assert sum(sleeps) < 600, "the retries must finish well inside the function's 900 s timeout"
+
+
+class FakeContext:
+    """A Lambda context whose remaining time drops by each recorded sleep."""
+
+    def __init__(self, seconds: float, sleeps: List[float]) -> None:
+        self.seconds = seconds
+        self.sleeps = sleeps
+
+    def get_remaining_time_in_millis(self) -> int:
+        return int((self.seconds - sum(self.sleeps)) * 1000)
+
+
+def test_a_retry_that_would_outlast_the_invocation_fails_while_it_can_still_answer(run):
+    s3 = _two_full_buckets()
+    s3.delete_errors = {"logging": ["OperationAborted"] * 20}
+    sleeps: List[float] = []
+    response, _, _ = run("Delete", s3, context=FakeContext(70, sleeps), sleeps=sleeps)
+    assert response["status"] == "FAILED"
+    assert "OperationAborted" in response["reason"]
+    # 70 s at the start: 2, 4, 8 and 16 s each leave the 30 s margin; after them
+    # 40 s remain, too few for a 30 s wait plus the margin.
+    assert sleeps == [2, 4, 8, 16]
 
 
 def test_an_error_that_is_not_transient_fails_at_once(run):
