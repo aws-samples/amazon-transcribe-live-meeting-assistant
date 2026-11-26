@@ -12,7 +12,8 @@ This page collects the demonstration videos for the Live Meeting Assistant (LMA)
 ## Table of Contents
 
 - [Overview](#overview)
-- [What's new in LMA 0.4.0](#whats-new-in-lma-040)
+- [What's new in this release](#whats-new-in-this-release)
+- [Earlier releases](#earlier-releases)
 - [Recording a new demo](#recording-a-new-demo)
 
 ---
@@ -29,13 +30,13 @@ https://github.com/user-attachments/assets/ccb1e079-3a9e-4e94-990a-c39043b659dd
 **Related Documentation**: [Quick Start Guide](./quick-start-guide.md), [MCP Servers](./mcp-servers.md), [Amazon Quick MCP Setup](./amazon-quick-mcp-setup.md), [Meeting Consent](./meeting-consent.md), [On-demand ASR](./microvm-asr.md)
 
 ### Meeting consent and compliance
-For compliance, privacy and legal teams. The three consent modes (off, notify, opt-in by each participant or by the owner's attestation), the notice and reply phrases, and the settings around them; which options work with the Virtual Participant, Stream Audio/Video and the Desktop Capture App, the browser extension and uploads. Then a live Google Meet run under opt-in: LMA posts the request and records nothing, a participant consents, the owner attests, a participant objects and recording stops, and consents again. It closes on the auditable consent record (notice, replies, attestation, evidence screenshots checked by a vision model, timeline), Stream Audio/Video consent records, and configuration profiles kept for different jurisdictions and policies.
+For compliance, privacy and legal teams. The three consent modes (off, notify, opt-in by each participant or by the owner's attestation), the notice, the video sentence added whenever video is recorded, and the reply phrases; which options work with the Virtual Participant, Stream Audio/Video, the browser extension and the Desktop Capture App, and why the Virtual Participant reads only chat messages sent to everyone. Then consent given in advance: the owner invites the meeting's listed participants, and a Participant signs in to My consents and agrees for that meeting or for the organizer's meetings, reading the exact text first. In a live Google Meet under opt-in, LMA names an attendee whose consent given in advance is on record, asks everyone else, starts recording once everyone present is covered, stops at once when a participant objects, and stops again when a participant withdraws their consent on My consents during the meeting. Afterwards the Participant reads the shared meeting and asks the assistant about it; the consent record keeps the notice, every reply, the consents given in advance, objections, withdrawals, evidence screenshots and a timeline; the recordings are deleted once the summary is written; and configuration presets keep different policies side by side.
 
 **Duration**: ~7 minutes
 
-https://github.com/user-attachments/assets/eb710e2f-f44c-49dd-917d-d32330fd65dc
+https://github.com/user-attachments/assets/999ede25-a0ba-4aba-b4ee-1bc30a4c9402
 
-**Related Documentation**: [Meeting Consent](./meeting-consent.md), [Privacy and Data Handling Controls](./privacy-and-data-handling.md), [Configuration Guide](./configuration-guide.md#configuration-presets)
+**Related Documentation**: [Meeting Consent](./meeting-consent.md), [Consent given in advance](./meeting-consent.md#consent-given-in-advance), [Privacy and Data Handling Controls](./privacy-and-data-handling.md), [User Management](./user-management.md), [Configuration Guide](./configuration-guide.md#configuration-presets)
 
 ### An AI coach for a requirements workshop
 A software vendor gathers requirements from a customer in a Google Meet, three people sharing the customer's board-room microphone, with LMA coaching the vendor's analyst as the meeting happens. After the consent notice, FACT CHECK corrects a figure that was just quoted, CLARITY CHECK lists requirements that are still too vague to build from, the assistant suggests the questions not yet asked, AGENDA CHECK tracks the five agenda items and MISSING ACTION OWNER or ETA finds follow-ups with no owner or date. After the meeting, the assistant drafts a software requirements specification from what was said.
@@ -55,16 +56,45 @@ https://github.com/user-attachments/assets/7642f659-ed9e-4abf-8baf-2f6fb27b08cb
 
 ---
 
-## What's new in LMA 0.4.0
+## What's new in this release
 
-### What's new in LMA 0.4.0: a meeting's life
-A tour of the 0.4.0 release following one meeting from its invitation to its shared summary: the launch settings read from a pasted invitation, LMA's own speech engine and the detected language, the consent record, speakers named automatically when the meeting ends, the agenda and labelled chapters on the Transcript tab, summary sections, key frames exported as a PDF, the itemised cost estimate and the Meeting Cost Prices page, retention controls, the Virtual Participant's display name setting, the Download menu, configuration profiles and the troubleshooting agent.
+### What's new in this release: a meeting's life
+A tour of this release following one meeting from its invitation to its shared summary: the participant list in the Create Virtual Participant form; meeting preparation with a summary profile, a label, a briefing for the assistant and a checklist; consent given in advance on the My consents page; the live transcript and a whiteboard the assistant keeps updated; live guidance in the Notifications drawer, raising what the meeting has not yet covered; a question asked in the meeting chat and answered there; the summary in the chosen profile's sections with structured action items, and the Download menu with every format, the meeting export and one archive; the meeting shared with its participants, read on a Participant's Shared meetings page; and, for administrators, the new configuration presets, the Participant role and Last active on User Management, and meeting notifications.
 
-**Duration**: ~4 minutes
+**Duration**: ~3 minutes
 
-https://github.com/user-attachments/assets/3eacd270-6584-477b-905c-8605e0cccd63
+https://github.com/user-attachments/assets/61aa2f96-9ae1-48dc-8f24-335f5ebb88d5
 
-**Related Documentation**: [Meeting Consent](./meeting-consent.md), [Transcript Deletion](./transcript-deletion.md), [Virtual Participant](./virtual-participant.md), [Meeting Cost Estimate](./meeting-cost-estimate.md)
+**Related Documentation**: [Meeting Context and Checklist](./meeting-context-and-checklist.md), [Live Guidance](./live-guidance.md), [Meeting Whiteboards](./meeting-whiteboards.md), [Meeting Consent](./meeting-consent.md#consent-given-in-advance), [Meeting Export](./meeting-export.md), [Meeting Notifications](./meeting-notifications.md), [Hosting Models](./hosting-models.md)
+
+### The meeting page in depth
+A tour of the meeting page: the compact header with its actions in one row and the speakers named from their introductions; the agenda derived from the conversation and the recording player on the Transcript tab; search, speaker filters and live translation; editing the summary by hand, with protection against regenerating over the edit; the Participants panel, with each listed person's LMA account, the invitation to consent in advance, and sharing with everyone listed; whiteboards made from a template, with the switch that lets the assistant keep them updated; the notice that says when and why the recordings were deleted after the summary; and the Download menu's summary formats and Email summary, addressed to the participant list.
+
+**Duration**: ~3 minutes
+
+https://github.com/user-attachments/assets/02165bb4-340b-4add-b564-8943bf6c7821
+
+**Related Documentation**: [Web UI Guide](./web-ui-guide.md#meeting-detail-page), [Meeting Whiteboards](./meeting-whiteboards.md), [Meeting Export](./meeting-export.md), [Transcript Deletion](./transcript-deletion.md)
+
+### The assistant, consent and privacy
+The MISSING ACTION OWNER or ETA quick action finding follow-ups with no owner or date; Participant use, which decides what the assistant may use to answer anyone other than the meeting's owner and the people it is shared with, and who in the meeting may ask; the switches that turn web search and MCP servers off for every request; a Participant asking the assistant about a meeting shared with them, answered from that meeting only; Leave out sensitive personal information; model inference geography; and the Minimised content preset compared with Standard.
+
+**Duration**: ~3 minutes
+
+https://github.com/user-attachments/assets/ad4783be-7d9d-4d0c-a2f3-bc1112e4b0ce
+
+**Related Documentation**: [Meeting Assistant](./meeting-assistant.md#who-may-ask), [Meeting Consent](./meeting-consent.md), [Configuration Guide](./configuration-guide.md#configuration-presets), [Privacy and Data Handling Controls](./privacy-and-data-handling.md)
+
+### Configuration and administration
+The View / Edit Configuration page: named profiles and the Managed presets, including the new Team-hosted (external meetings), Customer account and Minimised content presets, each of which now also sets the meeting assistant and summary settings; who activated the active profile and when, with the activation and deletion history; editing a profile as a form or YAML, with every save a revision; and new settings in this release (Participant use: who may ask, the video sentence, deleting recordings after the summary, recording Virtual Participant meeting video). Then User Management, with the Admin, User and Participant roles and each account's Last sign-in and Last active; creating a Participant who is invited to a meeting; and an MCP API key's Last used time.
+
+**Duration**: ~3 minutes
+
+https://github.com/user-attachments/assets/28f88e4a-396f-4520-bbde-909e97a1a6dc
+
+**Related Documentation**: [Configuration Guide](./configuration-guide.md#configuration-profiles), [User Management](./user-management.md), [Hosting Models](./hosting-models.md), [MCP API Key Authentication](./mcp-api-key-auth.md)
+
+## Earlier releases
 
 ### The Virtual Participant in depth
 Scheduling a Virtual Participant for later and editing it before it starts, then directing it from the meeting chat: asking for help, pausing and resuming the transcript, and, with two LMAs in one Google Meet, asking one of them by name to leave while the other stays.
@@ -75,15 +105,6 @@ https://github.com/user-attachments/assets/3086d7ac-2de2-47ee-9c7d-a3f0394b5b4d
 
 **Related Documentation**: [Virtual Participant](./virtual-participant.md)
 
-### The meeting page in depth
-A tour of the meeting page: the compact header and tabs, the itemised cost estimate, the agenda and chapter marks on the Transcript tab, playing the recording from any transcript line, search, speaker filters and live translation, editing the summary by hand with protection against regenerating over the edit, AGENDA CHECK, the Download menu and sharing with a colleague.
-
-**Duration**: ~3 minutes
-
-https://github.com/user-attachments/assets/2a3f2678-7dcc-4bd4-9fea-045ef02a6e5c
-
-**Related Documentation**: [Web UI Guide](./web-ui-guide.md#meeting-detail-page)
-
 ### Speakers and the shared screen
 How LMA tells apart and names several people sharing one microphone, with the words each name came from; naming a voice by hand; showing a room as one person or several people; voice enrollment; and searchable key frames of shared slides with their own summary section.
 
@@ -92,24 +113,6 @@ How LMA tells apart and names several people sharing one microphone, with the wo
 https://github.com/user-attachments/assets/5dde83b5-482d-49bd-9774-5465b78565d1
 
 **Related Documentation**: [Web UI Guide](./web-ui-guide.md#meeting-detail-page), [Voice Enrollment](./voice-enrollment.md), [Meeting Video and Key Frames](./meeting-video.md)
-
-### The assistant, consent and privacy
-The MISSING ACTION OWNER or ETA quick action, the Claude Haiku 5.5 default with prompt caching and the scope of in-meeting requests, model inference geography, meeting consent modes and the per-meeting choice, deleting transcripts after the summary, and the consent record kept with each meeting.
-
-**Duration**: ~2 minutes
-
-https://github.com/user-attachments/assets/cd8a7d9d-15f3-4c2a-a946-0b50f790793d
-
-**Related Documentation**: [Meeting Consent](./meeting-consent.md), [Transcript Deletion](./transcript-deletion.md)
-
-### Configuration and administration
-The View / Edit Configuration page: named profiles and Managed presets, Form, YAML or JSON editing, revision history, comparing profiles, saving edits as a new profile, the Transcription Engine section, Meeting Cost Prices, the model lists, and the troubleshooting agent explaining why a Virtual Participant could not join.
-
-**Duration**: ~3 minutes
-
-https://github.com/user-attachments/assets/0703d007-3429-4a4b-b354-628f7dc8f794
-
-**Related Documentation**: [Configuration Guide](./configuration-guide.md#configuration-profiles), [Meeting Cost Estimate](./meeting-cost-estimate.md)
 
 ---
 

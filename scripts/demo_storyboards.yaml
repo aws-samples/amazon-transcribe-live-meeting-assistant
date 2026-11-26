@@ -188,7 +188,7 @@ storyboards:
     not_shown:
       - 'Zoom, Teams, Webex and Chime joins (Google Meet stands in); the voice assistant; the Desktop Capture App'
     docs: docs/INDEX.md
-    category: 'What''s new in LMA 0.4.0'
+    category: 'Earlier releases'
     last_recorded: {date: 2026-11-13, version: 0.4.0.dev3}
 
   - id: vp-in-depth
@@ -247,83 +247,79 @@ storyboards:
     not_shown:
       - 'Voice assistant commands; Zoom, Teams, Webex and Chime; a join that needs a sign-in or CAPTCHA'
     docs: docs/virtual-participant.md
-    category: 'What''s new in LMA 0.4.0'
+    category: 'Earlier releases'
     last_recorded: {date: 2026-11-13, version: 0.4.0.dev3}
 
   - id: meeting-page-in-depth
     title: 'The meeting page in depth'
-    source: 'CHANGELOG [Unreleased] (0.4.0)'
-    audience: 'LMA users and administrators who want one area of 0.4.0 in depth'
+    source: 'Feature: docs/web-ui-guide.md#meeting-detail-page; CHANGELOG [Unreleased]: Participants panel and invitations, sharing with listed participants, Email summary to participants, whiteboards, retention notices'
+    audience: 'People who run meetings with LMA'
     hook: >-
-      LMA's meeting page puts everything about a meeting in one compact place: what was said, what it was about, what it cost, and what to do next.
+      Everything about a meeting is on its page: the transcript with its recording, the summary you can edit, the people who were expected, whiteboards, and how long each part is kept.
     persona: Admin
-    duration_target: '3:00'
+    duration_target: '3:30'
     fixtures:
-      - 'Finished meeting Mobile app planning (Google Meet, VP, two voices on one seat named Priya Shah and Marcus Lee, agenda from the invitation); a second user to share with'
+      - 'Finished meeting "Mobile app planning" (Polly-synthesized three-voice meeting, uploaded, agenda derived, summary written) with Avery Lin and a second listed person on its participant list'
+      - 'A second finished meeting made under Delete the transcript / recordings after the summary, so its retention notices show'
     chapters:
       - label: 'Header and tabs'
         say: >-
-          A compact header gives the meeting's status, platform, owner, speakers, consent and an estimated cost at a glance. Below it, tabs separate the summary, the transcript and the details.
+          The meeting page keeps everything about a meeting in one place: a compact header with its actions in one row, the speakers named from their introductions, and tabs for the summary, the transcript, whiteboards and the details.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'What the meeting cost'
+      - label: 'Agenda and the recording'
         say: >-
-          The estimated cost opens into a breakdown: each service the meeting used, how much, and the unit price, with where each price comes from.
+          On the Transcript tab, the agenda LMA derived from the conversation lists what the meeting set out to cover, and the player plays the recording from any point.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Agenda and chapters'
+      - label: 'Search, speakers and translation'
         say: >-
-          The Transcript tab starts with the agenda, taken from the invitation. Under the recording player, the seek bar is marked with the meeting's chapters, each with its title.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'The recording follows the transcript'
-        say: >-
-          Each line of the transcript can play the recording from that moment, and as it plays, the transcript keeps up, highlighting the line being spoken.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Search the transcript; filter by speaker'
-        say: >-
-          Searching the transcript finds every mention, highlighted where it was said, and we step from one match to the next with the arrows beside the search box. Speaker filters narrow the transcript to one person. Here, only what Marcus said.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Translate as you read'
-        say: >-
-          Anyone reading can translate the transcript into their own language, here French. The translation is done a few lines at a time as we read, each line keeps its speaker and its time, and the original transcript is not changed. Turning Translate off shows the original again.
+          Search finds a phrase in the transcript and steps through each match. A speaker filter shows one voice at a time, here everything Ana said. And Translate shows the transcript in another language as you read, here Spanish, without changing the transcript itself.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
       - label: 'Edit the summary by hand'
         say: >-
-          The summary can be edited by hand, in Markdown. We add a follow-up that was agreed after the meeting, at the top, and save it. The edited summary is what everyone sees from now on, and the downloads use the edited version too.
+          The summary can be edited by hand, as Markdown, for the things only the people in the room know. Here we add the date the decision on offline sync is due, and save it.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
       - label: 'Hand edits are protected'
         say: >-
-          If someone asks LMA to regenerate the summary, it stops to ask first, because regenerating would replace the hand edit. We keep our version.
+          A hand edit is protected: regenerating the summary asks before writing over it.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'AGENDA CHECK; download'
+      - label: 'Participants, invitations and sharing'
         say: >-
-          The meeting assistant's AGENDA CHECK goes item by item through the agenda: what was covered, what is still open, and where in the meeting each one came up. One Download menu exports the summary or the transcript as Markdown, Word, plain text or Excel, or copies it to the clipboard.
+          The Details tab lists the people expected at the meeting, with whether each has an LMA account, and the meeting is shared, read-only, with everyone listed. From here the owner can invite them to give consent in advance, or create Participant accounts for those without one.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Share with a colleague'
+      - label: 'Whiteboards'
         say: >-
-          And we share the meeting with a colleague. We enter their address, add it and submit, and the meeting appears in their own meetings list, where they can read the transcript and summary and ask the assistant about it.
+          Whiteboards are named panels for decisions, a process or a comparison, made from a template and shared with everyone who can see the meeting. While a meeting is live, the assistant can keep its own whiteboards up to date from the transcript, a switch on each meeting.
+        do:
+          - 'Perform the steps the narration describes, on the fixtures above.'
+      - label: 'How long each part is kept'
+        say: >-
+          When a deployment deletes the recordings, or the transcript, once the summary is written, the meeting page says so, with when and why. The summary, the shared-screen slides and the consent record stay.
+        do:
+          - 'Perform the steps the narration describes, on the fixtures above.'
+      - label: 'Email the summary to the participants'
+        say: >-
+          Finally, the Download menu offers the summary as Word, PDF, a web page or Markdown, and Email summary opens your own mail app, addressed to everyone on the participant list.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
     closing: >-
-      That is the meeting page in LMA. The Web UI guide in the LMA documentation describes every part of it.
+      That is the meeting page in LMA. The Web UI Guide in the LMA documentation describes every panel.
     takeaways:
-      - 'A compact header and tabs put the whole meeting in one place'
-      - 'An itemised cost estimate, with the source of every price'
-      - 'The recording, chapters, search, speaker filters and translation work together on the transcript'
+      - 'One page for the transcript, recording, summary, whiteboards and details'
       - 'Summaries can be edited by hand, and hand edits are protected'
-      - 'AGENDA CHECK reports what was covered and what is still open'
+      - 'Meetings are shared with the people on their participant list'
+      - 'Whiteboards are shared live, and the assistant can keep them updated'
+      - 'The page says when the transcript or recordings were deleted, and why'
     not_shown:
-      - 'Email summary; the Video recording player; editing the agenda'
+      - 'The itemised cost estimate and AGENDA CHECK (in the 0.4.0 recording); the mail client itself; a whiteboard being updated live by the assistant'
     docs: docs/web-ui-guide.md#meeting-detail-page
-    category: 'What''s new in LMA 0.4.0'
-    last_recorded: {date: 2026-11-13, version: 0.4.0.dev3}
+    category: 'What''s new in this release'
+    last_recorded: {date: 2026-11-26, version: 0.4.1.dev1}
 
   - id: speakers-and-screen-share
     title: 'Speakers and the shared screen'
@@ -392,28 +388,44 @@ storyboards:
     not_shown:
       - 'Recording an enrollment and a meeting labelled from it (needs a person speaking into the browser); Known attendees list; merging voices'
     docs: docs/meeting-video.md
-    category: 'What''s new in LMA 0.4.0'
+    category: 'Earlier releases'
     last_recorded: {date: 2026-11-13, version: 0.4.0.dev3}
 
   - id: assistant-consent-privacy
     title: 'The assistant, consent and privacy'
-    source: 'CHANGELOG [Unreleased] (0.4.0)'
-    audience: 'LMA users and administrators who want one area of 0.4.0 in depth'
+    source: 'CHANGELOG [Unreleased]: Participant use (who may ask, web search and MCP servers, Participant questions on a shared meeting), Leave out sensitive personal information, Minimised content preset'
+    audience: 'LMA users and administrators who want the assistant and its privacy controls in depth'
     hook: >-
-      LMA's meeting assistant is sharp and inexpensive by default, and administrators have clear control over consent, retention and where AI processing happens.
+      LMA's meeting assistant answers the people who own a meeting and, within limits an administrator sets, everyone else in it. This video shows those limits, and the controls for keeping personal content to a minimum.
     persona: Admin
-    duration_target: '2:30'
+    duration_target: '3:00'
     fixtures:
-      - 'Finished meeting Mobile app planning (consent Notify); active profile team-meetings (Custom, copy of internal-meetings-notify)'
+      - 'Finished meeting "Mobile app planning" a Polly-synthesized three-voice meeting uploaded by the Admin, with a throwaway Participant (Avery Lin) on its participant list, so it is shared with them'
+      - 'Default configuration (Standard preset as deployed); Minimised content applied to a copied profile, never to the active one'
     chapters:
       - label: 'Who owns the follow-ups?'
         say: >-
-          The quick action MISSING ACTION OWNER or ETA reads the whole meeting and lists the follow-ups that nobody took on, or that have no date. The answer streams in as it is written.
+          On the meeting page, the quick action MISSING ACTION OWNER or ETA reads the whole meeting and lists the follow-ups that nobody took on, or that have no date. The answer streams in as it is written. Here it finds that nobody owns the help center articles yet, and that the follow-up is due only at the next meeting, with no date: the kind of gap that is easy to miss when you only have your own notes.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Better answers at lower cost'
+      - label: 'Participant use'
         say: >-
-          The meeting assistant uses Claude Haiku 5.5 by default, at low reasoning effort, with Amazon Bedrock prompt caching on. Requests made from the meeting chat are limited to the current meeting unless an administrator allows every tool. Summaries use Claude Sonnet 5.5. Each can be changed here.
+          Requests from anyone other than the meeting's owner and the people it is shared with fall under Participant use. By default the assistant answers them from the current meeting only; an administrator can allow every tool, or a selection. A second setting decides who may ask at all: anyone in the meeting, only the owner's own microphone, or nobody.
+        do:
+          - 'Perform the steps the narration describes, on the fixtures above.'
+      - label: 'Web search and MCP servers, for every request'
+        say: >-
+          Two switches go further, and turn web search, or the installed MCP servers, off for every request, the meeting page's own chat included.
+        do:
+          - 'Perform the steps the narration describes, on the fixtures above.'
+      - label: 'A Participant asks about a shared meeting'
+        say: >-
+          A Participant reading a meeting shared with them can ask the assistant about it too. The answer comes from that meeting only. It never reaches the meeting's context or checklist, or the owner's other meetings, and the question is not added to the transcript. Avery asks for the topics, and the answer lists the launch date, the beta feedback and support hiring, all from the meeting they were invited to.
+        do:
+          - 'Perform the steps the narration describes, on the fixtures above.'
+      - label: 'Leave out sensitive personal information'
+        say: >-
+          Leave out sensitive personal information tells the assistant to keep details such as health, finances or identity numbers out of its answers. It is an instruction to the model, not a filter: redacting personal information in Amazon Transcribe remains the control for what is stored.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
       - label: 'Where models run'
@@ -421,115 +433,87 @@ storyboards:
           Model inference geography decides where Amazon Bedrock may process meeting content: in any commercial Region, within this deployment's geography, or in its own Region only.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Meeting consent'
+      - label: 'Minimised content'
         say: >-
-          Meeting consent can be off, can notify participants that the meeting is recorded, with any objection stopping it, or can require their agreement before anything is recorded.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Delete transcripts after the summary'
-        say: >-
-          For teams that only need the summary, each meeting's transcript can be deleted once its summary is written, immediately or after a short delay.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'A choice for each meeting'
-        say: >-
-          Whoever starts a meeting can choose its consent mode: the deployment's setting, off, notify, opt-in with every participant consenting, or opt-in with the owner confirming that everyone agreed. A deployment can require that a meeting only ever picks a stricter choice.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'The consent record'
-        say: >-
-          Every meeting keeps an auditable consent record: the mode it ran under, whether consent was granted, the notice that was posted, each participant's reply, and evidence screenshots checked by a vision model.
+          For deployments that should keep as little personal content as possible, the Minimised content preset asks each participant's consent first, records no audio and no video, leaves the meeting chat out, redacts personal information, keeps AI processing in this geography, and deletes the transcript, and any recording, as soon as the summary is written. Comparing it with the Standard preset shows every setting it changes.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
     closing: >-
-      That is the assistant, consent and privacy in LMA. The Meeting Consent, Transcript Deletion and Configuration guides in the LMA documentation have the details, and there is a separate video on consent for compliance teams.
+      That is the assistant and its privacy controls in LMA. The Meeting Assistant, Meeting Consent and Configuration guides in the LMA documentation have the details.
     takeaways:
       - 'Quick actions find follow-ups with no owner or date'
-      - 'Claude Haiku 5.5 at low effort, with prompt caching, by default'
-      - 'Choose where Amazon Bedrock may process meeting content'
-      - 'Consent: off, notify or opt-in, chosen per meeting, with a record kept'
-      - 'Transcripts can be deleted as soon as the summary is written'
+      - 'Participant use decides what the assistant may use for everyone else, and who may ask'
+      - 'Participants can ask about a shared meeting, answered from that meeting only'
+      - 'Tell the assistant to leave sensitive personal information out of its answers'
+      - 'Minimised content keeps only the summary, with consent first'
     not_shown:
-      - 'Opt-in consent in a live meeting and the Stream Audio consent step (see the consent and compliance video); prompt-cache savings in the cost breakdown'
-    docs: docs/meeting-consent.md
-    category: 'What''s new in LMA 0.4.0'
-    last_recorded: {date: 2026-11-13, version: 0.4.0.dev3}
+      - 'Requests typed in a live meeting chat (in the consent and Virtual Participant videos); Selected tools with MCP servers and skills (none installed on the demo stack); web search answers (no Tavily key on the demo stack)'
+    docs: docs/meeting-assistant.md#who-may-ask
+    category: 'What''s new in this release'
+    last_recorded: {date: 2026-11-26, version: 0.4.1.dev1}
 
   - id: configuration-and-admin
     title: 'Configuration and administration'
-    source: 'CHANGELOG [Unreleased] (0.4.0)'
-    audience: 'LMA users and administrators who want one area of 0.4.0 in depth'
+    source: 'CHANGELOG [Unreleased]: hosting and Minimised content presets, presets that also set the assistant and summary, profile activation history, Participant role, Last sign-in and Last active, inviting a new user to a meeting, MCP API key Last used'
+    audience: 'Administrators of an LMA deployment'
     hook: >-
-      LMA keeps every runtime setting on one configuration page, organised as named profiles that administrators can compare, version and switch between, without redeploying.
+      Everything an administrator decides about LMA is on two pages: the Configuration page, organised as named profiles, and User Management, which now shows every account's role and when it was last used.
     persona: Admin
-    duration_target: '3:00'
+    duration_target: '4:00'
     fixtures:
-      - 'Profiles team-meetings (active; revision 2 shortens transcript retention to 30 days), all-party-consent, one-party-notify, notify-in-geography; the demo saves team-meetings-thorough, deleted before a re-take'
-      - 'A Virtual Participant that Google Meet refused to admit, for the troubleshooting agent'
+      - 'Profiles: the shipped Managed presets; a Custom profile team-meetings (copy of Standard, one revision), activated by the Admin so the activation history has an entry'
+      - 'Throwaway users only on the demo stack: the Admin, two Participants, one User; each signed in once so Last sign-in and Last active are recorded'
+      - 'An MCP API key created by the Admin and used once (lma CLI or a curl to the MCP endpoint) so Last used shows'
+      - 'A meeting (Mobile app planning) for the invitation chapter'
     chapters:
-      - label: 'Named profiles'
+      - label: 'Named profiles and presets'
         say: >-
-          Settings live in named profiles. One is active at a time, and every meeting uses it. This deployment runs team-meetings, a custom profile, and Managed presets ship with LMA.
+          The Configuration page holds every runtime setting, organised as named profiles. Managed profiles are the shipped presets: Standard, Internal meetings, two Regulated presets and, new in this release, Team-hosted for meetings with external organisations, Customer account, and Minimised content. Every preset now also sets the meeting assistant and summary settings.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Managed presets'
+      - label: 'Who activated a profile, and when'
         say: >-
-          Managed presets cover common situations: regulated meetings that require consent and keep no transcript, regulated meetings that notify participants, internal meetings, and the standard defaults. One can also be chosen when LMA is deployed.
+          One profile is active at a time. The table shows who activated it and when, and the activation and deletion history keeps every change, with the profile it replaced.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Form, YAML or JSON'
+      - label: 'Form or YAML; every save is a revision'
         say: >-
-          A profile can be edited as a form, or as YAML or JSON when that is quicker, for example to review or paste a whole configuration.
+          A profile can be edited as a form, or as YAML or JSON. Every save is a revision that can be labelled, compared or restored.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Revision history'
+      - label: 'New settings in this release'
         say: >-
-          Every save is kept as a revision, with who made it and why. Comparing two revisions shows exactly what changed: here, team meetings now keep transcripts for thirty days.
+          New settings include who in a meeting may ask the assistant, the video sentence added to consent notices, deleting the recordings once the summary is written, and whether Virtual Participants record meeting video at all.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Compare profiles'
+      - label: 'Three roles, and when each account was last used'
         say: >-
-          Comparing profiles lists only the settings that differ. Against team-meetings, the all-party-consent profile requires opt-in consent, records no audio, redacts personal information, and deletes the transcript once the summary is written.
+          User Management lists every account with its role: Admin, User, or Participant, for people who take part in meetings without capturing them. Last sign-in shows when someone last signed in with their password, and Last active when they last used LMA at all, from the web UI, the extension, the desktop app or an MCP key. That makes access reviews straightforward.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Save edits as a new profile'
+      - label: 'Invite a Participant to a meeting'
         say: >-
-          To try a change without touching the live profile, we make the edit, here a more thorough meeting assistant, and save it as a new profile, with a name and a description that say what it is for. The active profile is left exactly as it was, so meetings that use it are not affected.
+          Creating an account can also invite the person to a meeting. We create a Participant and choose the meeting: their invitation names it and links its consent page, and the address is added to the meeting's participant list.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Transcription engine'
+      - label: 'MCP API keys: Last used'
         say: >-
-          The Transcription Engine section chooses how each kind of meeting is transcribed: by LMA's own speech engine, which runs open speech models on AWS Lambda MicroVMs and tells apart voices sharing one microphone, or by Amazon Transcribe.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Meeting cost prices'
-        say: >-
-          Every meeting shows an estimated cost, and Meeting Cost Prices holds the unit prices behind it, each with its source. An administrator can enter their own rate for any line.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'The latest models'
-        say: >-
-          The model lists offer the latest Claude models, and each feature can use its own: one for summaries and meeting insights, another for the meeting assistant.
-        do:
-          - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Troubleshooting agent; the cause, with its evidence'
-        say: >-
-          When something fails, the Troubleshooting page asks an agent that reads the deployment's own logs and records. Here we ask why a Virtual Participant could not join a meeting. It answers with the root cause, here that Google Meet refused the join, the evidence it rests on, and what to do next.
+          MCP API keys let agents such as Amazon Quick use LMA. Each key now shows when it was last used, so keys nobody uses are easy to find and revoke.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
     closing: >-
-      That is configuration and administration in LMA. The Configuration guide in the LMA documentation explains profiles, presets and every setting.
+      That is configuration and administration in LMA. The Configuration Guide and the User Management page in the LMA documentation cover every setting and role.
     takeaways:
-      - 'Every runtime setting on one page, organised as named profiles'
-      - 'Managed presets for consent, retention and privacy'
-      - 'Every save is a revision; compare revisions or whole profiles'
-      - 'Choose the speech engine and set your own prices'
-      - 'A troubleshooting agent explains failures from the logs'
+      - 'Every runtime setting lives in named profiles, with Managed presets for common policies'
+      - 'Every change is a revision, and every activation is recorded with who made it'
+      - 'Three roles: Admin, User and Participant'
+      - 'Last sign-in and Last active make access reviews simple'
+      - 'MCP API keys show when they were last used'
     not_shown:
-      - 'Importing and exporting profiles; the operational dashboard and alarms (CloudWatch console)'
+      - 'The troubleshooting agent and Meeting Cost Prices (unchanged; in the 0.4.0 recording); lma users list (CLI); import and export of profiles'
     docs: docs/configuration-guide.md#configuration-profiles
-    category: 'What''s new in LMA 0.4.0'
-    last_recorded: {date: 2026-11-13, version: 0.4.0.dev3}
+    category: 'What''s new in this release'
+    last_recorded: {date: 2026-11-26, version: 0.4.1.dev1}
 
   - id: lma-complete-demo
     title: 'Live Meeting Assistant: an AI teammate in your meetings'
@@ -610,80 +594,82 @@ storyboards:
 
   - id: consent-and-compliance
     title: 'Meeting consent and compliance'
-    source: 'Feature: docs/meeting-consent.md and docs/privacy-and-data-handling.md'
+    source: 'Feature: docs/meeting-consent.md and docs/privacy-and-data-handling.md; CHANGELOG [Unreleased] consent given in advance, Participant role, shared meetings, video sentence, private chat, recordings deletion'
     audience: 'Compliance, privacy and legal teams evaluating how LMA handles recording consent'
     hook: >-
-      This video is for compliance teams. It shows how LMA tells participants that a meeting is recorded, waits for their agreement where your rules require it, and keeps an auditable record of what happened, with policies you can set for each jurisdiction or context.
+      This video is for compliance teams. It shows how LMA tells participants that a meeting is recorded, waits for their agreement where your rules require it, lets people give that agreement before the meeting, and keeps an auditable record of what happened, with policies you can set for each jurisdiction or context.
     persona: Admin
-    duration_target: '7:00'
+    duration_target: '9:00'
     fixtures:
-      - 'Live: a Google Meet with a silent guest keeping it open; VP launched with a per-meeting Opt-in (owner attests) choice; guest Conference Room 4 typing I consent, I object and I consent'
-      - 'Stream Audio meetings made with the WebSocket API (integ-tests/meeting_consent_probe.py): an attested opt-in call with an evidence image, and a notify call with an objection'
-      - 'Profiles all-party-consent, one-party-notify and notify-in-geography (copies of the shipped presets); concept slides 6 and 7'
+      - 'Two throwaway accounts from scripts/ux_test_session.py: an Admin (records the meeting) and a Participant shown as Avery Lin; a second Participant shown as Sam Ortiz with a standing consent made off camera'
+      - 'Configuration: Allow consent given in advance on; Video sentence at its default; Delete the recordings after the summary at 15 minutes; Virtual Participant display name LMA'
+      - 'A scheduled Virtual Participant for a Google Meet ("Vendor security review"), with Avery Lin and Sam Ortiz on its participant list, consent mode Opt-in (each participant) for this meeting, Record meeting video on'
+      - 'Live: the Meet held open by a silent guest named Sam Ortiz; a scripted guest named Avery Lin; a scripted guest named Conference Room 4 who types I consent, I object and I consent'
+      - 'Concept card for private chat messages (Zoom, Webex); finished meetings and profiles from the 0.4.0 recording reused for chapters 10 and 11 where still on the stack, otherwise remade the same way'
     chapters:
       - label: 'Different rules, one record'
         say: >-
           Recording and transcription rules differ between countries, states and organizations: some require every participant to agree, some only one. LMA does not decide which rules apply. You choose the policy, with whoever advises your organization, and LMA applies it and keeps the evidence of what was said and agreed. That record is supporting evidence, not a legal determination.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Three consent modes; the words participants see'
+      - label: 'Consent modes, the notice and the video sentence'
         say: >-
-          Consent is set on the Configuration page, in the Meeting Consent section. Off records as LMA always has. Notify tells participants the meeting is recorded and how to object, and any objection stops recording. Opt-in records nothing until consent is given: by every participant, or by the meeting owner confirming that everyone agreed. The notice and the consent request are yours to word, with placeholders for who is using LMA and the meeting's name. The phrases that count as consent, and as an objection, are listed too, and objections are always looked for first.
+          Consent is set on the Configuration page, in the Meeting Consent section. Off records as LMA always has. Notify tells participants the meeting is recorded and how to object. Opt-in records nothing until consent is given: by every participant, or by the meeting owner confirming that everyone agreed. The notice and the consent request are yours to word. When the meeting's video is recorded, every client ends them with the video sentence, also yours to word. The phrases that count as consent, and as an objection, are listed too, and objections are always looked for first.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'What happens around consent'
+      - label: 'Around consent; which options work where'
         say: >-
-          Further settings decide whether a meeting may choose a different mode, or only a stricter one; whether evidence screenshots are kept, and which vision model checks them; whether streaming clients that show no consent step are accepted with a warning or refused; whether the Virtual Participant leaves after an objection; and whether it listens for replies said aloud.
+          Further settings decide whether a meeting may choose a different mode, whether evidence screenshots are kept and which vision model checks them, how streaming clients without a consent step are treated, and whether the Virtual Participant leaves after an objection. New in this release: people can give their consent before the meeting, for at most as many days as you allow, and you decide whether the device they gave it from is kept with it. The Virtual Participant runs the whole flow inside the meeting. Stream Audio, the browser extension and the Desktop Capture App show the notice to the LMA user to share, who confirms it was given or that everyone agreed. And the Virtual Participant acts only on chat messages sent to everyone. On Zoom and Webex, a consent, an objection or a command sent to it privately is not read at all, so participants reply where everyone can see it.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Which options work where'
+      - label: 'Consent given in advance'
         say: >-
-          Which options apply depends on how the meeting is captured. The Virtual Participant runs the whole flow inside the meeting: notify, opt-in with each participant's reply typed or said aloud, or the owner's confirmation, objections, and screenshots as evidence. Stream Audio and the Desktop Capture App show the notice to the LMA user to share, who confirms it was given or that everyone agreed, and can record an objection. The Stream Audio embed has no consent step, so its meetings are accepted with a warning or refused, as you choose. On Webex, use the owner's confirmation, because the Virtual Participant cannot see who is present.
+          The meeting's owner lists who is expected, and sends them the meeting's consent link from the Participants section. Someone with no LMA account gets a Participant account, the role for people who take part in meetings without capturing them. Avery signs in and opens My consents. They can agree for this meeting only, or for every meeting this organizer holds until a date, or, without a link, for every meeting on this deployment. The exact text they agree to is shown first, and is kept with the consent.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Opt-in for one meeting'
+      - label: 'In the meeting: who is covered, and everyone else'
         say: >-
-          Now in a real meeting. We invite LMA to a vendor security review on Google Meet, and for this meeting we choose opt-in, with the owner confirming that everyone agreed. The other choices are listed here too: the deployment's own setting, off, notify, and opt-in with every participant consenting. LMA reads the meeting's name, link and agenda from the invitation we pasted.
+          The meeting starts with opt-in, and every participant must agree. LMA posts its request as always, then names, by display name only, the attendees whose consent given in advance is on record when it posts. Here that is Sam. On the meeting's page, Sam and Avery are both covered by consents given in advance. Everyone else is asked as usual: Conference Room 4 has not replied yet, so nothing is recorded or transcribed. Conference Room 4 types I consent, and with everyone present covered, recording and transcription begin.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Nothing is recorded yet; waiting for consent; the owner confirms'
+      - label: 'An objection still wins'
         say: >-
-          LMA joins and posts the consent request in the meeting chat, with the phrases to reply. Until consent is given, nothing is recorded or transcribed. On the meeting's page, consent is pending, and recording and transcription are withheld. A participant has replied in the chat that they consent, and LMA keeps that reply as evidence. Under this rule, recording starts when the meeting's owner confirms in LMA that everyone agreed. We say how they agreed, here out loud at the start of the call, and add a statement in our own words. The attestation is recorded under our name, with the time.
+          A consent given in advance never outweighs what someone says in the meeting. Conference Room 4 types I object, and LMA stops recording and transcribing at once. When they consent again, their latest reply counts, and recording resumes.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Consent granted; in the meeting; an objection stops recording; recorded as an objection; consent again'
+      - label: 'Withdrawing stops capture'
         say: >-
-          The record now shows consent granted, and recording and transcription allowed. In the meeting, LMA announces that the owner confirmed, and starts recording. Now a participant types I object. LMA stops recording and transcribing at once, says so in the chat, and tells the participant how to continue if they change their mind. The meeting's record shows the objection, and recording and transcription withheld. When the participant replies I consent, their latest reply is the one that counts, and recording resumes.
+          Avery changes their mind during the meeting. They withdraw their consent on My consents. Within seconds the meeting records it as Avery's objection. In the meeting chat, LMA posts that Avery withdrew the consent they gave in advance, and stops recording and transcribing. On the meeting's page, Avery is now listed as objected, and capture is withheld.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'The consent record'
+      - label: 'What a Participant sees afterwards'
         say: >-
-          The consent record is the audit trail. It holds the mode and rule, the notice exactly as posted, each participant's latest reply, the owner's attestation, evidence screenshots of the chat, each checked by a vision model with its verdict and confidence, and a timeline of every notice, reply and change of status, with the reason. It is kept with the meeting, included in the summary download, and deleted with the meeting.
+          Meetings are shared with the people on their participant list. Avery has a Shared meetings page, and reads the meeting without changing it: its summary, transcript and consent record. The meeting assistant is there for Avery too. Asked for the action items, it answers from this meeting only: what the security review asked for, from data stored in the European Union to quarterly access reviews and incident notice within 24 hours. A Participant's question never reaches the owner's other meetings, the meeting's context or checklist, and it is not added to the transcript.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Stream Audio and the Desktop Capture App; an attestation from Stream Audio; an objection during a stream'
+      - label: 'The consent record; recordings deleted after the summary'
         say: >-
-          When people capture a meeting from their own device, with Stream Audio or the Desktop Capture App, the consent step is theirs. They copy the notice into the meeting, confirm how everyone was told, or that everyone agreed, and can attach a frame of the meeting as evidence. During the stream, Participant objected stops it. This supplier call was streamed under opt-in. Its record shows the owner's confirmation and how everyone agreed, and the evidence image, which the vision model read as supporting consent. In this support call, a participant objected part-way through. The record shows the objection, and capture stopped from that moment.
+          The consent record is the audit trail: the mode and rule, the notice exactly as posted, with its video sentence, each participant's latest reply, the consents given in advance that counted, objections and withdrawals, evidence screenshots checked by a vision model, and a timeline of every change. With Delete the recordings after the summary, the audio and video are removed once the summary is written, and the meeting page says when and why. The summary and the consent record stay with the meeting.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
-      - label: 'Profiles for different jurisdictions; one policy at a time'
+      - label: 'Profiles for different policies'
         say: >-
-          Different places and teams need different policies, so each can be kept as its own configuration profile. Here, all-party-consent, for places where every participant must agree: opt-in, no audio recording, personal information redacted, and the transcript deleted after the summary. One-party-notify, where notifying participants is enough. And notify-in-geography, which also keeps AI processing in this deployment's geography. Comparing them shows only what differs. One profile is active at a time, and every new meeting uses it. Organizations with several jurisdictions run a deployment for each, and copy profiles between them by export and import. A meeting can still choose a stricter mode than the active profile's.
+          Different places and teams need different policies, so each can be kept as its own configuration profile. LMA ships presets for common ones, such as Regulated, consent required, and Internal meetings, notify participants. Comparing two shows only what differs. One profile is active at a time, and a meeting can still choose a stricter mode than the active profile's.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
     closing: >-
-      That is meeting consent in LMA: your policy, applied in the meeting, with a record you can audit. The Meeting Consent and Privacy and Data Handling guides in the LMA documentation have every detail.
+      That is meeting consent in LMA: your policy, applied in the meeting, agreed in advance where people prefer, with a record you can audit. The Meeting Consent and Privacy and Data Handling guides in the LMA documentation have every detail.
     takeaways:
       - 'You choose the policy: off, notify, or opt-in by each participant or the owner'
-      - 'The Virtual Participant asks in the meeting chat, and any objection stops recording'
-      - 'Stream Audio and the Desktop Capture App record the user''s confirmation and evidence'
+      - 'People on the participant list can consent before the meeting, and withdraw at any time'
+      - 'An objection in the meeting always wins, and stops recording at once'
+      - 'Participants read the meetings shared with them, and nothing else'
       - 'Every meeting keeps an auditable consent record with evidence and a timeline'
-      - 'Keep a configuration profile for each jurisdiction or context'
     not_shown:
-      - 'Opt-in with every participant consenting in a live meeting (a silent attendee who never replies keeps it waiting, as designed); spoken replies; the Desktop Capture App itself; the Stream Audio embed (no consent step)'
+      - 'Private chat live (Google Meet has none; shown as a concept card); spoken replies; the Desktop Capture App and the Stream Audio consent step in detail (in the 0.4.0 recording); standing consent for every meeting on the deployment given on camera (named, not given); device details (off as shipped)'
     docs: docs/meeting-consent.md
     category: 'Overview'
-    last_recorded: {date: 2026-11-13, version: 0.4.0.dev3}
+    last_recorded: {date: 2026-11-26, version: 0.4.1.dev1}
 
   - id: requirements-workshop-coach
     title: 'An AI coach for a requirements workshop'
@@ -759,3 +745,74 @@ storyboards:
     docs: docs/meeting-assistant.md
     category: 'Overview'
     last_recorded: {date: 2026-11-13, version: 0.4.0.dev3}
+
+  - id: whats-new-meeting-life
+    title: 'What''s new in this release: a meeting''s life'
+    source: 'CHANGELOG [Unreleased]'
+    audience: 'Existing LMA users and evaluators'
+    hook: >-
+      This release follows a meeting from before it starts to after it ends: who is expected, consent given in advance, guidance while it runs, and a summary that reaches the people who were there.
+    persona: Admin
+    duration_target: '4:30'
+    fixtures:
+      - 'The live Google Meet from the consent video, held open by two guests; a VP created on camera with participants, context, labels and checklist (its launch shown, the join done off camera)'
+      - 'A finished meeting with structured action items, chat, whiteboard, summary profile; a Participant account with a consent given in advance'
+    chapters:
+      - label: 'Before: who is expected, and what the meeting is for'
+        say: >-
+          We invite LMA to a meeting. Besides the meeting link and the agenda, we list the people expected at it, by name and email address. The meeting will be shared with each of them, and they can be asked for consent before it starts.
+        do:
+          - 'Perform the steps the narration describes, on the fixtures above.'
+      - label: 'Meeting preparation'
+        say: >-
+          Meeting preparation gives the assistant what it needs to help. A summary profile, here Discovery session, with structured action items. A label, so the meeting can be found with others for the same customer. A short briefing on what the meeting is for, and a checklist of what it should cover: where the data is stored, and the incident notification window. For this meeting we choose notify for consent, and turn live guidance on.
+        do:
+          - 'Perform the steps the narration describes, on the fixtures above.'
+      - label: 'Consent given in advance'
+        say: >-
+          The people on the list can give their consent before the meeting, on a My consents page, for one meeting, an organizer's meetings or every meeting on the deployment, and the Virtual Participant counts it when they join. Anyone can still object in the meeting.
+        do:
+          - 'Perform the steps the narration describes, on the fixtures above.'
+      - label: 'During: the live transcript and whiteboards'
+        say: >-
+          While the meeting runs, the transcript streams in, and whiteboards hold decisions and open questions for everyone who can see the meeting. We turn on the assistant's updates and start one from a template.
+        do:
+          - 'Perform the steps the narration describes, on the fixtures above.'
+      - label: 'Live guidance and the checklist'
+        say: >-
+          Live guidance reads the meeting as it happens, keeps the checklist up to date, and offers what to raise next in the Notifications drawer, for the owner and the people the meeting is shared with. The assistant has filled in its whiteboard too.
+        do:
+          - 'Perform the steps the narration describes, on the fixtures above.'
+      - label: 'In the meeting chat'
+        say: >-
+          People in the meeting can ask LMA in the meeting chat, within the limits an administrator sets. LMA answers there, and reads only messages sent to everyone.
+        do:
+          - 'Perform the steps the narration describes, on the fixtures above.'
+      - label: 'After: action items and every download'
+        say: >-
+          After the meeting, the summary follows the chosen profile, with structured action items. The Download menu offers the summary and the transcript as Word, PDF, a web page or Markdown, the recordings, every file as one archive, and a structured export of the whole meeting. Email summary addresses everyone on the participant list.
+        do:
+          - 'Perform the steps the narration describes, on the fixtures above.'
+      - label: 'Shared with the people who were there'
+        say: >-
+          The meeting is shared with its participants. Avery reads it on their own Shared meetings page, read-only.
+        do:
+          - 'Perform the steps the narration describes, on the fixtures above.'
+      - label: 'For administrators'
+        say: >-
+          For administrators there are new presets for team-hosted, customer-account and minimised-content deployments, a Participant role, when each account was last active, and notifications for meeting events.
+        do:
+          - 'Perform the steps the narration describes, on the fixtures above.'
+    closing: >-
+      That is a meeting's life in this release of LMA. The CHANGELOG and the LMA documentation describe every change.
+    takeaways:
+      - 'List who is expected, and let them consent before the meeting'
+      - 'Live guidance and whiteboards while the meeting runs'
+      - 'Summary profiles with structured action items, and every file in one download'
+      - 'Meetings are shared with their participants'
+      - 'New presets, a Participant role and last-active times for administrators'
+    not_shown:
+      - 'Meeting lifecycle events on EventBridge, the CLI and SDK, the hosted MCP server''s meeting tools, the full-precision ASR bundle, screen video from the browser extension, live security tests (no web UI)'
+    docs: docs/INDEX.md
+    category: 'What''s new in this release'
+    last_recorded: {date: 2026-11-26, version: 0.4.1.dev1}
