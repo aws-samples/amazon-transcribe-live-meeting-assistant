@@ -443,7 +443,10 @@ def live_delivery(deployment: Deployment, id_token: str, call_id: str, publish) 
     url = realtime_url(deployment.graphql_url)
     if not url:
         return {"skipped": "the GraphQL endpoint is not an AppSync domain; its real-time endpoint is not derived"}
-    return asyncio.run(_live(url, deployment.graphql_url.split("/")[2], id_token, call_id, publish))
+    try:
+        return asyncio.run(_live(url, deployment.graphql_url.split("/")[2], id_token, call_id, publish))
+    except Exception as error:  # noqa: BLE001 — reported by its own test, not the whole scenario
+        return {"error": f"{type(error).__name__}: {str(error)[:200]}"}
 
 
 def page_delivery(listed: Probe, opened: Probe, app_url: str, username: str, password: str) -> dict:
@@ -511,11 +514,11 @@ def page_delivery(listed: Probe, opened: Probe, app_url: str, username: str, pas
                 ]
             finally:
                 browser.close()
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001 — reported by its own test, not the whole scenario
         # Only a missing browser is a skip.
         if "Executable doesn't exist" in str(error):
             return {"skipped": "playwright's Chromium is not installed (python -m playwright install chromium)"}
-        raise
+        return {**seen, "error": f"{type(error).__name__}: {str(error)[:200]}"}
     return seen
 
 
@@ -558,6 +561,8 @@ def run_probe(stack_name: str, region: str | None = None) -> dict:
             probe.transcript_deletion()
             probe.meeting_deletion()
         finally:
-            probe.cleanup()
-            own.cleanup()
+            try:
+                probe.cleanup()
+            finally:
+                own.cleanup()
     return probe.observed

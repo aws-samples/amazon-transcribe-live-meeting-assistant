@@ -25,6 +25,7 @@ import re
 
 import cognito_test_user
 import pytest
+from meeting_notifications_probe import ui_subscription
 
 
 @pytest.fixture(scope="module")
@@ -76,40 +77,60 @@ def test_a_removed_share_stops_seeing_them(observed) -> None:
 
 # ── live delivery ───────────────────────────────────────────────────────────
 
-# What the web UI's subscription asks for (onMeetingNotification.js).
-LIVE_FIELDS = {
-    "CallId", "NotificationId", "Category", "Type", "Severity", "Title", "Body", "Refs", "DedupKey",
-    "Actions", "Source", "CreatedBy", "CreatedAt", "UpdatedAt", "Revision", "ExpiresAt", "Owner", "SharedWith",
-}  # fmt: skip
+def _top_level_fields(document: str) -> set:
+    """The fields a subscription document selects on its one root field."""
+    body = document[document.index("{", document.index("{") + 1) + 1 :]
+    fields, depth = set(), 0
+    for token in re.findall(r"[A-Za-z_]\w*|[{}]", body):
+        if token == "{":
+            depth += 1
+        elif token == "}":
+            depth -= 1
+            if depth < 0:
+                break
+        elif depth == 0:
+            fields.add(token)
+    return fields
 
 
-def _assert_delivered(live: dict, call_id: str) -> None:
+def test_the_ui_subscription_fields_are_read_from_the_ui() -> None:
+    fields = _top_level_fields(ui_subscription())
+    assert {"CallId", "NotificationId", "Actions", "Owner", "SharedWith"} <= fields, fields
+    assert "Label" not in fields, "a nested field was read as a top-level one"
+
+
+def _delivered(live: dict, call_id: str) -> dict:
+    """The published notification as the meeting subscription received it, after checking both."""
     if "skipped" in live:
         pytest.skip(live["skipped"])
+    assert "error" not in live, live["error"]
     assert live["acks"] == {"meeting": "start_ack", "every": "start_ack"}, live["acks"]
     for name in ("meeting", "every"):
         received = live["received"][name]
         assert received, f"the {name} subscription received nothing: {live}"
         (notification,) = [item for item in received if item["NotificationId"] == live["published_id"]]
         assert notification["CallId"] == call_id
-        assert set(notification) == LIVE_FIELDS
+        assert set(notification) == _top_level_fields(ui_subscription())
         assert notification["Owner"], "the delivered message carries no Owner"
+        if name == "meeting":
+            delivered = notification
+    return delivered
 
 
 def test_a_publish_reaches_the_ui_subscriptions_of_a_user_it_is_shared_with(observed) -> None:
-    _assert_delivered(observed["live_shared"], observed["call_id"])
-    shared = observed["live_shared"]["received"]["meeting"][0]
+    shared = _delivered(observed["live_shared"], observed["call_id"])
     assert shared["SharedWith"], "the delivered message carries no SharedWith"
 
 
 def test_a_publish_reaches_the_ui_subscriptions_of_the_owner(observed) -> None:
-    _assert_delivered(observed["live_owned"], observed["own_call_id"])
+    _delivered(observed["live_owned"], observed["own_call_id"])
 
 
 def test_the_web_ui_shows_a_notification_as_it_arrives(observed) -> None:
     page = observed["page"]
     if "skipped" in page:
         pytest.skip(page["skipped"])
+    assert "error" not in page, page
     # At least the one published; another test may publish to the test user's meetings meanwhile.
     assert re.search(r"\b[1-9]\d* during this visit", page["bell_on_list"] or ""), page
     # The meeting had none, so its page offered no Notifications drawer until the publish.
