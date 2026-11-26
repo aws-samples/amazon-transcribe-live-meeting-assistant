@@ -109,3 +109,12 @@ def test_an_erasure_that_leaves_some_says_so_and_where_to_finish(calls, monkeypa
     with pytest.raises(Exception, match="consent records were erased, but more remain"):
         delete(deleteConsentRecords=True)
     assert len(rounds) == index.MAX_ERASURE_ROUNDS
+
+
+def test_an_erasure_that_finds_none_of_the_accounts_left_is_complete(calls, monkeypatch) -> None:
+    answers = [
+        {"Deleted": 2, "Withdrawn": 0, "ConsentIds": [], "AuditId": "a1", "MoreRemain": True},
+        {"Deleted": 0, "Withdrawn": 0, "ConsentIds": [], "AuditId": "a2", "MoreRemain": True},
+    ]
+    monkeypatch.setattr(administration, "erase", lambda *_a, **_k: answers.pop(0))
+    assert delete(deleteConsentRecords=True)["consentRecordsDeleted"] == 2

@@ -98,7 +98,8 @@ def test_the_start_that_creates_the_meeting_publishes_each_open_request(
 ):
     session = QueuedSession(schema, [created(), vp_row()])
     process_event(session, start(), monkeypatch)
-    assert published == [
+    # Published at the same time, so in no particular order.
+    assert sorted(published, key=lambda p: p[1]["email"]) == [
         (CALL_ID, {"email": "bo@example.com", "name": "Bo"}),
         (CALL_ID, {"email": "cy@example.com", "name": ""}),
     ]
@@ -109,9 +110,9 @@ def test_a_start_with_an_empty_participant_list_publishes_every_request(
 ):
     session = QueuedSession(schema, [created(), vp_row()])
     process_event(session, start(Participants=[]), monkeypatch)
-    assert [request["email"] for _, request in published] == [
-        "bo@example.com",
+    assert sorted(request["email"] for _, request in published) == [
         "ana@example.com",
+        "bo@example.com",
         "cy@example.com",
     ]
 
@@ -192,3 +193,17 @@ def test_open_requests_keep_one_per_address_and_at_most_the_cap():
     assert len(out) == requests_module.MAX_PUBLISHED
     assert out[-1] == {"email": "p@example.com", "name": "New"}
     assert sum(1 for r in out if r["email"] == "p@example.com") == 1
+
+
+def test_slow_publishes_do_not_hold_the_start_past_the_budget(schema, monkeypatch):
+    import threading  # pylint: disable=import-outside-toplevel
+
+    release = threading.Event()
+    monkeypatch.setattr(requests_module, "_publish", lambda *_a: release.wait(5))
+    monkeypatch.setattr(requests_module, "PUBLISH_BUDGET_SECONDS", 0.2)
+    session = QueuedSession(schema, [created(), vp_row()])
+    try:
+        process_event(session, start(), monkeypatch)  # returns once the budget is spent
+    finally:
+        release.set()
+    assert any("slow to publish" in m for m in cep.LOGGER.at_level("WARNING"))

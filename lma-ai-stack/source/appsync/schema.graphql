@@ -3469,8 +3469,9 @@ type DeleteUserOutput @aws_cognito_user_pools {
 }
 
 # A person on a meeting's participant list, as that list names them, and
-# whether they have an LMA account: "none", or the account's role ("Admin",
-# "User" or "Participant").
+# whether they have an LMA account: "none", the account's role ("Admin",
+# "User" or "Participant"), or "unknown" when the user pool kept throttling the
+# lookup (reading the list again checks it again).
 type MeetingParticipantAccount @aws_cognito_user_pools {
 	name: String
 	email: String!

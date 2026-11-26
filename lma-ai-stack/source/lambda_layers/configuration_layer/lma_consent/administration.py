@@ -89,8 +89,13 @@ def consents_of(client: Any, table: str, email: str) -> List[Dict[str, Any]]:
     return _consents_read(client, table, email)[0]
 
 
-def _consents_read(client: Any, table: str, email: str) -> tuple:
-    """The first MAX_ERASED consents under one address, and whether any were left unread."""
+def _consents_read(client: Any, table: str, email: str, subject: str = "") -> tuple:
+    """The newest MAX_ERASED consents under one address, and whether more are kept there.
+
+    With ``subject``, only the consents the account with that Cognito sub gave
+    are read and counted, so another account's consents under the address
+    neither fill the answer nor make more of this account's seem to remain.
+    """
     arguments: Dict[str, Any] = {
         "TableName": table,
         "KeyConditionExpression": "PK = :pk AND begins_with(SK, :ac)",
@@ -101,16 +106,15 @@ def _consents_read(client: Any, table: str, email: str) -> tuple:
     out: List[Dict[str, Any]] = []
     while True:
         response = client.query(**arguments)
-        out += [item_of(item) for item in response.get("Items") or []]
+        out += [
+            item
+            for item in (item_of(raw) for raw in response.get("Items") or [])
+            if not subject or item.get("Subject") == subject
+        ]
         if len(out) > MAX_ERASED:
             return out[:MAX_ERASED], True
         if not response.get("LastEvaluatedKey"):
             return out, False
-        if len(out) == MAX_ERASED:
-            # A last page can be empty, so whether one is left takes one more read.
-            arguments["ExclusiveStartKey"] = response["LastEvaluatedKey"]
-            arguments["Limit"] = 1
-            return out, bool(client.query(**arguments).get("Items"))
         arguments["ExclusiveStartKey"] = response["LastEvaluatedKey"]
 
 
@@ -226,10 +230,11 @@ def erase(  # pylint: disable=too-many-arguments,too-many-locals
             {"PK": {"S": partition(email)}, "SK": {"S": f"ac#{i}"}}
             for i in dict.fromkeys(str(i) for i in consent_ids)
         ]
-        read, more_remain = list(read_items(client, table, keys).values()), False
+        found = read_items(client, table, keys).values()
+        targets = [c for c in found if not subject or c.get("Subject") == subject]
+        more_remain = False
     else:
-        read, more_remain = _consents_read(client, table, email)
-    targets = [c for c in read if not subject or c.get("Subject") == subject]
+        targets, more_remain = _consents_read(client, table, email, subject)
     withdrawn = 0
     for consent in targets:
         if in_force(consent, now):

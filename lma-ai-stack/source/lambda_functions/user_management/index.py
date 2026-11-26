@@ -635,7 +635,7 @@ def _erase_advance_consents(email, sub, erased_by):
             "on My consents › All consents (admin)"
         ) from exc
     logger.info("Erased %d consent records of a deleted user", deleted)
-    if answer.get("MoreRemain"):
+    if answer.get("MoreRemain") and answer["Deleted"]:
         raise ValidationError(
             f"The user was deleted and {deleted} of their consent records were erased, but more "
             "remain; erase them on My consents › All consents (admin)"
@@ -790,6 +790,9 @@ UNKNOWN_ACCOUNT = "unknown"
 THROTTLE_CODES = ("TooManyRequestsException", "ThrottlingException")
 LOOKUP_ATTEMPTS = 4
 LOOKUP_BACKOFF_SECONDS = 0.2
+#: Seconds one answer spends on lookups (the function has 30); an address not
+#: looked up by then, or throttled past it, is answered "unknown" at once.
+LOOKUP_DEADLINE_SECONDS = 15.0
 #: A meeting lists at most this many people (normalize_participants in the
 #: configuration layer's lma_meeting_preparation/rules.py).
 MAX_PARTICIPANTS = 100
@@ -924,14 +927,17 @@ def _throttled(exc):
     )
 
 
-def _account_of(email):
+def _account_of(email, deadline=None):
     """ "none", the role of the account with this address, or "unknown".
 
     A lookup the user pool throttles is tried again after a pause, up to
     LOOKUP_ATTEMPTS times; an address still throttled is answered "unknown",
-    so one busy moment does not fail the answer for the whole list.
+    so one busy moment does not fail the answer for the whole list. Past
+    ``deadline`` (a time.monotonic() value) no lookup or pause is started.
     """
     for attempt in range(LOOKUP_ATTEMPTS):
+        if deadline is not None and time.monotonic() >= deadline:
+            break
         try:
             username = _find_account(email)
             if username is None:
@@ -940,16 +946,22 @@ def _account_of(email):
         except ClientError as exc:
             if not _throttled(exc):
                 raise
-            if attempt + 1 < LOOKUP_ATTEMPTS:
-                time.sleep(LOOKUP_BACKOFF_SECONDS * 2**attempt)
-    logger.warning("An account lookup was throttled %d times; answered unknown", LOOKUP_ATTEMPTS)
+            pause = LOOKUP_BACKOFF_SECONDS * 2**attempt
+            if attempt + 1 < LOOKUP_ATTEMPTS and (
+                deadline is None or time.monotonic() + pause < deadline
+            ):
+                time.sleep(pause)
+            else:
+                break
+    logger.warning("An account lookup could not be made; answered unknown")
     return UNKNOWN_ACCOUNT
 
 
 def _accounts_of(emails):
-    """Each address's account answer, looked up a few at a time."""
+    """Each address's account answer, looked up a few at a time, within LOOKUP_DEADLINE_SECONDS."""
+    deadline = time.monotonic() + LOOKUP_DEADLINE_SECONDS
     with ThreadPoolExecutor(max_workers=LOOKUP_WORKERS) as pool:
-        return dict(zip(emails, pool.map(_account_of, emails)))
+        return dict(zip(emails, pool.map(lambda email: _account_of(email, deadline), emails)))
 
 
 def _address_key(email):

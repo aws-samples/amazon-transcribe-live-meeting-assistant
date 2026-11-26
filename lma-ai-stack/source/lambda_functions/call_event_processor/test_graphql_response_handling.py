@@ -3065,7 +3065,7 @@ def test_a_new_meeting_gets_its_whiteboards_choice_else_the_deployments(
     assert expected in print_ast(session.queries[0])
 
 
-def test_a_start_event_with_an_empty_participant_list_creates_the_meeting_with_none(
+def test_a_start_event_with_an_empty_participant_list_creates_the_meeting_with_an_empty_list(
     schema, emitted, monkeypatch
 ):
     """A Virtual Participant started with no one on its list sends an empty list:

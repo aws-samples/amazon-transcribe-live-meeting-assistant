@@ -138,3 +138,26 @@ def test_an_unreadable_named_consent_stops_the_erasure_before_anything_is_remove
     with pytest.raises(administration.ConsentsUnreadable):
         erase(client, consent_ids=[min(client.items)[3:]])
     assert len(client.items) == 2 and client.puts == []
+
+
+def test_an_account_erasure_counts_only_that_accounts_consents():
+    """Another account's consents under the address neither fill an erasure of
+    this account's nor make more of this account's seem to remain."""
+    client = PagedClient(count=9, page=2)
+    for n, sk in enumerate(sorted(client.items, reverse=True)):
+        # The newest five are another account's; the older four are this one's.
+        client.items[sk]["Subject"] = "other-sub" if n < 5 else "this-sub"
+    answer = erase(client, subject="this-sub")
+    assert (answer["Deleted"], answer["MoreRemain"]) == (4, False)
+    assert {i["Subject"] for i in client.items.values()} == {"other-sub"}
+    assert client.puts[-1]["Status"] == "complete"
+
+
+def test_an_account_erasure_past_the_cap_counts_only_that_account():
+    client = PagedClient(count=7, page=3)
+    for n, sk in enumerate(sorted(client.items, reverse=True)):
+        client.items[sk]["Subject"] = "other-sub" if n == 0 else "this-sub"
+    first = erase(client, subject="this-sub")
+    assert (first["Deleted"], first["MoreRemain"]) == (4, True)
+    second = erase(client, subject="this-sub")
+    assert (second["Deleted"], second["MoreRemain"]) == (2, False)

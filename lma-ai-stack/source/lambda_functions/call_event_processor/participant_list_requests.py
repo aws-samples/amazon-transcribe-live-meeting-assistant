@@ -33,8 +33,10 @@ from gql.dsl import DSLQuery, DSLSchema, dsl_gql
 
 #: The most requests published for one meeting (the row keeps at most 20).
 MAX_PUBLISHED = 20
-#: Seconds each publish may take; the record waits for them one after another.
+#: Seconds each publish may take.
 PUBLISH_TIMEOUT_SECONDS = 5.0
+#: Seconds the record waits for all of them, published at the same time.
+PUBLISH_BUDGET_SECONDS = 8.0
 
 
 def _query(schema: Any, vp_id: str) -> Any:
@@ -116,16 +118,27 @@ async def publish_vp_requests(message: Mapping[str, Any], appsync_session: Any, 
         return 0
     if (vp.get("Owner") or "") != (message.get("Owner") or ""):
         return 0
-    published = 0
+    requests = open_requests(message, vp)
+    if not requests:
+        return 0
     loop = asyncio.get_running_loop()
-    for request in open_requests(message, vp):
-        try:
-            # In the default executor: the signed request is synchronous, and
-            # this loop is also writing every other record in the batch.
-            await loop.run_in_executor(None, functools.partial(_publish, call_id, request))
-            published += 1
-        except Exception as error:  # pylint: disable=broad-except
-            logger.warning("START: a request to be added was not published - %s", error)
+    # At the same time, in the default executor: each signed request is
+    # synchronous, and this loop is also writing every other record in the batch.
+    publishes = [
+        loop.run_in_executor(None, functools.partial(_publish, call_id, request))
+        for request in requests
+    ]
+    try:
+        results = await asyncio.wait_for(
+            asyncio.gather(*publishes, return_exceptions=True), timeout=PUBLISH_BUDGET_SECONDS
+        )
+    except asyncio.TimeoutError:
+        logger.warning("START: the requests to be added are slow to publish; not waiting for them")
+        return 0
+    failed = [r for r in results if isinstance(r, BaseException)]
+    for error in failed:
+        logger.warning("START: a request to be added was not published - %s", error)
+    published = len(results) - len(failed)
     if published:
         logger.info("START: published %d requests to be added to the meeting", published)
     return published

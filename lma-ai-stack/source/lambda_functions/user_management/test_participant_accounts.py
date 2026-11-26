@@ -708,3 +708,21 @@ def test_an_error_other_than_a_throttle_still_fails_the_answer(pool, ddb, monkey
     monkeypatch.setattr(pool, "admin_get_user", broken)
     with pytest.raises(ClientError):
         accounts({"CallId": CALL_ID})
+
+
+def test_lookups_past_the_deadline_are_answered_unknown_at_once(pool, ddb, monkeypatch):
+    pool.add("ana@example.com", groups=["Participant"])
+    monkeypatch.setattr(index, "LOOKUP_DEADLINE_SECONDS", -1.0)
+    answer = {e["email"]: e["account"] for e in accounts({"CallId": CALL_ID})}
+    assert set(answer.values()) == {"unknown"}
+    assert "admin_get_user" not in pool.names_called()
+
+
+def test_a_throttled_lookup_does_not_pause_past_the_deadline(pool, ddb, monkeypatch):
+    _throttle(pool, monkeypatch, "ana@example.com", 99)
+    pauses = []
+    monkeypatch.setattr(index.time, "sleep", pauses.append)
+    monkeypatch.setattr(index, "LOOKUP_DEADLINE_SECONDS", 0.3)
+    answer = {e["email"]: e["account"] for e in accounts({"CallId": CALL_ID})}
+    assert answer["ana@example.com"] == "unknown"
+    assert sum(pauses) < 0.3
