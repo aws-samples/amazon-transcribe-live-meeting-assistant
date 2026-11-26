@@ -422,7 +422,12 @@ async def _live(url: str, host: str, token: str, call_id: str, publish) -> dict:
         published = await asyncio.get_running_loop().run_in_executor(None, publish)
         seen["published_id"] = published.get("NotificationId")
         deadline = time.monotonic() + LIVE_WAIT_SECONDS
-        while time.monotonic() < deadline and not all(seen["received"].values()):
+        def has_published(name: str) -> bool:
+            return any(item.get("NotificationId") == seen["published_id"] for item in seen["received"][name])
+
+        # Until each has the publish itself: an Admin's every-meeting subscription
+        # also receives other meetings' notifications.
+        while time.monotonic() < deadline and not all(has_published(name) for name in subscriptions):
             try:
                 message = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
             except asyncio.TimeoutError:

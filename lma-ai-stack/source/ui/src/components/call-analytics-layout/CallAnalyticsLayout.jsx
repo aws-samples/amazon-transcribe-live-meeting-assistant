@@ -70,7 +70,7 @@ const CallAnalyticsLayout = () => {
 
   // A meeting's notifications, in a drawer of their own on its page once it has
   // any (docs/meeting-notifications.md), beside Help, which is a drawer on
-  // every page (see layout-drawers.jsx).
+  // every page (see layout-drawers.js).
   const meetingCallId = meetingCallIdOf(location.pathname);
   const meetingNotifications = useMeetingNotifications(meetingCallId);
   const drawer = useNotificationsDrawer({

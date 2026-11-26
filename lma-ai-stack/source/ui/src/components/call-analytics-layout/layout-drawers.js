@@ -4,8 +4,9 @@
  * See the LICENSE file in the project root for full license information.
  */
 import { NOTIFICATIONS_DRAWER_ID } from '../../hooks/use-notifications-drawer';
+import { appLayoutLabels } from '../common/labels';
 
-/** The help panel's drawer, beside the Notifications drawer on a meeting page. */
+/** The help panel's drawer, on every page of the meetings layout. */
 export const TOOLS_DRAWER_ID = 'tools';
 
 /**
@@ -14,11 +15,12 @@ export const TOOLS_DRAWER_ID = 'tools';
  * before it (docs/meeting-notifications.md).
  *
  * The layout is always given `drawers`, never `tools`, even where Help is the
- * only drawer. Cloudscape's AppLayout does not show a drawer named by
+ * only drawer: Cloudscape's AppLayout does not show the drawer named by
  * `activeDrawerId` once it has been changed from `tools` to `drawers` after it
- * was first shown, so a layout that switched when a meeting's first
- * notification arrived left that notification's drawer closed, and closed Help
- * if it was open. Adding a drawer to `drawers` is shown as expected.
+ * was first shown, whereas a drawer added to `drawers` is shown as expected.
+ * So the Notifications drawer is added to the list when the meeting's first
+ * notification arrives, and Help is named as the other layouts' tools trigger
+ * is (appLayoutLabels).
  *
  * `drawer` is what useNotificationsDrawer returns; `showNotifications` is
  * whether the Notifications drawer is offered; `visibleCount` is its count of
@@ -41,7 +43,11 @@ const layoutDrawerProps = ({
     id: TOOLS_DRAWER_ID,
     content: toolsContent,
     trigger: { iconName: 'status-info' },
-    ariaLabels: { drawerName: 'Help', closeButton: 'Close help', triggerButton: 'Help' },
+    ariaLabels: {
+      drawerName: appLayoutLabels.tools,
+      closeButton: appLayoutLabels.toolsClose,
+      triggerButton: appLayoutLabels.toolsToggle,
+    },
   };
   const notificationsDrawer = {
     id: NOTIFICATIONS_DRAWER_ID,
