@@ -186,6 +186,24 @@ def _mark_job(call_id: str, status: str, extra: dict | None = None) -> None:
         logger.error("DDB update_item failed for %s: %s", pk, err)
 
 
+def _record_start_sent(call_id: str, sent_at: str) -> None:
+    """Record on the UploadJob row that START was sent, as soon as it is.
+
+    A retry reads it and does not send START again, even when the invocation
+    that sent it ended before it could record anything else. Best-effort, as
+    ``_mark_job`` is: the status is left as it is.
+    """
+    pk = f"uj#{call_id}"
+    try:
+        job_table.update_item(
+            Key={"PK": pk, "SK": pk},
+            UpdateExpression="SET StartEventSentAt = :sent",
+            ExpressionAttributeValues={":sent": sent_at},
+        )
+    except ClientError as err:
+        logger.error("DDB update_item failed for %s: %s", pk, err)
+
+
 def _language_settings(job: dict) -> dict[str, Any]:
     """The StartTranscriptionJob language parameters for the upload.
 
@@ -428,6 +446,7 @@ def lambda_handler(event, context):  # noqa: ARG001
             if not start_sent_at:
                 _emit_start_event(job)
                 start_sent_at = datetime.now(timezone.utc).isoformat()
+                _record_start_sent(call_id, start_sent_at)
         except Exception as err:  # noqa: BLE001
             logger.exception(
                 "Processing failed for callId=%s key=%s: %s",

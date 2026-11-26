@@ -100,7 +100,7 @@ def parse_update(call: dict) -> dict:
     with generated placeholders, so the assertions below need the real attribute
     names back rather than the placeholder text.
     """
-    names = call["ExpressionAttributeNames"]
+    names = call.get("ExpressionAttributeNames", {})
     values = call["ExpressionAttributeValues"]
     assignments = call["UpdateExpression"].removeprefix("SET ").split(", ")
     decoded = {}
@@ -136,13 +136,13 @@ class FakeTable:
     @property
     def statuses(self) -> list[str]:
         """The Status values written, in order."""
-        return [parse_update(u)["Status"] for u in self.updates]
+        return [s for u in self.updates if (s := parse_update(u).get("Status"))]
 
     def update_for(self, status: str) -> dict:
         """The decoded attributes of the update that set ``status``."""
         for call in self.updates:
             decoded = parse_update(call)
-            if decoded["Status"] == status:
+            if decoded.get("Status") == status:
                 return decoded
         raise AssertionError(f"no update set Status={status}: {self.statuses}")
 
@@ -490,6 +490,24 @@ def test_a_connection_error_is_left_for_the_retry(env, monkeypatch) -> None:
     with pytest.raises(RuntimeError):
         index.lambda_handler(s3_event(), None)
     assert [p["EventType"] for p in kinesis.payloads] == ["START"]
+
+
+def test_the_start_is_recorded_as_sent_before_the_job_is_started(env, monkeypatch) -> None:
+    """An invocation that ends after START (a timeout, say) must not lead the
+    retry to send START again, so the row records it before anything else."""
+    table, _, _ = env
+    order = []
+    monkeypatch.setattr(table, "update_item", lambda **kw: order.append(parse_update(kw)) or {})
+
+    class Recording(FakeTranscribe):
+        def start_transcription_job(self, **params):
+            order.append("start_transcription_job")
+            return {}
+
+    monkeypatch.setattr(index, "transcribe_client", Recording())
+    index.lambda_handler(s3_event(), None)
+    assert order[1] == {"StartEventSentAt": FROZEN_NOW.isoformat()}
+    assert order[2] == "start_transcription_job"
 
 
 def test_a_parameter_or_credentials_error_ends_the_meeting_at_once(env, monkeypatch) -> None:
@@ -965,7 +983,7 @@ def test_every_record_is_attempted_before_the_invocation_fails(env, monkeypatch)
 
     assert [c["TranscriptionJobName"] for c in transcribe.calls] == ["call-bad", "call-good"]
     # The bad record is marked ERROR; the good one still reaches TRANSCRIBING.
-    updated = [(u["Key"]["PK"], parse_update(u)["Status"]) for u in table.updates]
+    updated = [(u["Key"]["PK"], parse_update(u).get("Status")) for u in table.updates]
     assert ("uj#call-bad", "ERROR") in updated
     assert ("uj#call-good", "TRANSCRIBING") in updated
 
