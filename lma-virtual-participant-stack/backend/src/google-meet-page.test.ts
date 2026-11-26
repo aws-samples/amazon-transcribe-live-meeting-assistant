@@ -183,11 +183,15 @@ test("the count is read from the current page's unlabelled People control", () =
 });
 
 test('the People panel opener also matches the unlabelled People control', () => {
-    assert.ok(
-        MEET_SELECTORS.peopleButton.some((sel) => sel.startsWith('[role="button"]:text-matches(')),
-        'a Playwright text match for the role="button" control',
-    );
-    assert.equal(new RegExp(MEET_PEOPLE_COUNT_TEXT, 'i').source, MEET_PEOPLE_COUNT_TEXT);
+    // Built from the reader's own pattern, so the two cannot drift apart. The
+    // argument is a CSS string, so its backslashes are doubled; unescaping it
+    // gives the pattern back.
+    const opener = MEET_SELECTORS.peopleButton.find((sel) => sel.startsWith('[role="button"]:text-matches('));
+    assert.ok(opener, 'a Playwright text match for the role="button" control');
+    const quoted = /:text-matches\(("(?:[^"\\]|\\.)*"), "i"\)$/.exec(opener ?? '');
+    assert.ok(quoted, opener);
+    assert.equal(JSON.parse(quoted[1]), MEET_PEOPLE_COUNT_TEXT);
+    assert.equal(new RegExp(JSON.parse(quoted[1]), 'i').test('People5'), true);
 });
 
 test('an unreadable or ambiguous count is null, never a guess', () => {
