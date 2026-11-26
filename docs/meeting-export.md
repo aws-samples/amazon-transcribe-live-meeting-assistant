@@ -225,9 +225,7 @@ tool, which is built by the same code:
   [The match is by display name](meeting-consent.md#the-match-is-by-display-name)),
   and `givenInAdvance` gives the consent's `scope`, `grantedAt`, `validUntil`,
   `noticeHash`, `noticeVersion` and `withdrawn`, never the person's address.
-  They are null on every other event, and `matchedNameSource` is also null on
-  an event recorded before it was noted; it is not required by the schema, so
-  an export without it still validates.
+  They are null on every other event.
   `speakerLinkBasis` says how the event was linked to the speaker who gave it,
   and `speakerLinkedAt` when; both are null for an event that was never linked.
   The basis is `same_segment`, the reply is that speaker's own line of the
@@ -242,7 +240,7 @@ tool, which is built by the same code:
   [Which speaker gave a reply](meeting-consent.md#which-speaker-gave-a-reply).
   After the transcript was deleted the link is still given, with a null
   `speakerId`. Every event has `speakerLinkBasis`, `speakerLinkedAt`,
-  `matchBasis` and `givenInAdvance` (the schema requires them), null when they
+  `matchBasis`, `matchedNameSource` and `givenInAdvance` (the schema requires them), null when they
   do not apply;
 - `hasEvidence` says whether evidence images exist.
 

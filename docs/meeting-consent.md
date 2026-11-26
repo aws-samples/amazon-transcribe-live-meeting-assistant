@@ -1547,6 +1547,21 @@ anyone, including the person whose name is shown, can object at any time. A
 short name that many people use ("Sam") makes a match less likely, not more:
 the safety rule refuses a name two listed people go by.
 
+**Names a person sets for themselves count.** A display name or short name
+the account holder sets on My consents counts for matching exactly as one an
+Admin sets, without the organizer or an Admin confirming it, and so does the
+user pool's `name` attribute. This is deliberate: the names only ever tie an
+attendee to that account's own consents, and only in meetings whose list the
+organizer put the account's address on. The account holder could equally
+show any name in the meeting itself. A name that collides with another listed
+person's name, from any source, matches nobody.
+
+**When the names cannot be read.** If the user pool or the names cannot be
+read while the Virtual Participant lists who is present, that listing counts
+no consent given in advance at all (matching on the list's names alone could
+match a name another listed person's account also goes by); the attendees are
+asked in the meeting as usual, and the next listing tries again.
+
 ## What is stored
 
 The consent record is the `Consent` attribute of the meeting's row in the

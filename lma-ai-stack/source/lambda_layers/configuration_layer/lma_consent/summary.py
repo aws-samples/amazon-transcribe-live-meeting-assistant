@@ -63,9 +63,9 @@ def consent_events(consent: Mapping[str, Any], speakers: Any = None) -> List[Dic
     ``matchBasis``, ``matchedNameSource`` and ``givenInAdvance`` are set on an
     event of source ``pre_meeting``: how the attendee was matched to the
     participant list (``display_name``), which of the listed person's names
-    matched (``list``, ``display_name`` or ``short_name``; null on an event
-    recorded before the names were noted) and the consent given in advance it
-    counted (:func:`given_in_advance`); null on every other event.
+    matched (``list``, ``display_name`` or ``short_name``) and the consent
+    given in advance it counted (:func:`given_in_advance`); null on every other
+    event.
     """
     out = []
     for event in consent.get("Events") or []:

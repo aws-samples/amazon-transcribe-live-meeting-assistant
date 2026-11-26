@@ -182,9 +182,13 @@ def test_the_user_pool_is_asked_once_for_attendees_listed_again(named) -> None:
     assert sorted(named.cognito.reads) == ["ana@example.com", "bo@example.com", "cy@example.com"]
 
 
-def test_the_lists_own_names_match_when_the_user_pool_cannot_be_read(named) -> None:
+def test_nothing_given_in_advance_is_counted_while_the_accounts_cannot_be_read(named) -> None:
     named.give("bo@example.com")
     named.cognito.fail = True
     start()
-    [event] = present("Bo Chen")["Events"]
+    assert present("Bo Chen")["Events"] == []
+    # The next listing tries again.
+    named.cognito.fail = False
+    index._ACCOUNTS.clear()
+    [event] = present("Bo Chen", "Somebody")["Events"]
     assert event["PreMeeting"]["MatchedNameSource"] == "list"

@@ -354,6 +354,9 @@ def match_listed(
             continue
         email = person.get("email")
         if isinstance(email, str) and email.strip():
+            # A list holds an address once (normalize_participants in
+            # lma_meeting_preparation keeps the first entry); should one hold
+            # it twice, the first entry is the person.
             people.setdefault(
                 email.strip().casefold(),
                 {"name": str(person.get("name") or "").strip(), "email": email.strip()},

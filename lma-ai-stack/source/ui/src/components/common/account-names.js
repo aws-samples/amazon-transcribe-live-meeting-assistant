@@ -41,13 +41,18 @@ export const parseShortNames = (text) => {
 /** Short names as the form shows them. */
 export const shortNamesText = (names) => (names || []).join(', ');
 
-/** What is wrong with the names, as the server would refuse them, or '' when nothing is. */
-export const namesProblem = (displayName, shortNames) => {
-  const display = collapse(displayName);
+/** What is wrong with the display name, as the server would refuse it, or ''. */
+export const displayNameProblem = (displayName) => {
   if (REFUSED.test(displayName || '')) return 'The display name cannot contain < or >.';
-  if (display.length > MAX_DISPLAY_NAME_CHARS) {
+  if (collapse(displayName).length > MAX_DISPLAY_NAME_CHARS) {
     return `The display name must be at most ${MAX_DISPLAY_NAME_CHARS} characters.`;
   }
+  return '';
+};
+
+/** What is wrong with the short names, as the server would refuse them, or ''. */
+export const shortNamesProblem = (displayName, shortNames) => {
+  const display = collapse(displayName);
   const shorts = (shortNames || []).filter((name) => key(name) !== key(display));
   if (shorts.some((name) => REFUSED.test(name))) return 'A short name cannot contain < or >.';
   if (shorts.some((name) => name.length > MAX_SHORT_NAME_CHARS)) {
@@ -56,6 +61,10 @@ export const namesProblem = (displayName, shortNames) => {
   if (shorts.length > MAX_SHORT_NAMES) return `At most ${MAX_SHORT_NAMES} short names.`;
   return '';
 };
+
+/** What is wrong with the names, as the server would refuse them, or '' when nothing is. */
+export const namesProblem = (displayName, shortNames) =>
+  displayNameProblem(displayName) || shortNamesProblem(displayName, shortNames);
 
 /** The names as a mutation sends them. */
 export const namesInput = (displayName, shortNamesTyped) => ({

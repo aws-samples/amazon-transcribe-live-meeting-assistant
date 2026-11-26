@@ -1344,7 +1344,33 @@ def search_accounts(event, args):
     if not EVENT_SOURCING_TABLE:
         raise ValidationError("Account search is not available on this deployment")
     limit = module.MAX_SEARCH_RESULTS
-    _reserve_search(caller, time.time())
+    now = time.time()
+    _reserve_search(caller, now)
+    try:
+        return _search(module, text, typed, limit)
+    except (ClientError, BotoCoreError):
+        # A search that could not be answered does not use up one of the day's.
+        _release_search(caller, now)
+        raise
+
+
+def _release_search(caller, now):
+    """Give back a search counted for one that failed. Best effort."""
+    if caller["is_admin"]:
+        return
+    try:
+        boto3.client("dynamodb").update_item(
+            TableName=EVENT_SOURCING_TABLE,
+            Key=_daily_count_key(caller["username"], now, "account-searches"),
+            UpdateExpression="ADD SearchCount :minus",
+            ExpressionAttributeValues={":minus": {"N": "-1"}},
+        )
+    except (ClientError, BotoCoreError):
+        logger.warning("Could not give back a daily account search", exc_info=True)
+
+
+def _search(module, text, typed, limit):
+    """The accounts a search finds (search_accounts' answer)."""
     client = boto3.client("dynamodb")
     records = {}
     for user in _pool_matches(text, typed, limit):

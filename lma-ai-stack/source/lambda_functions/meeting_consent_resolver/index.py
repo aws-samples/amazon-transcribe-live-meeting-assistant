@@ -780,11 +780,11 @@ FILTER_SPECIAL = ('"', "\\")
 _ACCOUNTS: Dict[str, tuple] = {}
 
 
-def memoized(function: Callable[[List[str]], Dict[str, Any]]) -> Callable[[List[str]], Dict]:
+def memoized(function: Callable[[List[str]], Any]) -> Callable[[List[str]], Any]:
     """``function`` answering each list of addresses once."""
-    answers: Dict[tuple, Dict[str, Any]] = {}
+    answers: Dict[tuple, Any] = {}
 
-    def call(emails: List[str]) -> Dict[str, Any]:
+    def call(emails: List[str]) -> Any:
         key = tuple(sorted(emails))
         if key not in answers:
             answers[key] = function(list(key))
@@ -828,12 +828,15 @@ def account_of(email: str) -> Optional[Dict[str, str]]:
     return answer
 
 
-def listed_account_names(emails: List[str]) -> Dict[str, Dict[str, Any]]:
+def listed_account_names(emails: List[str]) -> Optional[Dict[str, Dict[str, Any]]]:
     """The names each listed address's account goes by, by the address in lower case.
 
     Only for an address an account holds, and only the names kept for that
     account (lma_consent.account_names.account_names). Empty when the user
-    pool is not named or cannot be read: the list's own names still match.
+    pool is not named. None when the accounts or their names cannot be read:
+    matching on the list's names alone could match a name another listed
+    person's account also goes by, so nothing given in advance is counted in
+    that write, and the next listing tries again.
     """
     if not USER_POOL_ID or not emails:
         return {}
@@ -843,8 +846,8 @@ def listed_account_names(emails: List[str]) -> Dict[str, Dict[str, Any]]:
         held = [email for email, account in accounts.items() if account]
         profiles = account_names.read_profiles(DYNAMODB, EVENT_SOURCING_TABLE, held) if held else {}
     except (ClientError, BotoCoreError, account_names.NamesChanged):
-        LOGGER.warning("the accounts' names could not be read; only the list's names match")
-        return {}
+        LOGGER.warning("the accounts' names could not be read; consent given in advance waits")
+        return None
     out: Dict[str, Dict[str, Any]] = {}
     for email in held:
         names = account_names.account_names(profiles.get(email), accounts[email])
@@ -911,7 +914,7 @@ def reconcile_advance_consents(  # pylint: disable=too-many-arguments,too-many-p
     vp_id: str,
     now: str,
     applied: Dict[str, List[str]],
-    names_of: Optional[Callable[[List[str]], Dict[str, Any]]] = None,
+    names_of: Optional[Callable[[List[str]], Optional[Dict[str, Any]]]] = None,
 ) -> List[Dict[str, Any]]:
     """The consent events to add for attendees covered by a consent given in advance.
 
@@ -933,7 +936,7 @@ def reconcile_advance_consents(  # pylint: disable=too-many-arguments,too-many-p
     }
     candidates = [name for name in present if consent.normalize_name(name) not in replied]
     listed = meeting.get("Participants") or []
-    accounts: Dict[str, Any] = {}
+    accounts: Optional[Dict[str, Any]] = {}
     if candidates and names_of is not None:
         emails = {
             str(p.get("email")).strip().casefold()
@@ -941,6 +944,10 @@ def reconcile_advance_consents(  # pylint: disable=too-many-arguments,too-many-p
             if isinstance(p, Mapping) and isinstance(p.get("email"), str) and p["email"].strip()
         }
         accounts = names_of(sorted(emails)[: consent.MAX_PARTICIPANTS])
+    if accounts is None:
+        # The accounts' names could not be read: a match on the list's names
+        # alone could be one the full rule refuses, so this write counts none.
+        return []
     matches = advance.match_listed(candidates, listed, accounts)
     covering_meeting = {
         "CallId": meeting.get("CallId"),

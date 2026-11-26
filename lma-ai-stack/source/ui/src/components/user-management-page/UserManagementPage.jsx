@@ -32,7 +32,15 @@ import {
   setUserAccountNames,
   listInvitableMeetings,
 } from '../../graphql/queries/userManagementQueries';
-import { namesInput, namesProblem, namesSummary, parseShortNames, shortNamesText } from '../common/account-names';
+import {
+  displayNameProblem,
+  namesInput,
+  namesProblem,
+  namesSummary,
+  parseShortNames,
+  shortNamesProblem,
+  shortNamesText,
+} from '../common/account-names';
 import useAppContext from '../../contexts/app';
 import { INVITABLE_MEETING_DAYS, invitableMeetingOptions, meetingRefFromText } from './invite-meeting';
 
@@ -87,7 +95,7 @@ export const lastActiveText = (item, lastSignInAvailable) => {
  * advance.
  */
 export const NamesFields = ({ displayName, shortNames, onDisplayName, onShortNames, accountName = '' }) => {
-  const problem = namesProblem(displayName, parseShortNames(shortNames));
+  const shortProblem = shortNamesProblem(displayName, parseShortNames(shortNames));
   return (
     <>
       <FormField
@@ -102,6 +110,7 @@ export const NamesFields = ({ displayName, shortNames, onDisplayName, onShortNam
             ? `Without one, the account's name applies: ${accountName}`
             : 'At most 100 characters.'
         }
+        errorText={displayNameProblem(displayName) || undefined}
       >
         <Input
           value={displayName}
@@ -118,7 +127,7 @@ export const NamesFields = ({ displayName, shortNames, onDisplayName, onShortNam
         }
         description="Other names the person shows in meetings, separated by commas."
         constraintText="At most 5, each at most 50 characters."
-        errorText={problem || undefined}
+        errorText={shortProblem || undefined}
       >
         <Input
           value={shortNames}

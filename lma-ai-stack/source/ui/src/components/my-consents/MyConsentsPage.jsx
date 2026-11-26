@@ -37,7 +37,14 @@ import {
   updateMyAccountNames,
   withdrawAdvanceConsent,
 } from '../../graphql/queries/advanceConsent';
-import { namesInput, namesProblem, parseShortNames, shortNamesText } from '../common/account-names';
+import {
+  displayNameProblem,
+  namesInput,
+  namesProblem,
+  parseShortNames,
+  shortNamesProblem,
+  shortNamesText,
+} from '../common/account-names';
 import {
   consentLinkMeeting,
   consentScopeLabel,
@@ -726,6 +733,7 @@ export const MyNamesInMeetings = ({ answer = null, onSaved }) => {
               ? `Without one, your account's name applies: ${names.AccountName}`
               : 'At most 100 characters.'
           }
+          errorText={displayNameProblem(displayName) || undefined}
         >
           <Input
             value={displayName}
@@ -743,7 +751,7 @@ export const MyNamesInMeetings = ({ answer = null, onSaved }) => {
           }
           description="Other names you show in meetings, separated by commas."
           constraintText="At most 5, each at most 50 characters."
-          errorText={problem || undefined}
+          errorText={shortNamesProblem(displayName, parseShortNames(shortNames)) || undefined}
         >
           <Input
             value={shortNames}

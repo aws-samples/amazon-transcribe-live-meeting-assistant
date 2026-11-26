@@ -182,6 +182,9 @@ class FakeDynamo:
         key = self._key(Key)
         item = self.items.setdefault(key, {"PK": Key["PK"], "SK": Key["SK"]})
         count = int(item.get("SearchCount", {"N": "0"})["N"])
+        if ":minus" in ExpressionAttributeValues:
+            item["SearchCount"] = {"N": str(count - 1)}
+            return {}
         if count >= int(ExpressionAttributeValues[":limit"]["N"]):
             raise ClientError({"Error": {"Code": "ConditionalCheckFailedException"}}, "UpdateItem")
         item["SearchCount"] = {"N": str(count + 1)}
@@ -407,3 +410,14 @@ def test_a_user_searches_a_limited_number_of_times_a_day(aws, monkeypatch) -> No
     # An Admin's searches are not counted.
     for _ in range(3):
         search("rob")
+
+
+def test_a_search_that_fails_does_not_use_up_one_of_the_users_day(aws, monkeypatch) -> None:
+    def failing(*_a, **_k):
+        raise ClientError({"Error": {"Code": "ProvisionedThroughputExceededException"}}, "Query")
+
+    monkeypatch.setattr(index._names_module(), "search_index", failing)
+    with pytest.raises(ClientError):
+        search("rob", username=USER, groups=())
+    [count] = [i for k, i in aws.dynamo.items.items() if k[1].startswith("account-searches#")]
+    assert count["SearchCount"]["N"] == "0"
