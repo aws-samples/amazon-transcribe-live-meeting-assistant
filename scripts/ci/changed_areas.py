@@ -404,7 +404,7 @@ EXTRA_RULES: tuple[Rule, ...] = _rules(
     ("lma-bedrockagent-stack/publish.sh", "sdk_cli"),
     # ...and package a copy of the ASR MicroVM stack, holding the image source
     # paths to the Dockerfile's COPY sources (TestAsrMicrovmPackage).
-    ("lma-asr-microvm-stack/**", "sdk_cli"),
+    (f"{ASR}/**", "sdk_cli"),
     # The integration plumbing tests hold the Stream page probe's route to the UI's,
     # and its slides to the transcriber's key frame detector.
     (f"{UI}/src/routes/constants.js", "integ_plumbing"),

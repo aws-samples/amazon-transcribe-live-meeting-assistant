@@ -427,6 +427,20 @@ def _asr_image_source_files(source_dir: Path) -> list[Path]:
     return sorted(files)
 
 
+def _hash_files(hasher: Any, root: Path, files: list[Path]) -> None:
+    for fpath in files:
+        hasher.update(f"{root.name}/{fpath.relative_to(root).as_posix()}\0".encode())
+        hasher.update(fpath.read_bytes())
+        hasher.update(b"\0")
+
+
+def _files_hash(root: Path, files: list[Path]) -> str:
+    """Hash of exactly the files a zip is written from, so its name follows its contents."""
+    hasher = hashlib.sha256()
+    _hash_files(hasher, root, files)
+    return hasher.hexdigest()[:16]
+
+
 def _asr_image_hash(stack_dir: Path, source_dir: Path) -> str:
     """Hash of everything that determines the ASR MicroVM image a deploy builds."""
     resolver_dir = stack_dir / ASR_IMAGE_RESOLVER_DIR
@@ -437,10 +451,7 @@ def _asr_image_hash(stack_dir: Path, source_dir: Path) -> str:
         (source_dir, _asr_image_source_files(source_dir)),
         (resolver_dir, [p for p in _walk_files(resolver_dir) if not _is_test_file(p)]),
     ):
-        for fpath in files:
-            hasher.update(f"{root.name}/{fpath.relative_to(root).as_posix()}\0".encode())
-            hasher.update(fpath.read_bytes())
-            hasher.update(b"\0")
+        _hash_files(hasher, root, files)
     return hasher.hexdigest()[:16]
 
 
@@ -1073,7 +1084,7 @@ class Publisher:
 
         The zip holds only ASR_IMAGE_SOURCE_PATHS and is named by
         _asr_image_hash, so its key changes only when the image would. Each
-        Lambda zip is named by the hash of its own directory.
+        Lambda zip is named by the hash of the files it holds.
         """
         stack_dir = project_dir / stack_def.name
 
@@ -1101,7 +1112,8 @@ class Publisher:
             if not function_dir.is_dir():
                 raise LMAPublishError(f"ASR Lambda directory not found: {function_dir}")
             function_files = _walk_files(function_dir)
-            function_zip = tmpdir / f"{function_name.replace('_', '-')}-{_calculate_dir_hash(function_dir)}.zip"
+            function_hash = _files_hash(function_dir, function_files)
+            function_zip = tmpdir / f"{function_name.replace('_', '-')}-{function_hash}.zip"
             zip_files(function_dir, function_files, function_zip)
             key = f"{prefix_and_version}/{stack_def.name}/{function_zip.name}"
             logger.info("Uploading %s to s3://%s/%s", function_zip.name, bucket, key)

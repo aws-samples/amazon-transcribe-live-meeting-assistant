@@ -205,8 +205,9 @@ stored, with a few quick retries, and never fails a meeting because the bus
 could not be reached. One publish makes at most three attempts, each allowed a
 2-second connection and a 3-second read, so an unreachable bus adds at most
 about 15 seconds, plus the short backoff between attempts, to processing the
-record that made the transition. `Summary Ready` also waits up to 4 seconds for
-its in-app notification. Both bounds leave out the read of the meeting record
+record that made the transition. In the call event processor, `Summary Ready`
+also waits up to 4 seconds for its in-app notification; the summary
+regenerator gives that request 3 seconds. Both bounds leave out the read of the meeting record
 that each meeting event is built from, which happens whether or not the bus can
 be reached. An event that still cannot be published is logged
 and counted in the `MeetingEventsPublishFailed` metric (see
