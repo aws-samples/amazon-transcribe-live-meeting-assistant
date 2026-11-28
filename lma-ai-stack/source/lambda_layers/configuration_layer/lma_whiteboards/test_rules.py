@@ -265,6 +265,9 @@ def test_diagrams_in_the_subset_are_accepted(text: str) -> None:
         ("flowchart TD\n  a-->b\n  linkStyle 0 stroke:url(#g)", "fetch"),
         ("flowchart TD\n  a-->b; style a fill:url(x)", "fetch"),
         ("flowchart TD\n  a-->b; click a call go()", "click"),
+        # Outside a flowchart, brackets and quotes are not labels.
+        ('sequenceDiagram\n  Alice->>Bob: "x; click Bob call go()"', "click"),
+        ("timeline\n  2026 : (a; style x fill:url(y))", "fetch"),
         ("gantt\n  Task <b>bold</b> :t1, 2026-12-01, 1d", "HTML"),
     ],
 )

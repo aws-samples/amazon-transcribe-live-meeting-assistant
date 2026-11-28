@@ -1927,7 +1927,7 @@ def create_whiteboard_tools(call_id: str, user_email: str, message_id: str = Non
             outcome = run()
             if isinstance(outcome, tuple):
                 board, result = outcome
-                # The meeting page offers a link to the whiteboard the change made.
+                # The whiteboard the change made, for a link to it on the meeting page.
                 result_step = {
                     'whiteboardId': board.get('WhiteboardId'),
                     'whiteboardTitle': board.get('Title'),
@@ -1937,9 +1937,9 @@ def create_whiteboard_tools(call_id: str, user_email: str, message_id: str = Non
         except meeting_whiteboard_tools.WhiteboardToolError as e:
             result = str(e)
             success = False
-        except Exception as e:  # pylint: disable=broad-except
-            logger.error(f"Error in {name}: {str(e)}")
-            result = "The meeting's whiteboards could not be read just now."
+        except Exception:  # pylint: disable=broad-except
+            logger.exception(f"Error in {name}")
+            result = "The meeting's whiteboards could not be read or changed just now."
             success = False
         logger.info(f"{name} for {call_id}: success={success}, {len(result)} characters")
         if call_id and message_id and APPSYNC_GRAPHQL_URL:

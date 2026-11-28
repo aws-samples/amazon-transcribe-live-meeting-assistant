@@ -165,8 +165,10 @@ export const mermaidProblem = (text) => {
   }
   // A line may hold several statements separated by ";".
   // A ";" in a label (quoted, or in a node's brackets) does not separate statements.
+  // Only a flowchart's brackets and quotes are node labels (rules._statements).
+  const labelled = ['flowchart', 'graph'].includes(first.split(/\s+/)[0]);
   const statements = meaningful.flatMap((line) => {
-    const masked = line.replace(LABEL, (label) => ' '.repeat(label.length));
+    const masked = labelled ? line.replace(LABEL, (label) => ' '.repeat(label.length)) : line;
     const parts = [];
     let start = 0;
     [...masked].forEach((character, index) => {

@@ -307,9 +307,10 @@ def check_text(value: Any, what: str, limit: int, *, required: bool = False) -> 
     return text
 
 
-def _statements(line: str) -> List[str]:
-    """The statements of one diagram line, split at each ";" outside a label."""
-    masked = _LABEL.sub(lambda match: " " * len(match.group(0)), line)
+def _statements(line: str, labelled: bool) -> List[str]:
+    """The statements of one diagram line, split at each ";" (outside a label, when the
+    diagram's brackets and quotes are labels)."""
+    masked = _LABEL.sub(lambda match: " " * len(match.group(0)), line) if labelled else line
     parts, start = [], 0
     for index, character in enumerate(masked):
         if character == ";":
@@ -343,7 +344,9 @@ def check_mermaid(text: str) -> None:
         raise _invalid("A diagram may not hold Mermaid directives or front matter")
     # A line may hold several statements separated by ";"; a ";" in a label
     # (quoted, or in a node's brackets) does not separate them.
-    statements = [part for line in meaningful for part in _statements(line)]
+    # Only a flowchart's brackets and quotes are node labels.
+    labelled = first.split(None, 1)[0] in ("flowchart", "graph")
+    statements = [part for line in meaningful for part in _statements(line, labelled)]
     for statement in statements:
         word = statement.split(None, 1)[0].lower()
         if word in ("click", "callback", "link", "links", "href"):

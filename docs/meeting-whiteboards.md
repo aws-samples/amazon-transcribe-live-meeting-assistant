@@ -150,7 +150,9 @@ to the open questions". It uses four tools, for the current meeting only:
   assistant keeps stays the assistant's, so its automatic updates (when they are
   on) keep it current; asked to keep a panel exactly as written, the assistant
   makes it the user's. A panel a person wrote stays theirs. A new panel the
-  chat adds is the user's unless they ask the assistant to keep it current.
+  chat adds to a whiteboard is the user's unless they ask the assistant to keep
+  it current; a new whiteboard's template panels are the assistant's unless they
+  ask for them to be kept as written.
 - **Changes made meanwhile.** If somebody changes the whiteboard while the
   assistant is changing it, the assistant reads it again and makes its change
   on the newer version, so it never overwrites theirs; if the whiteboard keeps
