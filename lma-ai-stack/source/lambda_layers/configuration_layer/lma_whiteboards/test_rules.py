@@ -229,6 +229,8 @@ def test_an_unknown_kind_or_source_is_refused() -> None:
         # A label may name a URL or an import; only a style statement may not fetch one.
         'flowchart LR\n  api["Orders URL (v2)"] --> imp["@import job"]',
         "gantt\n  dateFormat YYYY-MM-DD\n  Update URL (staging) :t1, 2026-12-01, 2d",
+        # A ";" inside a label does not start a statement.
+        'flowchart TD\n  a["Fix; link checker"] --> b[Retry; click again]',
     ],
 )
 def test_diagrams_in_the_subset_are_accepted(text: str) -> None:

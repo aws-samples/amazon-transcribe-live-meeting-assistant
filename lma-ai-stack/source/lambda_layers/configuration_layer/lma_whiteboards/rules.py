@@ -64,6 +64,8 @@ ASSISTANT_LABEL = "LMA assistant"
 
 #: The Mermaid diagram types a panel may hold, by the keyword that starts them.
 MERMAID_TYPES = ("flowchart", "graph", "sequenceDiagram", "timeline", "mindmap", "gantt")
+#: A label within a statement: quoted text, or a node's text in brackets.
+_LABEL = re.compile(r'"[^"]*"|\[[^\]]*\]|\([^)]*\)|\{[^}]*\}')
 #: The statements that carry CSS in the subset, by their first word, lowered.
 STYLE_STATEMENTS = ("style", "classdef", "linkstyle")
 
@@ -305,6 +307,18 @@ def check_text(value: Any, what: str, limit: int, *, required: bool = False) -> 
     return text
 
 
+def _statements(line: str) -> List[str]:
+    """The statements of one diagram line, split at each ";" outside a label."""
+    masked = _LABEL.sub(lambda match: " " * len(match.group(0)), line)
+    parts, start = [], 0
+    for index, character in enumerate(masked):
+        if character == ";":
+            parts.append(line[start:index])
+            start = index + 1
+    parts.append(line[start:])
+    return [part.strip() for part in parts if part.strip()]
+
+
 def check_mermaid(text: str) -> None:
     """Refuse a diagram outside the subset a panel may hold.
 
@@ -327,8 +341,9 @@ def check_mermaid(text: str) -> None:
     lowered = text.lower()
     if "%%{" in text or any(line == "---" for line in lines):
         raise _invalid("A diagram may not hold Mermaid directives or front matter")
-    # A line may hold several statements separated by ";".
-    statements = [part.strip() for line in meaningful for part in line.split(";") if part.strip()]
+    # A line may hold several statements separated by ";"; a ";" in a label
+    # (quoted, or in a node's brackets) does not separate them.
+    statements = [part for line in meaningful for part in _statements(line)]
     for statement in statements:
         word = statement.split(None, 1)[0].lower()
         if word in ("click", "callback", "link", "links", "href"):

@@ -86,6 +86,8 @@ export const DEFAULT_TEMPLATE = 'decisions';
 export const MERMAID_TYPES = ['flowchart', 'graph', 'sequenceDiagram', 'timeline', 'mindmap', 'gantt'];
 /** The statements that carry CSS in the subset, by their first word, lowered (rules.STYLE_STATEMENTS). */
 const STYLE_STATEMENTS = ['style', 'classdef', 'linkstyle'];
+/** A label within a statement: quoted text, or a node's text in brackets (rules._LABEL). */
+const LABEL = /"[^"]*"|\[[^\]]*\]|\([^)]*\)|\{[^}]*\}/g;
 
 const byCreation = (a, b) =>
   String(a.CreatedAt || '').localeCompare(String(b.CreatedAt || '')) ||
@@ -162,7 +164,20 @@ export const mermaidProblem = (text) => {
     return 'A diagram may not hold Mermaid directives or front matter.';
   }
   // A line may hold several statements separated by ";".
-  const statements = meaningful.flatMap((line) => line.split(';').map((part) => part.trim())).filter(Boolean);
+  // A ";" in a label (quoted, or in a node's brackets) does not separate statements.
+  const statements = meaningful.flatMap((line) => {
+    const masked = line.replace(LABEL, (label) => ' '.repeat(label.length));
+    const parts = [];
+    let start = 0;
+    [...masked].forEach((character, index) => {
+      if (character === ';') {
+        parts.push(line.slice(start, index));
+        start = index + 1;
+      }
+    });
+    parts.push(line.slice(start));
+    return parts.map((part) => part.trim()).filter(Boolean);
+  });
   if (
     statements.some((statement) =>
       ['click', 'callback', 'link', 'links', 'href'].includes(statement.split(/\s+/)[0].toLowerCase()),
