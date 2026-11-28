@@ -67,36 +67,40 @@ const MemberRoutes = ({ redirectParam }) => {
 
   return (
     <SettingsContext.Provider value={settingsContextValue}>
-      <ManualActionAlerts />
-      <Routes>
-        <Route path={`${CALLS_PATH}/*`} element={<CallsRoutes />} />
-        <Route
-          path={LOGIN_PATH}
-          element={
-            <Navigate to={!redirectParam || redirectParam === LOGIN_PATH ? DEFAULT_PATH : `${redirectParam}`} replace />
-          }
-        />
-        <Route path={LOGOUT_PATH} element={<SignOutRedirect />} />
-        <Route path={`${MEETINGS_QUERY_PATH}/*`} element={<MeetingsQueryRoutes />} />
-        <Route path={`${STREAM_AUDIO_PATH}/*`} element={<StreamAudioRoutes />} />
-        <Route path={`${UPLOAD_AUDIO_PATH}/*`} element={<UploadAudioRoutes />} />
-        <Route path={`${VIRTUAL_PARTICIPANT_PATH}/*`} element={<VirtualParticipantRoutes />} />
-        <Route path={`${BROWSER_EXTENSION_PATH}/*`} element={<BrowserExtensionRoutes />} />
-        <Route path={`${DESKTOP_CAPTURE_APP_PATH}/*`} element={<DesktopCaptureAppRoutes />} />
-        <Route path={`${MCP_SERVERS_PATH}/*`} element={<MCPServersRoutes />} />
-        <Route path={`${SKILLS_PATH}/*`} element={<SkillsRoutes />} />
-        {/* The pages that each edited one section moved into the Configuration
+      <ManualActionAlerts>
+        <Routes>
+          <Route path={`${CALLS_PATH}/*`} element={<CallsRoutes />} />
+          <Route
+            path={LOGIN_PATH}
+            element={
+              <Navigate
+                to={!redirectParam || redirectParam === LOGIN_PATH ? DEFAULT_PATH : `${redirectParam}`}
+                replace
+              />
+            }
+          />
+          <Route path={LOGOUT_PATH} element={<SignOutRedirect />} />
+          <Route path={`${MEETINGS_QUERY_PATH}/*`} element={<MeetingsQueryRoutes />} />
+          <Route path={`${STREAM_AUDIO_PATH}/*`} element={<StreamAudioRoutes />} />
+          <Route path={`${UPLOAD_AUDIO_PATH}/*`} element={<UploadAudioRoutes />} />
+          <Route path={`${VIRTUAL_PARTICIPANT_PATH}/*`} element={<VirtualParticipantRoutes />} />
+          <Route path={`${BROWSER_EXTENSION_PATH}/*`} element={<BrowserExtensionRoutes />} />
+          <Route path={`${DESKTOP_CAPTURE_APP_PATH}/*`} element={<DesktopCaptureAppRoutes />} />
+          <Route path={`${MCP_SERVERS_PATH}/*`} element={<MCPServersRoutes />} />
+          <Route path={`${SKILLS_PATH}/*`} element={<SkillsRoutes />} />
+          {/* The pages that each edited one section moved into the Configuration
             page, and the Configuration History page into its revision history
             dialog; a bookmark to one opens it there. */}
-        {movedConfigurationRoutes()}
-        <Route path={`${USER_MANAGEMENT_PATH}/*`} element={<UserManagementRoutes />} />
-        <Route path={`${CONFIGURATION_PATH}/*`} element={<ConfigurationRoutes />} />
-        <Route path={`${EMBED_PATH}/*`} element={<EmbedRoutes />} />
-        <Route path={`${VOICE_ENROLLMENT_PATH}/*`} element={<VoiceEnrollmentRoutes />} />
-        <Route path={`${MY_CONSENTS_PATH}/*`} element={<MyConsentsRoutes />} />
-        <Route path={`${TROUBLESHOOTING_PATH}/*`} element={<TroubleshootingRoutes />} />
-        <Route path="*" element={<Navigate to={DEFAULT_PATH} replace />} />
-      </Routes>
+          {movedConfigurationRoutes()}
+          <Route path={`${USER_MANAGEMENT_PATH}/*`} element={<UserManagementRoutes />} />
+          <Route path={`${CONFIGURATION_PATH}/*`} element={<ConfigurationRoutes />} />
+          <Route path={`${EMBED_PATH}/*`} element={<EmbedRoutes />} />
+          <Route path={`${VOICE_ENROLLMENT_PATH}/*`} element={<VoiceEnrollmentRoutes />} />
+          <Route path={`${MY_CONSENTS_PATH}/*`} element={<MyConsentsRoutes />} />
+          <Route path={`${TROUBLESHOOTING_PATH}/*`} element={<TroubleshootingRoutes />} />
+          <Route path="*" element={<Navigate to={DEFAULT_PATH} replace />} />
+        </Routes>
+      </ManualActionAlerts>
     </SettingsContext.Provider>
   );
 };

@@ -23,7 +23,7 @@ import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import pytest
 from botocore.exceptions import ClientError
@@ -87,11 +87,14 @@ class FakeTable:
     def __init__(self, hash_key: str, range_key: str | None = None) -> None:
         self.hash_key, self.range_key = hash_key, range_key
         self.items: Dict[tuple, Dict[str, Any]] = {}
+        #: Whether each get_item asked for a consistent read, in order.
+        self.consistent_reads: List[bool] = []
 
     def _key(self, key):
         return (key[self.hash_key], key.get(self.range_key) if self.range_key else None)
 
-    def get_item(self, Key, **_kwargs):  # noqa: N803
+    def get_item(self, Key, **kwargs):  # noqa: N803
+        self.consistent_reads.append(bool(kwargs.get("ConsistentRead")))
         item = self.items.get(self._key(Key))
         return {"Item": copy.deepcopy(item)} if item else {}
 
@@ -1006,3 +1009,33 @@ def test_a_failed_second_look_for_the_meeting_still_answers_the_request_as_made(
     answer = call("askToBeAddedToMeeting", BO, {"input": {"VirtualParticipantId": VP_ID}})
     assert answer == {"Requested": True, "Listed": False}
     assert aws["dynamo"].vps.items[(VP_ID, None)]["participantListRequests"][0]["email"] == BO
+
+
+def test_every_read_after_a_request_is_kept_on_a_vp_row_is_consistent(aws, monkeypatch):
+    """The row is read consistently to keep the request, and again with its meeting
+    afterwards, so a meeting created just before the request was kept is found.
+    The call event processor's read of the row after creating the meeting is the
+    getVirtualParticipant resolver's, which is consistent as well
+    (lma-ai-stack/test/test_vp_read_is_consistent.py)."""
+    aws["dynamo"].vps.items[(VP_ID, None)] = {"id": VP_ID, "Owner": OWNER, "CallId": CALL_ID}
+    # The VP has linked its CallId; its meeting is created while the request is kept.
+    meeting = aws["dynamo"].events.items.pop((f"c#{CALL_ID}", f"c#{CALL_ID}"))
+    real_keep = index._keep_request_on_vp
+    reads_before_keep = {}
+
+    def keep(*args):
+        reads_before_keep["vps"] = len(aws["dynamo"].vps.consistent_reads)
+        reads_before_keep["events"] = len(aws["dynamo"].events.consistent_reads)
+        kept = real_keep(*args)
+        aws["dynamo"].events.items[(f"c#{CALL_ID}", f"c#{CALL_ID}")] = meeting
+        return kept
+
+    monkeypatch.setattr(index, "_keep_request_on_vp", keep)
+    call("askToBeAddedToMeeting", BO, {"input": {"VirtualParticipantId": VP_ID}})
+    vp_reads = aws["dynamo"].vps.consistent_reads[reads_before_keep["vps"] :]
+    meeting_reads = aws["dynamo"].events.consistent_reads[reads_before_keep["events"] :]
+    # The read that keeps the request, then the second look at the row.
+    assert vp_reads == [True, True], vp_reads
+    assert meeting_reads and all(meeting_reads), meeting_reads
+    [(call_id, _)] = aws["published"]
+    assert call_id == CALL_ID

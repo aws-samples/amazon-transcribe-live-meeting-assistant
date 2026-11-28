@@ -17,16 +17,18 @@ import { AppLayout, Flashbar } from '@cloudscape-design/components';
 
 import VoiceEnrollmentPage from '../components/voice-enrollment/VoiceEnrollmentPage';
 import { appLayoutLabels } from '../components/common/labels';
-import useNotifications from '../hooks/use-notifications';
+import useNotifications, { useStickyNotifications } from '../hooks/use-notifications';
 
 const VoiceEnrollmentRoutes = () => {
   const notifications = useNotifications();
+  const stickyNotifications = useStickyNotifications();
 
   return (
     <AppLayout
       navigationHide
       toolsHide
       notifications={<Flashbar items={notifications} />}
+      stickyNotifications={stickyNotifications}
       content={<VoiceEnrollmentPage />}
       ariaLabels={appLayoutLabels}
     />

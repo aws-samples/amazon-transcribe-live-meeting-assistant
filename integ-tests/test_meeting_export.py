@@ -35,7 +35,7 @@ it).
     ``prepareMeetingArchive(Contents: EXPORT)`` as the signed-in user, read back
     through ``getMeetingArchive`` and downloaded through its link.
 ``test_a_large_export_is_answered_with_a_link_for_ten_minutes``
-    *(opt-in, ``LMA_TEST_LARGE_EXPORT=1``)* A second meeting with more than 6 MB
+    *(opt-in, ``LMA_TEST_LARGE_EXPORT=1``; the scheduled run sets it)* A second meeting with more than 6 MB
     of transcript: the tool answers with a link, signed for at most ten minutes,
     to an export that validates. It writes 3,200 segments, so it is left out of a
     default run.

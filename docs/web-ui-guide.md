@@ -73,7 +73,7 @@ Use the search bar to filter meetings by topic or other attributes.
 
 ## Manual Action Alerts
 
-A **persistent Flashbar** at the top of the LMA UI surfaces any of your Virtual Participants currently in the `MANUAL_ACTION_REQUIRED` state — a CAPTCHA, 2FA prompt, SSO redirect, unknown consent dialog, or other Zoom verification step that needs human input. Each alert links directly to the affected meeting detail page where you can open the live VNC viewer and complete the challenge.
+A **persistent Flashbar**, shown below the top navigation bar on every page that has one and kept in view as the page scrolls, surfaces any of your Virtual Participants currently in the `MANUAL_ACTION_REQUIRED` state — a CAPTCHA, 2FA prompt, SSO redirect, unknown consent dialog, or other Zoom verification step that needs human input. Each alert links directly to the affected meeting detail page where you can open the live VNC viewer and complete the challenge.
 
 - Alerts arrive in real time via an AppSync GraphQL subscription, with a one-time backfill on page load so anything fired while the tab was closed still shows up.
 - Each alert is **dismissible** — dismissed alerts are remembered in `localStorage` (per VP id) so they don't reappear on every refresh after you've dealt with them.

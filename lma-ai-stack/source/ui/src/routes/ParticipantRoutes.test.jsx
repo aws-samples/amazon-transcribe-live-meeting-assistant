@@ -19,7 +19,7 @@ vi.mock('../contexts/app', () => ({
 // stubbed: a Participant must reach none of them.
 vi.mock('./CallsRoutes', () => ({ default: () => <div>member: meetings</div> }));
 vi.mock('../hooks/use-parameter-store', () => ({ default: () => ({}) }));
-vi.mock('../components/virtual-participant-layout/ManualActionAlerts', () => ({ default: () => null }));
+vi.mock('../components/virtual-participant-layout/ManualActionAlerts', () => ({ default: ({ children }) => children }));
 // The Participant's own pages, which read the API.
 vi.mock('../components/participant-meetings/ParticipantMeetingList', () => ({
   default: () => <div>participant: shared meetings</div>,

@@ -4,8 +4,9 @@
  * See the LICENSE file in the project root for full license information.
  */
 import { ConsoleLogger } from 'aws-amplify/utils';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import useAppContext from '../contexts/app';
+import useVpAlerts from '../contexts/vp-alerts';
 
 const logger = new ConsoleLogger('useNotifications');
 
@@ -20,8 +21,16 @@ const initialNotifications = [
   },
 ];
 
+/**
+ * The items for a page's AppLayout `notifications` Flashbar: the signed-in
+ * user's Virtual Participant alerts (VpAlertsContext), then the welcome
+ * message and any error the page reported. Every global banner goes through
+ * here, so each is shown in the layout's notifications slot, below the top
+ * navigation, rather than over it.
+ */
 const useNotifications = () => {
   const { errorMessage, setErrorMessage } = useAppContext();
+  const vpAlerts = useVpAlerts();
 
   const [notifications, setNotifications] = useState([]);
 
@@ -126,7 +135,15 @@ const useNotifications = () => {
     setErrorMessage('');
   }, [errorMessage, notifications]);
 
-  return notifications;
+  return useMemo(() => [...vpAlerts, ...notifications], [vpAlerts, notifications]);
 };
+
+/**
+ * Whether the layout's notifications should stay in view while the page
+ * scrolls: true while a Virtual Participant alert is up, since one may be
+ * waiting on the user (a CAPTCHA, a sign-in). AppLayout keeps sticky
+ * notifications below the header named by `headerSelector`.
+ */
+export const useStickyNotifications = () => useVpAlerts().length > 0;
 
 export default useNotifications;

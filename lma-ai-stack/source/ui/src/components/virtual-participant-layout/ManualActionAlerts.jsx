@@ -5,18 +5,24 @@
  *
  * Global, app-shell-level alerts for the user's Virtual Participants. Listens
  * to onUpdateVirtualParticipant and surfaces:
- *   - MANUAL_ACTION_REQUIRED  → sticky Flashbar + browser Notification, with
+ *   - MANUAL_ACTION_REQUIRED  → warning flash + browser Notification, with
  *                               a one-click link to the VP's live VNC viewer.
- *   - FAILED                  → red Flashbar with errorMessage, dismissible.
+ *   - FAILED                  → red flash with errorMessage, dismissible.
  * Only the user's own VPs trigger alerts. Cleans up subscription on unmount.
+ *
+ * It renders none of the alerts itself. It provides them as Flashbar items
+ * through VpAlertsContext, and each page's layout shows them in its AppLayout
+ * `notifications` slot (useNotifications), sticky while any is up
+ * (useStickyNotifications). That slot sits below the top navigation, so an
+ * alert never covers the header or takes its clicks.
  */
 /* eslint-disable react/jsx-props-no-spreading */
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import PropTypes from 'prop-types';
 import { useNavigate } from 'react-router-dom';
 import { generateClient } from 'aws-amplify/api';
-import { Flashbar } from '@cloudscape-design/components';
-
 import { VIRTUAL_PARTICIPANT_PATH } from '../../routes/constants';
+import { VpAlertsContext } from '../../contexts/vp-alerts';
 
 const client = generateClient();
 
@@ -201,7 +207,7 @@ const playAlertChime = async () => {
   }
 };
 
-const ManualActionAlerts = () => {
+const ManualActionAlerts = ({ children = null }) => {
   const navigate = useNavigate();
   const [alerts, setAlerts] = useState([]);
   const dismissedRef = useRef(loadDismissed());
@@ -459,48 +465,41 @@ const ManualActionAlerts = () => {
     };
   }, [handleVPUpdate]);
 
-  if (!alerts.length) return null;
-  return (
-    <div
-      style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        zIndex: 5000,
-      }}
-    >
-      <Flashbar
-        items={[
-          // Synthetic "enable desktop notifications" prompt at the top.
-          // Shown only when the browser supports Notifications, permission
-          // hasn't been granted *or* denied (default = "not asked yet"),
-          // and the user hasn't dismissed it on this device.
-          ...(typeof Notification !== 'undefined' && notificationPermission === 'default' && !permPromptDismissed
-            ? [
-                {
-                  id: 'lma-vp-notif-permission',
-                  type: 'info',
-                  dismissible: true,
-                  onDismiss: () => {
-                    markPermPromptDismissed();
-                    setPermPromptDismissed(true);
-                  },
-                  header: 'Enable desktop notifications for VP alerts',
-                  content:
-                    'When a Virtual Participant needs your help (CAPTCHA, 2FA, sign-in challenge), ' +
-                    "LMA can show a desktop notification + audio chime so you don't miss it while in another tab.",
-                  buttonText: 'Enable notifications',
-                  onButtonClick: requestNotificationPermission,
-                },
-              ]
-            : []),
-          ...alerts,
-        ]}
-        stackItems
-      />
-    </div>
-  );
+  const items = useMemo(() => {
+    if (!alerts.length) return [];
+    return [
+      // Synthetic "enable desktop notifications" prompt at the top.
+      // Shown only when the browser supports Notifications, permission
+      // hasn't been granted *or* denied (default = "not asked yet"),
+      // and the user hasn't dismissed it on this device.
+      ...(typeof Notification !== 'undefined' && notificationPermission === 'default' && !permPromptDismissed
+        ? [
+            {
+              id: 'lma-vp-notif-permission',
+              type: 'info',
+              dismissible: true,
+              onDismiss: () => {
+                markPermPromptDismissed();
+                setPermPromptDismissed(true);
+              },
+              header: 'Enable desktop notifications for VP alerts',
+              content:
+                'When a Virtual Participant needs your help (CAPTCHA, 2FA, sign-in challenge), ' +
+                "LMA can show a desktop notification + audio chime so you don't miss it while in another tab.",
+              buttonText: 'Enable notifications',
+              onButtonClick: requestNotificationPermission,
+            },
+          ]
+        : []),
+      ...alerts,
+    ];
+  }, [alerts, notificationPermission, permPromptDismissed, requestNotificationPermission]);
+
+  return <VpAlertsContext.Provider value={items}>{children}</VpAlertsContext.Provider>;
+};
+
+ManualActionAlerts.propTypes = {
+  children: PropTypes.node,
 };
 
 export default ManualActionAlerts;

@@ -24,7 +24,7 @@ import { appLayoutLabels } from '../common/labels';
 import { NAV_HEADER } from '../common/navigation-items';
 import { meetingTitle } from '../common/meeting-header';
 import useAppContext from '../../contexts/app';
-import useNotifications from '../../hooks/use-notifications';
+import useNotifications, { useStickyNotifications } from '../../hooks/use-notifications';
 import { HOME_PATH, MY_CONSENTS_PATH, SHARED_MEETINGS_PATH, VOICE_ENROLLMENT_PATH } from '../../routes/constants';
 import ParticipantToolsPanel from './tools-panel';
 
@@ -103,6 +103,7 @@ export const ParticipantLayout = ({
   const { navigationOpen, setNavigationOpen } = useAppContext();
   const { pathname } = useLocation();
   const notifications = useNotifications();
+  const stickyNotifications = useStickyNotifications();
   const [ownToolsOpen, setOwnToolsOpen] = useState(false);
   const open = toolsOpen === undefined ? ownToolsOpen : toolsOpen;
   const setOpen = setToolsOpen || setOwnToolsOpen;
@@ -124,6 +125,7 @@ export const ParticipantLayout = ({
           breadcrumbs || <BreadcrumbGroup ariaLabel="Breadcrumbs" items={participantBreadcrumbs(pathname)} />
         }
         notifications={<Flashbar items={notifications} />}
+        stickyNotifications={stickyNotifications}
         tools={tools || <ParticipantToolsPanel pathname={pathname} />}
         toolsOpen={open}
         onToolsChange={({ detail }) => setOpen(detail.open)}

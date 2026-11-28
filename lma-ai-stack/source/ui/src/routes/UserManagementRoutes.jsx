@@ -13,12 +13,13 @@ import Breadcrumbs from '../components/user-management-page/breadcrumbs';
 import ToolsPanel from '../components/user-management-page/tools-panel';
 import { appLayoutLabels } from '../components/common/labels';
 import AdminOnly from '../components/common/AdminOnly';
-import useNotifications from '../hooks/use-notifications';
+import useNotifications, { useStickyNotifications } from '../hooks/use-notifications';
 import useAppContext from '../contexts/app';
 
 const UserManagementRoutes = () => {
   const { navigationOpen, setNavigationOpen } = useAppContext();
   const notifications = useNotifications();
+  const stickyNotifications = useStickyNotifications();
   const [toolsOpen, setToolsOpen] = useState(false);
 
   return (
@@ -31,6 +32,7 @@ const UserManagementRoutes = () => {
         onNavigationChange={({ detail }) => setNavigationOpen(detail.open)}
         breadcrumbs={<Breadcrumbs />}
         notifications={<Flashbar items={notifications} />}
+        stickyNotifications={stickyNotifications}
         tools={<ToolsPanel />}
         toolsOpen={toolsOpen}
         onToolsChange={({ detail }) => setToolsOpen(detail.open)}

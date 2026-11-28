@@ -7,7 +7,7 @@ import React, { useState } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { AppLayout, Flashbar } from '@cloudscape-design/components';
 
-import useNotifications from '../../hooks/use-notifications';
+import useNotifications, { useStickyNotifications } from '../../hooks/use-notifications';
 import { appLayoutLabels } from '../common/labels';
 
 import Navigation from './navigation';
@@ -21,6 +21,7 @@ import VirtualParticipantDetails from './VirtualParticipantDetails';
 const VirtualParticipantLayout = () => {
   const { navigationOpen, setNavigationOpen } = useAppContext();
   const notifications = useNotifications();
+  const stickyNotifications = useStickyNotifications();
   const [toolsOpen, setToolsOpen] = useState(false);
 
   return (
@@ -31,6 +32,7 @@ const VirtualParticipantLayout = () => {
       onNavigationChange={({ detail }) => setNavigationOpen(detail.open)}
       breadcrumbs={<Breadcrumbs />}
       notifications={<Flashbar items={notifications} />}
+      stickyNotifications={stickyNotifications}
       tools={<ToolsPanel />}
       toolsOpen={toolsOpen}
       onToolsChange={({ detail }) => setToolsOpen(detail.open)}

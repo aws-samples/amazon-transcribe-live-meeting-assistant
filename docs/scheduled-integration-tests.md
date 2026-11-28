@@ -87,6 +87,10 @@ checked no transcript. Under `--no-skips` a skip is a failure, so a lapsed secre
 or a dropped requirement reports red. Tests excluded by a marker (`live`) are
 still allowed to skip; see `integ-tests/conftest.py`.
 
+The job also sets `LMA_TEST_LARGE_EXPORT` = `1`, so the meeting-export case that
+writes more than 6 MB of transcript (`integ-tests/test_meeting_export.py`), which
+a local run skips unless asked for, runs every night.
+
 ### The build, without a Docker daemon
 
 `nightly_publish` sets **`SAM_BUILD_IN_CONTAINER=false`**, which builds the

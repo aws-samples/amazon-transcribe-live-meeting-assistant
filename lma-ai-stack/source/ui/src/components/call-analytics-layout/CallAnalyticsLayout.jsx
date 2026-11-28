@@ -9,7 +9,7 @@ import { AppLayout, Flashbar } from '@cloudscape-design/components';
 
 import { CallsContext } from '../../contexts/calls';
 
-import useNotifications from '../../hooks/use-notifications';
+import useNotifications, { useStickyNotifications } from '../../hooks/use-notifications';
 import useSplitPanel from '../../hooks/use-split-panel';
 import useCallsGraphQlApi from '../../hooks/use-calls-graphql-api';
 import useMeetingNotifications from '../../hooks/use-meeting-notifications';
@@ -37,6 +37,7 @@ const CallAnalyticsLayout = () => {
   const location = useLocation();
 
   const notifications = useNotifications();
+  const stickyNotifications = useStickyNotifications();
   const [toolsOpen, setToolsOpen] = useState(false);
   const [selectedItems, setSelectedItems] = useState([]);
 
@@ -125,6 +126,7 @@ const CallAnalyticsLayout = () => {
         onNavigationChange={({ detail }) => setNavigationOpen(detail.open)}
         breadcrumbs={<Breadcrumbs />}
         notifications={<Flashbar items={notifications} />}
+        stickyNotifications={stickyNotifications}
         // eslint-disable-next-line react/jsx-props-no-spreading
         {...drawerProps}
         splitPanelOpen={splitPanelOpen}
