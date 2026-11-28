@@ -1998,20 +1998,22 @@ def create_read_chat_attachment_tool(call_id: str, model_id: str, message_id: st
             return refused, 'not found' if attachment is None else 'not read'
         if read_count[0] >= meeting_attachments.MAX_READS_PER_ANSWER:
             return {'status': 'success', 'content': [{'text': meeting_attachments.TOO_MANY_READS}]}, 'read limit'
-        read_count[0] += 1
         content_type = attachment.get('ContentType')
         try:
             body = meeting_attachments.download(
                 attachment.get('DownloadUrl'), meeting_attachments.size_limit(content_type)
             )
-        except meeting_attachments.ContentGone:
-            return meeting_attachments.gone_result(attachment), 'content deleted'
+        except meeting_attachments.ContentGone as gone:
+            # 404, or 403 for a missing object read without list permission;
+            # a 403 can also be a permission of the signing role, hence the status.
+            return meeting_attachments.gone_result(attachment), f'content not found (HTTP {gone.status})'
         if body is None:
             return meeting_attachments.too_large_result(attachment), 'too large'
         result = meeting_attachments.content_result(
             attachment, body, accepts_files=accepts_files,
             name=meeting_attachments.document_name(valid_id, next(reads)),
         )
+        read_count[0] += 1  # only content actually given counts
         return result, f'{len(body)} bytes'
 
     @tool

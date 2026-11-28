@@ -282,7 +282,7 @@ def test_deleted_content_is_said_to_be_no_longer_stored(tool):
     read, _ = tool([attachment()])
     result = read("0000065000-ab")
     assert result["status"] == "success"
-    assert "no longer stored" in texts(result) and "retention" in texts(result)
+    assert "can no longer be read" in texts(result) and "retention" in texts(result)
 
 
 def test_with_capture_turned_off_a_missing_attachment_says_so(tool):
@@ -296,6 +296,21 @@ def test_a_text_only_model_is_given_a_text_file_as_text(tool):
     result = read("0000065000-ab")
     assert "document" not in result["content"][1]
     assert "The codeword is ORCHID." in result["content"][1]["text"]
+
+
+def test_a_text_only_model_is_given_at_most_the_text_cap_and_told_so(tool):
+    tool.bodies["body"] = b"y" * (meeting_attachments.MAX_TEXT_CHARS + 50)
+    read, _ = tool([attachment()], model_id=NOVA_MICRO)
+    result = read("0000065000-ab")
+    assert result["content"][1]["text"].count("y") == meeting_attachments.MAX_TEXT_CHARS
+    assert "from the start of the file" in result["content"][0]["text"]
+
+
+def test_a_read_that_gives_no_content_does_not_count_toward_the_limit(tool):
+    tool.bodies["body"] = meeting_attachments.ContentGone(404)
+    read, _ = tool([attachment()])
+    for _ in range(meeting_attachments.MAX_READS_PER_ANSWER + 1):
+        assert texts(read("0000065000-ab")) != meeting_attachments.TOO_MANY_READS
 
 
 @pytest.mark.parametrize("kind", ["png", "pdf", "xlsx"])

@@ -222,6 +222,10 @@ DATA_NOTE = (
 #: on every later model call of the same answer.
 MAX_READS_PER_ANSWER = 4
 
+#: Characters of a text file given as text to a model that reads no documents
+#: (Amazon Nova Micro, whose context is 128K tokens): about 50K tokens.
+MAX_TEXT_CHARS = 200_000
+
 TOO_MANY_READS = (
     f"At most {MAX_READS_PER_ANSWER} chat attachments can be read for one answer, and that many "
     "have been. Answer from what has been read, and from the titles and summaries of the rest."
@@ -229,7 +233,11 @@ TOO_MANY_READS = (
 
 
 class ContentGone(Exception):
-    """The attachment's record is there but its stored content is not: it has expired."""
+    """The attachment's record is there but its stored object cannot be read (403 or 404)."""
+
+    def __init__(self, status: int = 0):
+        super().__init__(status)
+        self.status = status
 
 
 def valid_attachment_id(value: Any) -> Optional[str]:
@@ -337,9 +345,9 @@ def unreadable_result(
 def gone_result(attachment: Mapping[str, Any]) -> Dict[str, Any]:
     """The answer for an attachment whose stored content has been deleted."""
     return _text_result(
-        f"{_label(attachment)}, is no longer stored: its content was deleted under the "
-        f"deployment's retention settings. {_summary_sentence(attachment)} Say so; do not guess "
-        "what else it held."
+        f"{_label(attachment)}, can no longer be read: its stored content was not found (the "
+        "retention settings delete attachments with the transcript). "
+        f"{_summary_sentence(attachment)} Say so; do not guess what else it held."
     )
 
 
@@ -386,8 +394,14 @@ def content_result(
         }
     else:
         text = body.decode("utf-8", errors="replace")
-        block = {"text": f"<attachment_content>\n{text}\n</attachment_content>"}
         header += " Its text is between the attachment_content tags."
+        if len(text) > MAX_TEXT_CHARS:
+            text = text[:MAX_TEXT_CHARS]
+            header += (
+                f" Only its first {MAX_TEXT_CHARS:,} characters are given: say that the answer "
+                "comes from the start of the file."
+            )
+        block = {"text": f"<attachment_content>\n{text}\n</attachment_content>"}
     return {"status": "success", "content": [{"text": header}, block]}
 
 
@@ -406,6 +420,6 @@ def download(url: Any, limit: int, timeout: float = 15.0) -> Optional[bytes]:
             body = response.read(limit + 1)
     except urllib.error.HTTPError as error:
         if error.code in (403, 404):
-            raise ContentGone() from error
+            raise ContentGone(error.code) from error
         raise
     return None if len(body) > limit else body
