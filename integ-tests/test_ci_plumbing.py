@@ -1603,15 +1603,21 @@ def test_the_large_meeting_export_case_is_opt_in() -> None:
     assert "LMA_TEST_LARGE_EXPORT=1" in mark.kwargs["reason"]
 
 
-def _job_lines(name: str, next_job: str) -> list[str]:
+def _job_lines(name: str) -> list[str]:
     """One job of .gitlab-ci.yml as lines, with comment lines removed.
 
-    Comments are dropped so a comment naming a variable cannot stand in for
-    the variable itself.
+    The job runs to the next top-level key, whichever job that is. Comments are
+    dropped so a comment naming a variable cannot stand in for the variable.
     """
     config = (Path(__file__).resolve().parents[1] / ".gitlab-ci.yml").read_text()
-    job = config.split(f"\n{name}:", 1)[1].split(f"\n{next_job}:", 1)[0]
-    return [line for line in job.splitlines() if not line.lstrip().startswith("#")]
+    lines = config.split(f"\n{name}:\n", 1)[1].splitlines()
+    job = []
+    for line in lines:
+        if re.match(r"^[^\s#].*:", line):
+            break
+        job.append(line)
+    assert job, f"could not locate the {name} job"
+    return [line for line in job if not line.lstrip().startswith("#")]
 
 
 def test_the_scheduled_run_includes_the_large_meeting_export_case() -> None:
@@ -1620,7 +1626,7 @@ def test_the_scheduled_run_includes_the_large_meeting_export_case() -> None:
     The case has no exempting marker, so under `--no-skips` its skip would fail
     the night rather than pass it; opting in here is what keeps it in the run.
     """
-    lines = [line.strip() for line in _job_lines("nightly_integ_tests", "zap_dast")]
+    lines = [line.strip() for line in _job_lines("nightly_integ_tests")]
     assert 'LMA_TEST_LARGE_EXPORT: "1"' in lines
     assert any("make integ-tests-nightly" in line for line in lines)
 
