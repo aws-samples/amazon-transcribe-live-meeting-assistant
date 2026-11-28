@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -169,3 +170,65 @@ def test_the_layers_selection_reads_the_updaters_segments() -> None:
     fresh = live_pass.new_segments(segments, 110, ["a", "b"])
     assert [s.segment_id for s in fresh] == ["late", "c"]
     assert live_pass.next_marker(fresh, 110) == 130
+
+
+def _gantt_board():
+    return rules.new_whiteboard(
+        whiteboard_id="wb2",
+        title="Release plan",
+        template="gantt",
+        instructions="",
+        assistant_updates=True,
+        panels=None,
+        source="user",
+        actor="u",
+        now=NOW,
+    )
+
+
+def test_each_whiteboard_is_shown_with_how_its_template_is_kept() -> None:
+    shown = {
+        b["whiteboardId"]: b
+        for b in json.loads(updater.whiteboards_block([board(), _gantt_board()]))
+    }
+    assert shown["wb1"]["purpose"].startswith(rules.TEMPLATES["decisions"]["description"])
+    assert "dateFormat YYYY-MM-DD" in shown["wb2"]["purpose"]
+    assert shown["wb2"]["panels"][0]["kind"] == rules.KIND_MERMAID
+
+
+def test_a_gantt_chart_from_the_model_is_written_to_the_plan_panel() -> None:
+    chart = (
+        "gantt\n  dateFormat YYYY-MM-DD\n  section Payments\n"
+        "  Refund API (Priya) :api, 2026-12-01, 5d\n  Load test (Sam) :after api, 2d"
+    )
+    panels, dropped = updater.plan_panels(_gantt_board(), [{"panelId": "plan", "content": chart}])
+    assert dropped == 0
+    assert panels[0]["Content"] == chart
+
+
+def test_the_request_gives_the_meetings_date_for_relative_dates() -> None:
+    _system, messages = updater.build_request(
+        prompt="",
+        meeting={"CreatedAt": "2026-11-27T15:04:05.000Z"},
+        boards=[_gantt_board()],
+        notes="",
+        transcript="[0:10] Priya: the API ships next Friday",
+        screen="",
+        elapsed_seconds=10,
+    )
+    first = messages[0]["content"][0]["text"]
+    assert "<meeting_date>Friday 2026-11-27 (UTC)</meeting_date>" in first
+
+
+def test_the_meetings_date_is_given_in_utc_and_left_out_when_unknown() -> None:
+    # An evening start in the Americas is the next day in UTC, and says so.
+    assert updater.meeting_date({"CreatedAt": "2026-11-27T20:00:00-05:00"}) == (
+        "Saturday 2026-11-28 (UTC)"
+    )
+    assert updater.meeting_date({"CreatedAt": "not a date"}) == ""
+    assert updater.meeting_date({}) == ""
+
+
+def test_the_model_is_told_every_rule_of_the_diagram_subset() -> None:
+    assert "gantt" in updater.FIXED_INSTRUCTIONS
+    assert "url( or @import" in updater.FIXED_INSTRUCTIONS

@@ -38,13 +38,54 @@ export const TEMPLATES = [
     label: 'Process diagram',
     description: 'A flowchart of the process or system being discussed, with notes.',
   },
+  {
+    name: 'architecture',
+    label: 'Architecture diagram',
+    description:
+      'The components of the system being discussed and how they connect, ' +
+      "with each component's responsibility and the design decisions.",
+  },
   { name: 'comparison', label: 'Comparison', description: 'The options being compared, with notes.' },
   { name: 'timeline', label: 'Timeline', description: 'Dates and milestones mentioned, as a timeline, with notes.' },
+  {
+    name: 'gantt',
+    label: 'Project plan (Gantt chart)',
+    description: 'The work agreed, with owners, dates and dependencies, as a Gantt chart.',
+  },
+  {
+    name: 'user_stories',
+    label: 'User stories',
+    description: 'The user stories discussed, each with its acceptance criteria.',
+  },
+  {
+    name: 'raci',
+    label: 'RACI matrix',
+    description: 'Who is Responsible, Accountable, Consulted and Informed for each piece of work.',
+  },
+  {
+    name: 'risks',
+    label: 'Risk register',
+    description: 'The risks raised, with their likelihood, impact, owner and mitigation.',
+  },
+  {
+    name: 'decision_log',
+    label: 'Decision log',
+    description:
+      'Each decision as a short decision record: its context, the decision, ' +
+      'its consequences and the alternatives considered.',
+  },
+  {
+    name: 'retrospective',
+    label: 'Retrospective',
+    description: 'What went well, what to improve, and the actions agreed.',
+  },
   { name: 'blank', label: 'Blank', description: 'One Markdown panel to start from.' },
 ];
 export const DEFAULT_TEMPLATE = 'decisions';
 
-export const MERMAID_TYPES = ['flowchart', 'graph', 'sequenceDiagram', 'timeline', 'mindmap'];
+export const MERMAID_TYPES = ['flowchart', 'graph', 'sequenceDiagram', 'timeline', 'mindmap', 'gantt'];
+/** The statements that carry CSS in the subset, by their first word, lowered (rules.STYLE_STATEMENTS). */
+const STYLE_STATEMENTS = ['style', 'classdef', 'linkstyle'];
 
 const byCreation = (a, b) =>
   String(a.CreatedAt || '').localeCompare(String(b.CreatedAt || '')) ||
@@ -120,15 +161,22 @@ export const mermaidProblem = (text) => {
   if (String(text).includes('%%{') || lines.includes('---')) {
     return 'A diagram may not hold Mermaid directives or front matter.';
   }
+  // A line may hold several statements separated by ";".
+  const statements = meaningful.flatMap((line) => line.split(';').map((part) => part.trim())).filter(Boolean);
   if (
-    meaningful.some((line) =>
-      ['click', 'callback', 'link', 'links', 'href'].includes(line.split(/\s+/)[0].toLowerCase()),
+    statements.some((statement) =>
+      ['click', 'callback', 'link', 'links', 'href'].includes(statement.split(/\s+/)[0].toLowerCase()),
     )
   ) {
     return 'A diagram may not hold click handlers, callbacks or links.';
   }
   const lowered = String(text).toLowerCase();
   if (/javascript\s*:/.test(lowered) || /<\s*\/?\s*[a-z!]/.test(lowered)) return 'A diagram may not hold HTML.';
+  const fetching = statements.find((statement) => {
+    const styled = statement.toLowerCase();
+    return STYLE_STATEMENTS.includes(styled.split(/\s+/)[0]) && (/url\s*\(/.test(styled) || styled.includes('@import'));
+  });
+  if (fetching) return `A diagram's styles may not fetch anything (url( or @import): ${fetching.slice(0, 80)}`;
   return null;
 };
 

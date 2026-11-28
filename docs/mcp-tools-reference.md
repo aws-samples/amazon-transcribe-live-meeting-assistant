@@ -384,8 +384,10 @@ you have to poll cheaply, and `format: "markdown"` for one Markdown document.
 
 ### create_meeting_whiteboard, update_meeting_whiteboard
 
-Make a whiteboard from a `template` (`decisions`, `process`, `comparison`, `timeline`
-or `blank`) or with the `panels` given, or change one. An update names the
+Make a whiteboard from a `template` (`decisions`, `process`, `architecture`,
+`comparison`, `timeline`, `gantt`, `user_stories`, `raci`, `risks`, `decision_log`,
+`retrospective` or `blank`; see
+[the templates](meeting-whiteboards.md#what-a-whiteboard-is)) or with the `panels` given, or change one. An update names the
 `baseVersion` it was made from, is refused if the whiteboard has moved on since, and
 takes the whole new list of `panels`. A panel the tool writes or changes is recorded
 as the caller's (`source: user`), so the assistant does not change it afterwards; send

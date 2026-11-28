@@ -195,3 +195,10 @@ def test_a_broken_rule_is_reported_before_anything_is_sent(meeting, appsync, arg
     with pytest.raises(ValueError, match=message):
         whiteboards.update_whiteboard(caller(OWNER), "m1", args)
     assert appsync.calls == []
+
+
+def test_the_create_tool_offers_every_template_the_rules_have() -> None:
+    import tool_definitions  # pylint: disable=import-outside-toplevel
+    from lma_whiteboards import rules  # pylint: disable=import-error,import-outside-toplevel
+
+    assert tool_definitions.WHITEBOARD_TEMPLATES == list(rules.TEMPLATES)

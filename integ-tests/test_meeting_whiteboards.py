@@ -24,7 +24,7 @@ import json
 
 import cognito_test_user
 import pytest
-from meeting_whiteboards_probe import USER_DECISION
+from meeting_whiteboards_probe import GANTT_CHART, USER_DECISION
 
 
 @pytest.fixture(scope="module")
@@ -64,6 +64,25 @@ def test_a_whiteboard_made_by_hand_is_the_users_and_costs_no_model_call(
         or "MeetingWhiteboards" not in observed["control_metering"]
     )
     assert observed["control_state"] == {}
+
+
+def test_a_project_plan_whiteboard_holds_a_gantt_chart(observed) -> None:
+    created = observed["gantt_created"]
+    assert created["Template"] == "gantt"
+    assert created["Title"] == "Project plan (Gantt chart)"
+    assert [(p["Title"], p["Kind"]) for p in created["Panels"]] == [
+        ("Plan", "mermaid"),
+        ("Dependencies and risks", "markdown"),
+        ("Notes", "markdown"),
+    ]
+    written = observed["gantt_written"]
+    assert written["Version"] == created["Version"] + 1
+    assert written["Panels"][0]["Content"] == GANTT_CHART
+    assert written["Panels"][0]["Source"] == "user"
+
+
+def test_a_diagram_style_that_fetches_anything_is_refused(observed) -> None:
+    assert observed["fetching_style_refused"] is True
 
 
 def test_the_assistant_makes_and_fills_the_default_whiteboard(observed) -> None:

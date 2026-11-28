@@ -28,6 +28,23 @@ original tools' descriptions do for the gateway's schema format, which has no
 
 from typing import Any, Dict, List
 
+#: The whiteboard templates, as lma_whiteboards.rules.TEMPLATES names them
+#: (test_whiteboard_tools checks the two agree).
+WHITEBOARD_TEMPLATES = [
+    "decisions",
+    "process",
+    "architecture",
+    "comparison",
+    "timeline",
+    "gantt",
+    "user_stories",
+    "raci",
+    "risks",
+    "decision_log",
+    "retrospective",
+    "blank",
+]
+
 READ_ONLY = {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True}
 WRITE = {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False}
 WRITE_IDEMPOTENT = {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True}
@@ -441,8 +458,9 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
     {
         "name": "create_meeting_whiteboard",
         "description": (
-            "Make a whiteboard on a meeting, from a template (decisions, process, comparison, "
-            "timeline or blank) or with the panels given. Panels you give are recorded as "
+            "Make a whiteboard on a meeting, from a template (decisions, process, architecture, "
+            "comparison, timeline, gantt, user_stories, raci, risks, decision_log, retrospective "
+            "or blank) or with the panels given. Panels you give are recorded as "
             "yours (source user), so the assistant does not change them; give a panel source "
             "assistant to let it. Requires a read-write API key."
         ),
@@ -453,8 +471,12 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
                 "title": {"type": "string", "description": "At most 120 characters"},
                 "template": {
                     "type": "string",
-                    "enum": ["decisions", "process", "comparison", "timeline", "blank"],
-                    "description": "decisions (the default), process, comparison, timeline or blank",
+                    "enum": WHITEBOARD_TEMPLATES,
+                    "description": (
+                        "decisions (the default), process, architecture, comparison, timeline, "
+                        "gantt (a project plan as a Gantt chart), user_stories, raci, risks (a "
+                        "risk register), decision_log, retrospective or blank"
+                    ),
                 },
                 "instructions": {
                     "type": "string",

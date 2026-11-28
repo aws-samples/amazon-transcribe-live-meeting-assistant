@@ -63,7 +63,9 @@ SOURCES = (SOURCE_USER, SOURCE_ASSISTANT)
 ASSISTANT_LABEL = "LMA assistant"
 
 #: The Mermaid diagram types a panel may hold, by the keyword that starts them.
-MERMAID_TYPES = ("flowchart", "graph", "sequenceDiagram", "timeline", "mindmap")
+MERMAID_TYPES = ("flowchart", "graph", "sequenceDiagram", "timeline", "mindmap", "gantt")
+#: The statements that carry CSS in the subset, by their first word, lowered.
+STYLE_STATEMENTS = ("style", "classdef", "linkstyle")
 
 
 class WhiteboardError(ValueError):
@@ -85,12 +87,18 @@ def _panel(panel_id: str, title: str, kind: str = KIND_MARKDOWN) -> Dict[str, st
     return {"PanelId": panel_id, "Title": title, "Kind": kind, "Content": ""}
 
 
-#: The shipped templates: a label, what it is for (shown when choosing one, and
-#: given to the assistant), and the panels a new whiteboard starts with.
+#: The shipped templates: a label, what it is for (``description``, shown when
+#: choosing one and given to the assistant), how the assistant keeps it
+#: (``guidance``, given to the assistant), and the panels a new whiteboard
+#: starts with. A page offers them in this order.
 TEMPLATES: Dict[str, Dict[str, Any]] = {
     "decisions": {
         "label": "Decisions and open questions",
         "description": "What was decided, what is still open, and notes worth keeping.",
+        "guidance": (
+            "Decisions: one bullet per decision, with who agreed it when that was said. "
+            "Open questions: what is unresolved; remove a question once it is answered."
+        ),
         "panels": [
             _panel("decisions", "Decisions"),
             _panel("open-questions", "Open questions"),
@@ -100,21 +108,140 @@ TEMPLATES: Dict[str, Dict[str, Any]] = {
     "process": {
         "label": "Process diagram",
         "description": "A flowchart of the process or system being discussed, with notes.",
+        "guidance": "Diagram: a Mermaid flowchart of the steps and decisions discussed.",
         "panels": [_panel("diagram", "Diagram", KIND_MERMAID), _panel("notes", "Notes")],
+    },
+    "architecture": {
+        "label": "Architecture diagram",
+        "description": (
+            "The components of the system being discussed and how they connect, with each "
+            "component's responsibility and the design decisions."
+        ),
+        "guidance": (
+            "Architecture: a Mermaid flowchart (flowchart LR) drawn like a C4 container "
+            "diagram: one node per person, system or component, labelled with its name and, "
+            "in brackets, its kind and technology when they were said, such as "
+            '"Orders API [Service: Python]"; a subgraph for each boundary (a system, an '
+            "account, a network); each arrow labelled with what flows along it or its "
+            "protocol. Components: a Markdown table with the columns Component, "
+            "Responsibility, Technology and Owner. Design decisions: each decision with its "
+            "reason and the alternatives rejected."
+        ),
+        "panels": [
+            _panel("architecture", "Architecture", KIND_MERMAID),
+            _panel("components", "Components"),
+            _panel("design-decisions", "Design decisions"),
+        ],
     },
     "comparison": {
         "label": "Comparison",
         "description": "The options being compared, as a Markdown table, with notes.",
+        "guidance": (
+            "Comparison: a Markdown table with one row per option and one column per "
+            "criterion discussed."
+        ),
         "panels": [_panel("comparison", "Comparison"), _panel("notes", "Notes")],
     },
     "timeline": {
         "label": "Timeline",
         "description": "Dates and milestones mentioned, as a Mermaid timeline, with notes.",
+        "guidance": "Timeline: a Mermaid timeline of the dates and events mentioned, in order.",
         "panels": [_panel("timeline", "Timeline", KIND_MERMAID), _panel("notes", "Notes")],
+    },
+    "gantt": {
+        "label": "Project plan (Gantt chart)",
+        "description": (
+            "The work agreed, with owners, dates and dependencies, as a Gantt chart, with "
+            "what the plan depends on and what could move it."
+        ),
+        "guidance": (
+            "Plan: a Mermaid gantt chart: after the gantt line, a 'dateFormat YYYY-MM-DD' line, then "
+            "one 'section' per workstream or owner, and one task per piece of work agreed, "
+            "written 'Task name (owner) :id, start, duration', where start is a date or "
+            "'after <id>' for a task that waits on another, and duration is like 3d or 2w. "
+            "A milestone is 'Name :milestone, id, date, 0d'. Use only dates and durations "
+            "that were said or follow from what was said; work a relative date such as "
+            "'next Friday' out from the meeting's date, and when a task has no date, list it "
+            "under Dependencies and risks rather than guess one. Dependencies and risks: "
+            "what the plan waits on, and what could move it."
+        ),
+        "panels": [
+            _panel("plan", "Plan", KIND_MERMAID),
+            _panel("dependencies", "Dependencies and risks"),
+            _panel("notes", "Notes"),
+        ],
+    },
+    "user_stories": {
+        "label": "User stories",
+        "description": "The user stories discussed, each with its acceptance criteria.",
+        "guidance": (
+            "Stories: a '### ' heading per story with a short name, then 'As a <role>, I "
+            "want <capability>, so that <benefit>.' and an 'Acceptance criteria' list whose "
+            "every item can be tested (Given / When / Then where it helps), with the "
+            "estimate, priority and owner when they were said. Open questions: what the "
+            "stories still need answered."
+        ),
+        "panels": [_panel("stories", "Stories"), _panel("open-questions", "Open questions")],
+    },
+    "raci": {
+        "label": "RACI matrix",
+        "description": (
+            "Who is Responsible, Accountable, Consulted and Informed for each piece of work."
+        ),
+        "guidance": (
+            "RACI: a Markdown table with the columns Work, Responsible, Accountable, "
+            "Consulted and Informed, one row per task or deliverable and one Accountable "
+            "person per row. Leave a cell empty rather than guess, and list each gap under "
+            "Notes."
+        ),
+        "panels": [_panel("raci", "RACI"), _panel("notes", "Notes")],
+    },
+    "risks": {
+        "label": "Risk register",
+        "description": "The risks raised, with their likelihood, impact, owner and mitigation.",
+        "guidance": (
+            "Risks: a Markdown table with the columns Risk, Likelihood, Impact, Owner, "
+            "Mitigation and Status. Likelihood and Impact are High, Medium or Low as "
+            "discussed; a risk closed in the meeting stays, with the Status Closed."
+        ),
+        "panels": [_panel("risks", "Risks"), _panel("notes", "Notes")],
+    },
+    "decision_log": {
+        "label": "Decision log",
+        "description": (
+            "Each decision as a short decision record: its context, the decision, its "
+            "consequences and the alternatives considered."
+        ),
+        "guidance": (
+            "Decision log: a '### ' heading per decision, numbered in the order made, with "
+            "the lines Status (Proposed, Accepted or Superseded), Context, Decision, "
+            "Consequences and Alternatives considered. A decision reversed later is marked "
+            "Superseded and names the decision that replaced it. Open questions: decisions "
+            "still to be made."
+        ),
+        "panels": [
+            _panel("decision-log", "Decision log"),
+            _panel("open-questions", "Open questions"),
+        ],
+    },
+    "retrospective": {
+        "label": "Retrospective",
+        "description": "What went well, what to improve, and the actions agreed.",
+        "guidance": (
+            "Went well and To improve: one bullet per point, a point raised again merged "
+            "into the first, with how many people raised it when that is clear. Actions: "
+            "one bullet per action agreed, with its owner and date when they were said."
+        ),
+        "panels": [
+            _panel("went-well", "Went well"),
+            _panel("to-improve", "To improve"),
+            _panel("actions", "Actions"),
+        ],
     },
     "blank": {
         "label": "Blank",
         "description": "One Markdown panel to start from.",
+        "guidance": "",
         "panels": [_panel("notes", "Notes")],
     },
 }
@@ -141,6 +268,14 @@ def template_listing() -> List[Dict[str, Any]]:
         }
         for name, template in TEMPLATES.items()
     ]
+
+
+def template_purpose(name: Any) -> str:
+    """What a template is for and how its panels are kept, as the assistant is told."""
+    template = TEMPLATES.get(str(name)) or {}
+    return " ".join(
+        part for part in (template.get("description"), template.get("guidance")) if part
+    )
 
 
 # ── single values ────────────────────────────────────────────────────────────
@@ -175,8 +310,10 @@ def check_mermaid(text: str) -> None:
 
     The subset: a diagram whose first line names one of MERMAID_TYPES, with no
     directives or front matter (which change how it is rendered), no click
-    handlers, callbacks or links (which make it interactive), and no HTML tags.
-    The page renders it in Mermaid's strict mode as well.
+    handlers, callbacks or links (which make it interactive), no HTML tags, and
+    no style statement (``style``, ``classDef``, ``linkStyle``) that fetches
+    anything (``url(`` or ``@import``); a label may say either. The page renders
+    it in Mermaid's strict mode as well.
     """
     lines = [line.strip() for line in text.splitlines()]
     meaningful = [line for line in lines if line and not line.startswith("%%")]
@@ -190,12 +327,21 @@ def check_mermaid(text: str) -> None:
     lowered = text.lower()
     if "%%{" in text or any(line == "---" for line in lines):
         raise _invalid("A diagram may not hold Mermaid directives or front matter")
-    for line in meaningful:
-        word = line.split(None, 1)[0].lower() if line.split() else ""
+    # A line may hold several statements separated by ";".
+    statements = [part.strip() for line in meaningful for part in line.split(";") if part.strip()]
+    for statement in statements:
+        word = statement.split(None, 1)[0].lower()
         if word in ("click", "callback", "link", "links", "href"):
             raise _invalid("A diagram may not hold click handlers, callbacks or links")
     if re.search(r"javascript\s*:", lowered) or re.search(r"<\s*/?\s*[a-z!]", lowered):
         raise _invalid("A diagram may not hold HTML")
+    for statement in statements:
+        word = statement.split(None, 1)[0].lower()
+        styled = statement.lower()
+        if word in STYLE_STATEMENTS and (re.search(r"url\s*\(", styled) or "@import" in styled):
+            raise _invalid(
+                "A diagram's styles may not fetch anything (url( or @import): " + statement[:80]
+            )
 
 
 def check_content(kind: str, value: Any) -> str:
@@ -729,6 +875,7 @@ __all__ = [
     "restore",
     "sort_whiteboards",
     "template_listing",
+    "template_purpose",
     "version_key",
     "whiteboard_markdown",
     "whiteboard_output",

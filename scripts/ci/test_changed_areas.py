@@ -400,6 +400,8 @@ def test_docs_only_refuses_an_instruction_path_whatever_its_rule() -> None:
         ),
         # The Participant chat buttons, held to the shipped prompts.
         ("lma-chat-button-config-stack/source/lambda_functions/ChatButtonConfig.json", "ui"),
+        # The UI's whiteboard templates and diagram types, held to the rules.
+        ("lma-ai-stack/source/lambda_layers/configuration_layer/lma_whiteboards/rules.py", "ui"),
         # The VP's inference catalogue copy, compared with the layer's.
         ("lma-virtual-participant-stack/backend/src/bedrock-inference-catalog.json", "ai_stack"),
         # The VP unit tests read these.

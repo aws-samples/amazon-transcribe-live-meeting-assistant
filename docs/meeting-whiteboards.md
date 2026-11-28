@@ -50,22 +50,34 @@ A whiteboard is an ordered list of named **panels**. Each panel is one of:
 - **Markdown**: lists, tables, short notes. It is shown without raw HTML and
   without images, and links open in a new tab.
 - **A diagram**, written in a subset of [Mermaid](https://mermaid.js.org/):
-  a `flowchart` (or `graph`), `sequenceDiagram`, `timeline` or `mindmap`. A
-  diagram may not hold Mermaid directives or front matter, `click`, `link` or
-  `callback` lines, or HTML; the server refuses one that does, and the page
-  renders diagrams in Mermaid's strict security mode. A diagram that cannot be
-  drawn is shown as its source.
+  a `flowchart` (or `graph`), `sequenceDiagram`, `timeline`, `mindmap` or
+  `gantt` chart. A diagram may not hold Mermaid directives or front matter,
+  `click`, `link` or `callback` lines, HTML, or a style that fetches anything
+  (`url(` or `@import`); the server refuses one that does, and the page renders
+  diagrams in Mermaid's strict security mode. A diagram that cannot be drawn is
+  shown as its source.
 
 A whiteboard is made from a **template**, which gives it its first panels and
-tells the assistant what it is for:
+tells the assistant what it is for and how to keep each panel (the shape of a
+table, the conventions of a diagram):
 
-| Template | Panels |
-|---|---|
-| Decisions and open questions (the default) | Decisions, Open questions, Notes |
-| Process diagram | Diagram (Mermaid flowchart), Notes |
-| Comparison | Comparison (a Markdown table), Notes |
-| Timeline | Timeline (Mermaid timeline), Notes |
-| Blank | Notes |
+| Template (`name`) | Panels | What the assistant keeps on it |
+|---|---|---|
+| Decisions and open questions (`decisions`, the default) | Decisions, Open questions, Notes | One bullet per decision, with who agreed it; questions removed once answered. |
+| Process diagram (`process`) | Diagram (Mermaid flowchart), Notes | The steps and decisions discussed. |
+| Architecture diagram (`architecture`) | Architecture (Mermaid flowchart), Components, Design decisions | A flowchart drawn like a C4 container diagram: a node per person, system or component labelled with its kind and technology in brackets, a subgraph per boundary, arrows labelled with what flows along them; a table of each component's responsibility, technology and owner; each design decision with its reason and the alternatives rejected. |
+| Comparison (`comparison`) | Comparison (a Markdown table), Notes | One row per option, one column per criterion. |
+| Timeline (`timeline`) | Timeline (Mermaid timeline), Notes | The dates and events mentioned, in order. |
+| Project plan (Gantt chart) (`gantt`) | Plan (Mermaid gantt chart), Dependencies and risks, Notes | One section per workstream or owner and one task per piece of work agreed, with its owner, start (a date, or after the task it waits on) and duration; only dates that were said or follow from what was said, an undated task listed under Dependencies and risks rather than given a guessed date. |
+| User stories (`user_stories`) | Stories, Open questions | Each story as "As a … I want … so that …" with testable acceptance criteria, and its estimate, priority and owner when said. |
+| RACI matrix (`raci`) | RACI, Notes | A table of who is Responsible, Accountable, Consulted and Informed for each piece of work, one Accountable per row, a cell left empty rather than guessed. |
+| Risk register (`risks`) | Risks, Notes | A table of each risk's likelihood, impact, owner, mitigation and status. |
+| Decision log (`decision_log`) | Decision log, Open questions | Each decision as a short decision record: status, context, decision, consequences and alternatives considered; a reversed decision marked Superseded. |
+| Retrospective (`retrospective`) | Went well, To improve, Actions | Points merged where they repeat; each action with its owner and date when said. |
+| Blank (`blank`) | Notes | |
+
+A template's panels start empty and are the assistant's. With the assistant's
+updates off, they are filled by hand like any other panel.
 
 A whiteboard can also carry **instructions** for the assistant, up to 1,000
 characters, such as "Track the pricing options discussed and compare them",

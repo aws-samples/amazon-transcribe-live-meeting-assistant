@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 # pylint: disable=import-error
@@ -69,7 +70,8 @@ FIXED_INSTRUCTIONS = (
     "or HTML.\n"
     f"- A diagram panel is at most {rules.MAX_MERMAID_CHARS} characters of Mermaid, starting "
     "with one of: " + ", ".join(rules.MERMAID_TYPES) + ". No directives (%%{...}%%), no click, "
-    "link or callback lines, no HTML.\n"
+    "link or callback lines, no HTML, and no style, classDef or linkStyle line that fetches "
+    "anything (url( or @import).\n"
     f"- Your notes to yourself are at most {MAX_NOTES_CHARS} characters: what the next run "
     "needs to know about the meeting so far.\n"
     f"- Answer by calling the {TOOL_NAME} tool once."
@@ -238,12 +240,11 @@ def whiteboards_block(boards: Sequence[Mapping[str, Any]]) -> str:
     """The whiteboards the run updates, as JSON: each panel marked yours or a user's."""
     shown = []
     for board in boards:
-        template = rules.TEMPLATES.get(str(board.get("Template")), {})
         shown.append(
             {
                 "whiteboardId": board.get("WhiteboardId"),
                 "title": board.get("Title"),
-                "purpose": template.get("description", ""),
+                "purpose": rules.template_purpose(board.get("Template")),
                 "instructions": board.get("Instructions") or "",
                 "panels": [
                     {
@@ -261,6 +262,19 @@ def whiteboards_block(boards: Sequence[Mapping[str, Any]]) -> str:
     return json.dumps(shown, ensure_ascii=False, indent=1)
 
 
+def meeting_date(meeting: Mapping[str, Any]) -> str:
+    """The weekday and date the meeting started, in UTC (``Friday 2026-11-27 (UTC)``), or
+    empty when unknown. No time zone of the meeting's own is stored, so it is said to be UTC."""
+    created = str(meeting.get("CreatedAt") or "")
+    try:
+        started = datetime.fromisoformat(created.replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    if started.tzinfo is not None:
+        started = started.astimezone(timezone.utc)
+    return started.strftime("%A %Y-%m-%d (UTC)")
+
+
 def build_request(  # pylint: disable=too-many-arguments
     *,
     prompt: str,
@@ -275,6 +289,10 @@ def build_request(  # pylint: disable=too-many-arguments
     caches a prompt prefix reads them from the cache."""
     system = [{"text": (prompt or DEFAULT_PROMPT) + FIXED_INSTRUCTIONS}]
     preparation = []
+    started = meeting_date(meeting)
+    if started:
+        # A relative date said in the meeting ("next Friday") is worked out from it.
+        preparation.append(f"<meeting_date>{started}</meeting_date>")
     if meeting.get("Agenda"):
         preparation.append(
             "<agenda>\n" + _clip(meeting.get("Agenda"), MAX_AGENDA_CHARS) + "\n</agenda>"

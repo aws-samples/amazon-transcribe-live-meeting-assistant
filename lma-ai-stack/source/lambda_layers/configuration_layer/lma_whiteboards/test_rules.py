@@ -109,6 +109,57 @@ def test_every_template_is_valid_and_listed() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "name, titles, kinds",
+    [
+        ("gantt", ["Plan", "Dependencies and risks", "Notes"], ["mermaid", "markdown", "markdown"]),
+        (
+            "architecture",
+            ["Architecture", "Components", "Design decisions"],
+            ["mermaid", "markdown", "markdown"],
+        ),
+        ("user_stories", ["Stories", "Open questions"], ["markdown", "markdown"]),
+        ("raci", ["RACI", "Notes"], ["markdown", "markdown"]),
+        ("risks", ["Risks", "Notes"], ["markdown", "markdown"]),
+        ("decision_log", ["Decision log", "Open questions"], ["markdown", "markdown"]),
+        (
+            "retrospective",
+            ["Went well", "To improve", "Actions"],
+            ["markdown", "markdown", "markdown"],
+        ),
+    ],
+)
+def test_each_board_type_starts_with_its_panels(name: str, titles: list, kinds: list) -> None:
+    b = rules.new_whiteboard(
+        whiteboard_id="x",
+        title="",
+        template=name,
+        instructions="",
+        assistant_updates=True,
+        panels=None,
+        source="user",
+        actor="u",
+        now=NOW,
+    )
+    assert [p["Title"] for p in b["Panels"]] == titles
+    assert [p["Kind"] for p in b["Panels"]] == kinds
+    assert b["Title"] == rules.TEMPLATES[name]["label"]
+
+
+def test_every_template_but_blank_tells_the_assistant_how_to_keep_each_panel() -> None:
+    for name, template in rules.TEMPLATES.items():
+        purpose = rules.template_purpose(name)
+        assert purpose.startswith(template["description"])
+        if name == "blank":
+            continue
+        for panel in template["panels"]:
+            if panel["Title"] != "Notes":
+                assert panel["Title"] in template["guidance"], (name, panel["Title"])
+    assert "dateFormat YYYY-MM-DD" in rules.template_purpose("gantt")
+    assert "As a <role>" in rules.template_purpose("user_stories")
+    assert rules.template_purpose("no-such-template") == ""
+
+
 # ── limits ───────────────────────────────────────────────────────────────────
 
 
@@ -163,6 +214,21 @@ def test_an_unknown_kind_or_source_is_refused() -> None:
         "timeline\n  title Launch\n  2026-12 : Beta",
         "mindmap\n  root((Plan))\n    Risks",
         "%% a comment first\nflowchart TD\n  a-->b",
+        (
+            "gantt\n  title Release 2.4\n  dateFormat YYYY-MM-DD\n  excludes weekends\n"
+            "  section Backend\n  Payments API (Priya) :api, 2026-12-01, 5d\n"
+            "  Load test (Sam) :load, after api, 2d\n  section Launch\n"
+            "  Code freeze :milestone, freeze, 2026-12-11, 0d"
+        ),
+        (
+            "flowchart LR\n  user([Shopper])\n  subgraph shop [Storefront]\n"
+            '    web["Web app [Container: React]"]\n    api["Orders API [Service: Python]"]\n'
+            "  end\n  db[(Orders DB)]\n  user -->|HTTPS| web --> api -->|SQL| db\n"
+            "  style db fill:#eef,stroke:#336"
+        ),
+        # A label may name a URL or an import; only a style statement may not fetch one.
+        'flowchart LR\n  api["Orders URL (v2)"] --> imp["@import job"]',
+        "gantt\n  dateFormat YYYY-MM-DD\n  Update URL (staging) :t1, 2026-12-01, 2d",
     ],
 )
 def test_diagrams_in_the_subset_are_accepted(text: str) -> None:
@@ -182,6 +248,22 @@ def test_diagrams_in_the_subset_are_accepted(text: str) -> None:
         ('flowchart TD\n  a["<img src=x>"] --> b', "HTML"),
         ('flowchart TD\n  a["javascript:void"] --> b', "HTML"),
         ('flowchart TD\n  a["JavaScript :void"] --> b', "HTML"),
+        (
+            "gantt\n  dateFormat YYYY-MM-DD\n  Task :t1, 2026-12-01, 3d\n  click t1 call go()",
+            "click",
+        ),
+        ('gantt\n  Task :t1, 2026-12-01, 3d\n  click t1 href "https://example.com"', "click"),
+        (
+            "%%{init: {'gantt': {'barHeight': 90}}}%%\ngantt\n  Task :t1, 2026-12-01, 1d",
+            "directive",
+        ),
+        ("flowchart TD\n  a-->b\n  style a fill:url(https://example.com/x.svg)", "fetch"),
+        ("flowchart TD\n  a-->b\n  classDef c fill:URL ( x )", "fetch"),
+        ("flowchart TD\n  a-->b\n  classDef c @import 'x'", "fetch"),
+        ("flowchart TD\n  a-->b\n  linkStyle 0 stroke:url(#g)", "fetch"),
+        ("flowchart TD\n  a-->b; style a fill:url(x)", "fetch"),
+        ("flowchart TD\n  a-->b; click a call go()", "click"),
+        ("gantt\n  Task <b>bold</b> :t1, 2026-12-01, 1d", "HTML"),
     ],
 )
 def test_diagrams_outside_the_subset_are_refused(text: str, message: str) -> None:

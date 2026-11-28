@@ -22,7 +22,9 @@ import {
 
 import MermaidDiagram from './MermaidDiagram';
 import WhiteboardMarkdown from './WhiteboardMarkdown';
-import { KIND_MERMAID, LIMITS, SOURCE_ASSISTANT, panelProblem } from './whiteboard-model';
+import { KIND_MERMAID, LIMITS, MERMAID_TYPES, SOURCE_ASSISTANT, panelProblem } from './whiteboard-model';
+
+const DIAGRAM_TYPES = `${MERMAID_TYPES.slice(0, -1).join(', ')} or ${MERMAID_TYPES.at(-1)}`;
 
 const formatTime = (iso) => {
   if (!iso) return '';
@@ -143,7 +145,7 @@ const WhiteboardPanel = ({ panel, isFirst, isLast, readOnly, assistantOn, onSave
             label={isDiagram ? 'Diagram (Mermaid)' : 'Content (Markdown)'}
             constraintText={
               isDiagram
-                ? `At most ${LIMITS.mermaid} characters. Starts with flowchart, graph, sequenceDiagram, timeline or mindmap.`
+                ? `At most ${LIMITS.mermaid} characters. Starts with ${DIAGRAM_TYPES}.`
                 : `At most ${LIMITS.markdown} characters.`
             }
           >
