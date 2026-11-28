@@ -202,8 +202,13 @@ summary run's own, so the deduplication key above removes it.
 
 **Publishing to the bus is best effort.** LMA publishes after the transition is
 stored, with a few quick retries, and never fails a meeting because the bus
-could not be reached; an unreachable bus adds at most a few seconds to
-processing the record that made the transition. An event that still cannot be published is logged
+could not be reached. One publish makes at most three attempts, each allowed a
+2-second connection and a 3-second read, so an unreachable bus adds at most
+about 15 seconds, plus the short backoff between attempts, to processing the
+record that made the transition. `Summary Ready` also waits up to 4 seconds for
+its in-app notification. Both bounds leave out the read of the meeting record
+that each meeting event is built from, which happens whether or not the bus can
+be reached. An event that still cannot be published is logged
 and counted in the `MeetingEventsPublishFailed` metric (see
 [Monitoring](#monitoring)), and is not sent again. A consumer that must not miss
 a transition reconciles by [polling](#polling-instead-of-subscribing) from time
@@ -241,7 +246,7 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: events.amazonaws.com
+              Service: !Sub "events.${AWS::URLSuffix}"
             Action: sns:Publish
             Resource: !Ref SummaryReadyTopic
             Condition:

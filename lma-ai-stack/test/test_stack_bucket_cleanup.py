@@ -19,6 +19,7 @@ The function's inline code is run against a fake S3 client:
 - with retention off, a Delete empties and deletes both buckets, recordings first;
 - OperationAborted, BucketNotEmpty and other transient errors are retried with
   backoff, other errors fail the request, NoSuchBucket counts as done;
+- a failure reason names the objects S3 would not delete, a few at most;
 - a retry that would leave too little time to answer CloudFormation fails
   the request instead;
 - Create and Update do nothing and keep the physical ID CloudFormation has.
@@ -26,6 +27,8 @@ The function's inline code is run against a fake S3 client:
 
 from __future__ import annotations
 
+import inspect
+import re
 import sys
 import types
 from pathlib import Path
@@ -190,6 +193,29 @@ def test_the_handler_properties_are_unchanged_so_updates_do_not_reach_it(resourc
     assert handler["Properties"]["ServiceToken"] == {"Fn::GetAtt": "S3BucketCleanupFunction.Arn"}
 
 
+def test_the_role_grants_the_s3_actions_the_function_uses(resources):
+    """ListBucketVersions for the paginator, DeleteObject and DeleteObjectVersion
+    for delete_objects, DeleteBucket, and ListBucket for the HeadBucket call
+    botocore makes when it has to find a bucket's Region."""
+    statements = resources["S3BucketCleanupRole"]["Properties"]["Policies"][0]["PolicyDocument"][
+        "Statement"
+    ]
+    actions = {action for statement in statements for action in statement["Action"]}
+    assert actions == {
+        "s3:ListBucket",
+        "s3:ListBucketVersions",
+        "s3:DeleteBucket",
+        "s3:DeleteObject",
+        "s3:DeleteObjectVersion",
+    }
+
+
+def test_the_function_calls_only_the_s3_operations_the_role_grants(resources):
+    calls = set(re.findall(r"\bs3\.(\w+)\(", _function_source(resources)))
+    assert calls == {"get_paginator", "delete_objects", "delete_bucket"}
+    assert "get_paginator('list_object_versions')" in _function_source(resources)
+
+
 # ── function code ───────────────────────────────────────────────────────────
 
 
@@ -211,13 +237,15 @@ class FakePaginator:
 
 class FakeS3:
     """Buckets hold (key, version) pairs; `delete_errors` queues errors per bucket
-    that DeleteBucket raises before it succeeds."""
+    that DeleteBucket raises before it succeeds; `object_errors` maps a bucket's
+    keys to the code DeleteObjects reports for them, and those objects stay."""
 
     def __init__(
         self, buckets: Dict[str, List[tuple]], delete_errors: Optional[Dict[str, List[str]]] = None
     ):
         self.buckets = {name: list(objects) for name, objects in buckets.items()}
         self.delete_errors = {name: list(codes) for name, codes in (delete_errors or {}).items()}
+        self.object_errors: Dict[str, Dict[str, str]] = {}
         self.deleted: List[str] = []
 
     def get_paginator(self, name: str) -> FakePaginator:
@@ -225,9 +253,15 @@ class FakeS3:
         return FakePaginator(self)
 
     def delete_objects(self, Bucket: str, Delete: Dict[str, Any]):  # noqa: N803
-        doomed = {(o["Key"], o["VersionId"]) for o in Delete["Objects"]}
+        refused = self.object_errors.get(Bucket, {})
+        doomed = {(o["Key"], o["VersionId"]) for o in Delete["Objects"] if o["Key"] not in refused}
         self.buckets[Bucket] = [o for o in self.buckets[Bucket] if o not in doomed]
-        return {}
+        errors = [
+            {"Key": o["Key"], "VersionId": o["VersionId"], "Code": refused[o["Key"]]}
+            for o in Delete["Objects"]
+            if o["Key"] in refused
+        ]
+        return {"Errors": errors} if errors else {}
 
     def delete_bucket(self, Bucket: str):  # noqa: N803
         if Bucket not in self.buckets:
@@ -243,6 +277,20 @@ class FakeS3:
 
 def _function_source(resources: Dict[str, Any]) -> str:
     return resources["S3BucketCleanupFunction"]["Properties"]["Code"]["ZipFile"]
+
+
+def _set_defaults(function: Any, **overrides: Any) -> None:
+    """Replace the named parameter defaults, keeping the others; a name that is
+    not a defaulted positional parameter fails rather than shifting the rest."""
+    defaulted = [
+        param
+        for param in inspect.signature(function).parameters.values()
+        if param.default is not inspect.Parameter.empty
+    ]
+    assert all(param.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD for param in defaulted)
+    unknown = set(overrides) - {param.name for param in defaulted}
+    assert not unknown, f"{function.__name__} has no defaulted parameter {sorted(unknown)}"
+    function.__defaults__ = tuple(overrides.get(param.name, param.default) for param in defaulted)
 
 
 @pytest.fixture
@@ -281,7 +329,7 @@ def run(resources, monkeypatch):
         exec(source, module.__dict__)  # noqa: S102
         sleeps = [] if sleeps is None else sleeps
         # `sleep` defaults to time.sleep, bound when the function was defined.
-        module.delete_bucket_with_retry.__defaults__ = (module.MAX_ATTEMPTS, sleeps.append, None)
+        _set_defaults(module.delete_bucket_with_retry, sleep=sleeps.append)
         event = {
             "RequestType": request_type,
             "LogicalResourceId": HANDLER,
@@ -375,6 +423,40 @@ def test_an_error_that_is_not_transient_fails_at_once(run):
     assert response["status"] == "FAILED"
     assert sleeps == []
     assert "logging" in s3.buckets
+
+
+def test_a_failure_reason_names_the_objects_that_could_not_be_deleted(run):
+    s3 = FakeS3({"logging": [("a", "1")], "recordings": [("r1", "1"), ("r2", "1")]})
+    s3.object_errors = {"recordings": {"r1": "AccessDenied", "r2": "AccessDenied"}}
+    response, sleeps, module = run("Delete", s3)
+    assert response["status"] == "FAILED"
+    assert len(sleeps) == module.MAX_ATTEMPTS - 1, "BucketNotEmpty is still retried"
+    assert "BucketNotEmpty" in response["reason"]
+    assert "r1 (AccessDenied)" in response["reason"]
+    assert "r2 (AccessDenied)" in response["reason"]
+    assert "logging" in s3.buckets
+
+
+def test_a_failure_reason_caps_the_objects_it_names(run):
+    keys = [f"k{i}" for i in range(10)]
+    s3 = FakeS3({"logging": [(key, "1") for key in keys]})
+    s3.object_errors = {"logging": {key: "AccessDenied" for key in keys}}
+    response, _, module = run("Delete", s3, recordings="")
+    assert response["status"] == "FAILED"
+    named = [key for key in keys if f"{key} (AccessDenied)" in response["reason"]]
+    assert len(named) == module.MAX_REPORTED_FAILURES
+    assert f"and {len(keys) - module.MAX_REPORTED_FAILURES} more" in response["reason"]
+    assert len(response["reason"]) <= 1024
+
+
+def test_set_defaults_rejects_an_unknown_parameter():
+    def function(a, b=1, c=2):
+        return a, b, c
+
+    with pytest.raises(AssertionError, match="no defaulted parameter"):
+        _set_defaults(function, d=3)
+    _set_defaults(function, c=5)
+    assert function(0) == (0, 1, 5)
 
 
 def test_a_bucket_that_is_already_gone_counts_as_deleted(run):
