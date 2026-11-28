@@ -14,6 +14,7 @@ import { consentAsText } from './meeting-consent';
 import { meetingTitle } from './meeting-header';
 import { fetchKeyframeThumbnails } from './keyframe-thumbnails';
 import { buildPdf } from './pdf-export';
+import { browserTextRasterizer } from './text-raster';
 
 const logger = new ConsoleLogger('download-func');
 
@@ -71,7 +72,7 @@ export const exportToExcel = async (data, nameFile) => {
 };
 
 // Hands a file to the browser to save.
-const saveBlob = (blob, fileName) => {
+export const saveBlob = (blob, fileName) => {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
@@ -548,11 +549,11 @@ export const exportBlocksToPdfFile = async (
   blocks,
   nameFile,
   title,
-  { loadPdfLibrary = () => import('jspdf') } = {},
+  { loadPdfLibrary = () => import('jspdf'), rasterizeText = null } = {},
 ) => {
   try {
     const { jsPDF } = await loadPdfLibrary();
-    const doc = await buildPdf(blocks, { jsPDF, title });
+    const doc = await buildPdf(blocks, { jsPDF, title, rasterizeText });
     saveBlob(doc.output('blob'), `${nameFile}.pdf`);
   } catch (error) {
     logger.error('Error exporting to PDF:', error);
@@ -566,13 +567,33 @@ export const downloadSummaryAsDocx = async (meeting, consent = null, options = {
 };
 
 /** The summary as a PDF: the Word document's content, thumbnails included. */
+// Text in a script the PDF's standard fonts lack is drawn as pictures of its
+// lines in the summary PDF (text-raster.js); in a test's document there is no
+// canvas, and such text is written as pdfSafeText writes it.
+const summaryPdfOptions = (options) => ({ rasterizeText: browserTextRasterizer(), ...options });
+
 export const downloadSummaryAsPdf = async (meeting, consent = null, options = {}) => {
   await exportBlocksToPdfFile(
     await summaryDocBlocks(meeting, consent, options),
     `Summary-${meeting.callId}`,
     meetingTitle(meeting.callId),
-    options,
+    summaryPdfOptions(options),
   );
+};
+
+/**
+ * The summary PDF downloadSummaryAsPdf saves, as a Blob, for the meeting pack
+ * and the email draft. Rejects when it cannot be built.
+ */
+export const summaryPdfBlob = async (meeting, consent = null, options = {}) => {
+  const { loadPdfLibrary = () => import('jspdf'), rasterizeText } = summaryPdfOptions(options);
+  const { jsPDF } = await loadPdfLibrary();
+  const doc = await buildPdf(await summaryDocBlocks(meeting, consent, options), {
+    jsPDF,
+    title: meetingTitle(meeting.callId),
+    rasterizeText,
+  });
+  return doc.output('blob');
 };
 
 /**

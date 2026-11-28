@@ -3079,6 +3079,8 @@ export const CallPanel = ({
             callTranscriptPerCallId={callTranscriptPerCallId}
             keyframeCount={keyframes.count}
             chapters={chapters}
+            whiteboards={whiteboards.items}
+            whiteboardsWritable={whiteboards.writable}
             getCallDetailsFromCallIds={getCallDetailsFromCallIds}
             setToolsOpen={setToolsOpen}
             onShowSpeakers={speakerNamesReadOnly ? undefined : () => setActiveTab(TAB_DETAILS)}

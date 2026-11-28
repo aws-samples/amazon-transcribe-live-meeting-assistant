@@ -131,37 +131,6 @@ describe('runSummaryAction', () => {
   });
 });
 
-describe('the Email summary entry', () => {
-  const openedLink = async (item) => {
-    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
-    try {
-      expect(await runSummaryAction('email', item, CONSENT)).toBe(true);
-      return open.mock.calls[0][0];
-    } finally {
-      open.mockRestore();
-    }
-  };
-
-  it("addresses the email to the meeting's participants", async () => {
-    const link = await openedLink({
-      ...ITEM,
-      participants: [
-        { name: 'Ana Lima', email: 'ana@example.com' },
-        { name: '', email: 'bob+lma@example.com' },
-        { name: 'Ana again', email: 'ANA@example.com' },
-        { name: 'No address', email: '' },
-      ],
-    });
-    expect(link.startsWith('mailto:ana@example.com,bob%2Blma@example.com?subject=')).toBe(true);
-    expect(link).toContain(`subject=${encodeURIComponent(ITEM.callId)}&body=`);
-  });
-
-  it('leaves the recipients empty for a meeting with no participant list', async () => {
-    expect((await openedLink(ITEM)).startsWith(`mailto:?subject=${encodeURIComponent(ITEM.callId)}&body=`)).toBe(true);
-    expect((await openedLink({ ...ITEM, participants: null })).startsWith('mailto:?subject=')).toBe(true);
-  });
-});
-
 describe('runTranscriptDownload', () => {
   it('builds the PDF with the consent record', async () => {
     expect(await runTranscriptDownload('pdf', TRANSCRIPT, ITEM, CONSENT)).toBe(true);
@@ -192,14 +161,41 @@ describe('downloadMenuItems', () => {
       'Transcript',
       'Recordings',
       'Screen share',
+      'Whiteboards (PDF)',
       'Chat attachments',
+      'Meeting pack (PDF files)…',
       'Meeting export (.json)',
       'Everything (.zip)',
     ]);
-    expect(items[5]).toMatchObject({ id: 'archive:EXPORT' });
-    expect(items[5].disabled).toBeFalsy();
-    expect(items[6]).toMatchObject({ id: 'archive:EVERYTHING' });
-    expect(items[6].disabled).toBeFalsy();
+    expect(items[7]).toMatchObject({ id: 'archive:EXPORT' });
+    expect(items[7].disabled).toBeFalsy();
+    expect(items[8]).toMatchObject({ id: 'archive:EVERYTHING' });
+    expect(items[8].disabled).toBeFalsy();
+  });
+
+  it('offers the whiteboards as a PDF only when the meeting has one, and says why not', () => {
+    const entry = (meeting) => downloadMenuItems(meeting).find((item) => item.id === 'pack:whiteboards');
+    expect(entry(BASE)).toMatchObject({ disabled: true, disabledReason: 'This meeting has no whiteboards.' });
+    expect(entry({ ...BASE, whiteboardsReason: 'Deleted with the transcript.' }).disabledReason).toBe(
+      'Deleted with the transcript.',
+    );
+    expect(entry({ ...BASE, whiteboardCount: 2 }).disabled).toBe(false);
+  });
+
+  it('offers the meeting pack when the meeting has any of its files, and says why not otherwise', () => {
+    const entry = (meeting) => downloadMenuItems(meeting).find((item) => item.id === 'pack:dialog');
+    expect(entry({ ...BASE, hasSummary: false })).toMatchObject({
+      disabled: true,
+      disabledReason: 'This meeting has no summary, slides or whiteboards yet.',
+    });
+    expect(entry(BASE).disabled).toBe(false);
+    expect(entry({ ...BASE, hasSummary: false, keyframeCount: 1 }).disabled).toBe(false);
+    expect(entry({ ...BASE, hasSummary: false, whiteboardCount: 1 }).disabled).toBe(false);
+  });
+
+  it('names the summary email entry Email participants…', () => {
+    const summary = group(downloadMenuItems(BASE), 'Summary').items;
+    expect(summary.at(-1)).toMatchObject({ id: 'summary:email', text: 'Email participants…' });
   });
 
   it('disables the transcript, with the reason, once it was deleted', () => {

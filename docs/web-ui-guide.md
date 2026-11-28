@@ -174,11 +174,12 @@ assistant is a panel beside the tabs, on every tab; see
     (.docx)**, **PDF (.pdf)**, **Web page (.html)**, **Markdown (.md)** and
     **Plain text (.txt)**, the transcript also as **Excel (.xlsx)**, and each
     copied to the clipboard as Markdown (**Copy to clipboard (Markdown)**; the
-    header confirms the copy). The summary can also be sent with **Email
-    summary (beta)**, which opens your mail client with the summary as the
-    body and the addresses on the meeting's
-    [participant list](virtual-participant.md#participant-list) in **To:**. The
-    transcript's entries are disabled, with the reason,
+    header confirms the copy). **Summary › Email participants…** prepares an
+    email to the addresses on the meeting's
+    [participant list](virtual-participant.md#participant-list), with the
+    meeting's PDF files attached; see
+    [Meeting pack and Email participants](#meeting-pack-and-email-participants).
+    The transcript's entries are disabled, with the reason,
     once the Retention settings have deleted it.
   - **Recordings** — the **Audio** and **Video** recordings, one entry per
     session for a meeting the Virtual Participant joined again
@@ -187,8 +188,14 @@ assistant is a panel beside the tabs, on every tab; see
   - **Screen share** — **Slides (PDF)**, the deck **Export slides (PDF)** on the
     **Screen share** tab prints, and **Key frames (.zip)**, every key frame's
     picture.
+  - **Whiteboards (PDF)** — every whiteboard of the meeting as one PDF file,
+    built in the browser; see
+    [Meeting Whiteboards › As a PDF](meeting-whiteboards.md#as-a-pdf).
   - **Chat attachments** — each stored attachment, read again for a fresh link
     and saved rather than opened, and **All attachments (.zip)**.
+  - **Meeting pack (PDF files)…** — the Summary, Slides and Whiteboards PDFs
+    together, as one .zip or as separate files; see
+    [Meeting pack and Email participants](#meeting-pack-and-email-participants).
   - **Meeting export (.json)** — the [meeting export](meeting-export.md), one
     structured record of the meeting, prepared on the server like the archives
     and offered as a link valid for ten minutes.
@@ -775,11 +782,77 @@ The archive is a temporary copy: it is deleted a day after it was written, and
 when the meeting is deleted. See
 [Privacy and Data Handling](privacy-and-data-handling.md#copies-that-follow-their-own-lifetime).
 
+The meeting pack's PDF files are not in the archive either, since they are built
+in the browser; use **Download › Meeting pack (PDF files)…**.
+
+### Meeting pack and Email participants
+
+**Download › Meeting pack (PDF files)…** and **Download › Summary › Email
+participants…** put the meeting's PDF files together, built in your browser from
+what the meeting page shows:
+
+| File | What it is |
+|---|---|
+| **Summary (PDF)** | The PDF **Download › Summary › PDF (.pdf)** saves, without the meeting's consent record, which stays in that download |
+| **Slides (PDF)** | The pages of the deck **Screen share › Slides (PDF)** prints: a cover, then a landscape page per frame of the shared screen with its label, picture, time and text. Each picture is scaled to at most 1,600 pixels wide |
+| **Whiteboards (PDF)** | Every whiteboard, as **Download › Whiteboards (PDF)** saves it ([Meeting Whiteboards › As a PDF](meeting-whiteboards.md#as-a-pdf)) |
+
+The Slides and Whiteboards PDFs open with a cover giving the meeting's name,
+date, owner, ID and duration; every page is numbered at its foot.
+
+Each dialog lists the three files with a box to tick, every file the meeting has
+ticked. A file the meeting does not have cannot be ticked, and says why: the
+meeting has no summary yet, nothing was shared on screen (or every key frame is of
+the camera, or repeats another), or the meeting has no whiteboards (or its
+transcript was deleted, and its whiteboards with it). A summary is still offered
+after the transcript is deleted. Each ticked file is built as soon as the dialog
+opens, with its progress, then its size, and the total below them; a file that
+could not be built says so and offers **Try again**. While the meeting is still
+going on, the dialog says the files are a snapshot of it as it is then. What
+was built is kept while the meeting page is open, and built again when what it
+came from has changed (the summary or the speakers' names, the number of key frames
+or the chapters, a whiteboard).
+
+- **Meeting pack** saves the chosen files as **One .zip file** or as **Separate
+  files**; for separate files the browser may ask once to allow several
+  downloads.
+- **Email participants** shows the recipients, the people on the meeting's
+  participant list with an email address (each address once), any of whom can be
+  taken off; the files to attach; and the size of the email once encoded, about
+  a third more than the files. Above 20 MB it warns that many mail services
+  refuse a message that large, and suggests unticking the slides.
+  - **Create email draft (.eml)** saves an email draft: To: the recipients, the
+    subject *<meeting name> summary*, the summary as the body (the meeting's
+    name and facts, then every section in the
+    [reading order](#summary-section-order), as HTML and as plain text), and the
+    chosen files attached. Open it in your mail app to edit and send it. The
+    file is marked `X-Unsent: 1`, the header Outlook reads to open a saved
+    message as a draft rather than as a message received. A mail app that does
+    not read that header opens the file as a received message, which most can
+    turn into a new one to send (for example **Edit as New Message** in
+    Thunderbird, or **Send Again** in Apple Mail).
+  - **Open in mail app (no attachments)** opens your mail app with a new
+    message to the same recipients, with the subject *<meeting name> summary* (it
+    was the Meeting ID) and the summary as its body. A message opened this way cannot carry
+    attachments: the dialog then offers **Download the files**, to attach by
+    hand.
+
+Nothing is sent from LMA, and nothing is stored on the server: the files and the
+draft are saved to your computer. The dialogs, like the rest of the Download
+menu, are on the page of everyone who can download the meeting (its owner,
+Admins, and Users it is shared with); a Participant's page has no Download menu.
+
+### Text in PDF files
+
 The PDF files are built in the browser, and their text can be selected and
 searched. They are set in the standard PDF fonts, which cover Western European
-characters: other characters lose their accents or are written as `?`, so a
-meeting in another script reads better in the Word download. A long transcript
-is laid out in steps, so the page keeps responding while the PDF is built.
+characters. In the summary, slides and whiteboards PDFs, a line holding any other
+character (another script, an emoji) is drawn as a picture of the line in your
+browser's own fonts, so it reads as written but cannot be selected or searched;
+right-to-left lines are set against the right margin. In the transcript PDF such
+a character loses its accent or is written as `?`, so a meeting in another script
+reads better in the transcript's Word download. A long transcript is laid out in
+steps, so the page keeps responding while the PDF is built.
 
 All export formats include speaker attribution and timestamps for each segment,
 and every channel the meeting has. A meeting chat message is under its sender

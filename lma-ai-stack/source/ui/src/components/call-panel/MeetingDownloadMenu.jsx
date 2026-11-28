@@ -18,6 +18,11 @@
  * An archive's link is taken off the page shortly before it lapses (an hour
  * after it was signed; ten minutes for the meeting export), and the page says
  * to choose the download again for a new link.
+ *
+ * Whiteboards (PDF), Meeting pack… and Summary › Email participants… build
+ * their PDF files in the browser (meeting-pack.js, use-meeting-pack.js): the
+ * first saves the Whiteboards PDF, the other two open MeetingPackModal. What
+ * has been built is kept while the page is open, for either dialog.
  */
 import React, { useEffect, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
@@ -32,6 +37,10 @@ import { meetingTitle } from '../common/meeting-header';
 import { loadKeyframePage } from '../../hooks/use-chat-keyframe-links';
 import { loadChatAttachments } from '../../hooks/use-chat-attachments';
 import { prepareAndWaitForArchive } from '../../hooks/use-meeting-archive';
+import { saveBlob } from '../common/download-func';
+import MeetingPackModal from './MeetingPackModal';
+import useMeetingPack from './use-meeting-pack';
+import { PART_WHITEBOARDS, WHITEBOARDS_DELETED, defaultBuilders } from './meeting-pack';
 import {
   downloadMenuItems,
   openSignedFile,
@@ -73,9 +82,31 @@ const MeetingDownloadMenu = ({
   sign = generateS3PresignedUrl,
   openFile = openSignedFile,
   printSlides = undefined,
+  whiteboards = [],
+  whiteboardsWritable = true,
+  packBuilders = defaultBuilders,
+  saveFile = saveBlob,
 }) => {
   const { currentCredentials } = useAppContext() || {};
   const { callId } = item;
+
+  // The meeting pack's PDF files, built in the browser and kept while the page is open.
+  const participantNames = speakers.map((speaker) => speaker.label);
+  const pack = useMeetingPack(
+    {
+      item,
+      participants: participantNames,
+      whiteboards,
+      keyframeCount,
+      chapters,
+      loadFrames: loadKeyframePage,
+    },
+    { builders: packBuilders },
+  );
+  const [packDialog, setPackDialog] = useState(null);
+  const currentCallId = useRef(callId);
+  currentCallId.current = callId;
+  const whiteboardsReason = !whiteboards.length && !whiteboardsWritable ? WHITEBOARDS_DELETED : null;
 
   // The stored attachments, for an entry each; read when the page opens, and
   // again every minute while the meeting is going on.
@@ -115,6 +146,7 @@ const MeetingDownloadMenu = ({
   useEffect(() => {
     setArchive(null);
     setNotice(null);
+    setPackDialog(null);
     return () => {
       archiveRun.current += 1;
     };
@@ -160,7 +192,23 @@ const MeetingDownloadMenu = ({
     videoUrls,
     keyframeCount,
     attachments,
+    whiteboardCount: whiteboards.length,
+    whiteboardsReason,
   });
+
+  const saveWhiteboardsPdf = async () => {
+    setNotice({ type: 'loading', text: 'Preparing the whiteboards PDF…' });
+    const askedFor = callId;
+    const built = await pack.ensure(PART_WHITEBOARDS);
+    // Another meeting opened meanwhile: this one's file is not saved on its page.
+    if (currentCallId.current !== askedFor) return;
+    if (built?.status === 'ready') {
+      saveFile(built.blob, built.filename);
+      setNotice({ type: 'success', text: `Saved ${built.filename}`, fades: true });
+    } else {
+      setNotice({ type: 'error', text: built?.message || 'The whiteboards PDF could not be prepared.' });
+    }
+  };
 
   const startArchive = async (contents) => {
     archiveRun.current += 1;
@@ -202,7 +250,12 @@ const MeetingDownloadMenu = ({
 
   const onItemClick = async ({ detail }) => {
     const [kind, rest] = parseMenuId(detail.id);
-    if (kind === 'summary' || kind === 'transcript') {
+    if (kind === 'summary' && rest === 'email') {
+      setPackDialog('email');
+    } else if (kind === 'pack') {
+      if (rest === 'whiteboards') await saveWhiteboardsPdf();
+      else setPackDialog('pack');
+    } else if (kind === 'summary' || kind === 'transcript') {
       const done =
         kind === 'summary'
           ? await runSummaryAction(rest, item, consent, { participants: speakers.map((speaker) => speaker.label) })
@@ -273,6 +326,20 @@ const MeetingDownloadMenu = ({
       <ButtonDropdown items={items} onItemClick={onItemClick} expandableGroups>
         Download
       </ButtonDropdown>
+      {packDialog && (
+        <MeetingPackModal
+          mode={packDialog}
+          visible
+          onDismiss={() => setPackDialog(null)}
+          item={item}
+          pack={pack}
+          participants={participantNames}
+          whiteboardCount={whiteboards.length}
+          whiteboardsDeleted={!whiteboardsWritable}
+          keyframeCount={keyframeCount}
+          save={saveFile}
+        />
+      )}
     </>
   );
 };
@@ -293,6 +360,12 @@ MeetingDownloadMenu.propTypes = {
   sign: PropTypes.func,
   openFile: PropTypes.func,
   printSlides: PropTypes.func,
+  // eslint-disable-next-line react/forbid-prop-types
+  whiteboards: PropTypes.array,
+  whiteboardsWritable: PropTypes.bool,
+  // eslint-disable-next-line react/forbid-prop-types
+  packBuilders: PropTypes.object,
+  saveFile: PropTypes.func,
 };
 
 export default MeetingDownloadMenu;

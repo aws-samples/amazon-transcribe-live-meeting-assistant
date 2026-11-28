@@ -41,6 +41,7 @@ configuration preset leaves On for new meetings off.
 - [Cost](#cost)
 - [Reading and writing them over MCP](#reading-and-writing-them-over-mcp)
 - [In the meeting export](#in-the-meeting-export)
+- [As a PDF](#as-a-pdf)
 - [API](#api)
 - [Limits](#limits)
 - [Limitations](#limitations)
@@ -381,6 +382,47 @@ default: each whiteboard as it is now (not its earlier versions), with its
 panels. Once the transcript is deleted the list is empty. The Everything (.zip)
 archive also holds each whiteboard as `whiteboards/<n>-<title>.md`, diagrams in
 `mermaid` code blocks.
+
+## As a PDF
+
+**Download › Whiteboards (PDF)** on the meeting page saves every whiteboard of
+the meeting as one PDF file, built in the browser from the whiteboards the page
+shows; it is also one of the files of the
+[meeting pack and Email participants](web-ui-guide.md#meeting-pack-and-email-participants).
+The entry is disabled, with the reason, for a meeting with no whiteboard, or
+whose transcript (and whiteboards with it) has been deleted. While the meeting
+is going on the file is a snapshot of the whiteboards as they are then, and its
+cover says so.
+
+The file opens with a cover: the meeting's name, date, owner, ID and duration,
+the number of whiteboards, and a list of them with the page each starts on, each
+a link to it. Then each whiteboard starts a page of its own, with its title, its
+template, version, when and by whom it last changed, and its instructions for
+the assistant, then its panels in their order, one below another, each with its
+title, whether the assistant keeps it or who last edited it, and when. Every page
+is numbered at its foot.
+
+A panel is drawn by its kind, whatever template it came from:
+
+- A **diagram** panel is drawn by the same Mermaid renderer as the Whiteboards
+  tab, with the same strict security settings and the same sanitizing of the
+  drawing, and placed in the PDF as a picture at two and a half times its size
+  on screen, so it prints sharply. It is drawn in Mermaid's light theme on
+  white, whatever theme the page is shown in. A diagram wider than a portrait
+  page shows well (a Gantt chart, a wide flowchart) gets a landscape page, with
+  its title. A diagram that cannot be drawn, or that is outside the subset a
+  panel may hold, is written as its source, under the same note the tab shows.
+- Any other panel is Markdown, rendered by the same renderer as the tab (HTML in
+  the text is shown as text, and no picture is fetched) and laid out as text:
+  headings, paragraphs with bold, italic, struck-out text and code, links with
+  their address, bulleted and numbered lists, task lists with a box ticked or
+  not, quotes, code blocks with their spacing kept, and tables. A table's columns
+  share the page by what is in them; a table with many columns gets a landscape
+  page, and a table longer than a page continues on the next with its header
+  again, so no cell is cut off.
+
+Text in a script the standard PDF fonts do not hold is drawn as pictures of its
+lines; see [Text in PDF files](web-ui-guide.md#text-in-pdf-files).
 
 ## API
 

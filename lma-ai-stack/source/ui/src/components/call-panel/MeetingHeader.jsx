@@ -129,6 +129,8 @@ const MeetingHeader = ({
   callTranscriptPerCallId,
   keyframeCount = 0,
   chapters = [],
+  whiteboards = [],
+  whiteboardsWritable = true,
   getCallDetailsFromCallIds = undefined,
   setToolsOpen = undefined,
   onShowSpeakers = undefined,
@@ -185,6 +187,8 @@ const MeetingHeader = ({
                   callTranscriptPerCallId={callTranscriptPerCallId}
                   keyframeCount={keyframeCount}
                   chapters={chapters}
+                  whiteboards={whiteboards}
+                  whiteboardsWritable={whiteboardsWritable}
                 />,
                 <DiagnoseButton key="diagnose" callId={item.callId} resourceLabel={title} />,
                 <ButtonDropdown
@@ -327,6 +331,11 @@ MeetingHeader.propTypes = {
   /** The meeting's chapters, which label the slide deck. */
   // eslint-disable-next-line react/forbid-prop-types
   chapters: PropTypes.array,
+  /** The meeting's whiteboards, for Whiteboards (PDF) and the meeting pack; none on a Participant's page. */
+  // eslint-disable-next-line react/forbid-prop-types
+  whiteboards: PropTypes.array,
+  /** False once the transcript, and the whiteboards with it, has been deleted. */
+  whiteboardsWritable: PropTypes.bool,
   getCallDetailsFromCallIds: PropTypes.func,
   setToolsOpen: PropTypes.func,
   onShowSpeakers: PropTypes.func,
