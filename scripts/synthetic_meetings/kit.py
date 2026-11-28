@@ -58,7 +58,8 @@ DEFAULT_CHAT_PAUSE = 1.0
 WORDS_PER_SECOND = 3.0
 #: Turns shorter than this are hard for speaker diarization to attribute.
 MIN_TURN_SECONDS = 2.5
-#: Amazon Polly accepts at most 3000 characters of plain text per request.
+#: Amazon Polly accepts up to 3000 characters of plain text per request; the kit
+#: splits long turns at half that, at a sentence end, to stay well inside it.
 POLLY_TEXT_LIMIT = 1500
 
 #: ``--pace fast`` on the audio path: the rate ws_stream_probe streams at. The

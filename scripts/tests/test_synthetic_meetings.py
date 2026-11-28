@@ -101,7 +101,7 @@ def test_the_adversarial_meeting_has_its_hard_material() -> None:
     assert any(
         t.text.lower().startswith("someone") or " someone " in t.text.lower() for t in meeting.turns
     )
-    # The long turn is longer than one Polly request allows, and is split.
+    # The long turn is longer than kit.POLLY_TEXT_LIMIT, so it is split.
     longest = max(meeting.turns, key=lambda t: len(t.text))
     assert len(kit.split_for_polly(longest.text)) >= 2
 
@@ -566,7 +566,8 @@ def test_cleanup_removes_every_partition_of_the_meeting_and_nothing_of_another()
     s3 = FakeS3(
         [
             f"lma-audio-recordings/{name}.wav",
-            f"lma-audio-recordings/{name}_20261128.wav",
+            f"lma-audio-recordings/{name}_2026-11-28T17-21-24-123Z.wav",
+            f"lma-audio-recordings/{name}_2.wav",
             f"lma-audio-recordings/{name}_copy.wav",
             f"lma-transcripts/{name}-TRANSCRIPT.txt",
             f"lma-transcripts/{name}-SUMMARY.txt.metadata.json",
@@ -599,6 +600,7 @@ def test_cleanup_removes_every_partition_of_the_meeting_and_nothing_of_another()
     assert s3.keys == {
         f"lma-audio-recordings/{name}_copy.wav",
         f"lma-transcripts/{name}_copy-SUMMARY.txt",
+        f"lma-audio-recordings/{name}_2.wav",
     }
     # A later session's recording (<name>_<timestamp>) and the summarizer's
     # <name>-TRANSCRIPT/-SUMMARY files are this meeting's.
@@ -715,3 +717,31 @@ def test_list_and_dry_run_need_no_aws(capsys) -> None:
 def test_the_audio_path_refuses_no_end() -> None:
     with pytest.raises(SystemExit, match="Kinesis path only"):
         run_meeting.main(["--meeting", "retrospective", "--via", "audio", "--no-end", "--dry-run"])
+
+
+RESOLVER = ROOT / "lma-ai-stack/source/lambda_functions/meeting_controls_resolver/index.py"
+
+
+def test_cleanup_covers_every_partition_the_meeting_delete_removes() -> None:
+    """The partitions the web UI's delete removes, read from the resolver."""
+    text = RESOLVER.read_text(encoding="utf-8")
+    deleted = set(re.findall(r'f"([a-z]+#)\{callid\}"', text))
+    deleted |= set(re.findall(r'"([a-z]+#)" \+ callid', text))
+    assert {"c#", "trs#", "mtr#", "kf#", "att#", "nt#", "gd#", "wb#"} <= deleted, deleted
+    assert deleted <= set(kit.MEETING_PARTITION_PREFIXES), "a partition the kit does not clean up"
+
+
+def test_cleanup_deletes_the_meeting_row_last() -> None:
+    table = FakeTable()
+    _seed_meeting(table, "m - synthetic-1", "2026-11-28T09:00:00Z")
+    order: list[str] = []
+    delete = table.delete_item
+
+    def recording(TableName, Key):  # noqa: N803
+        order.append(Key["PK"]["S"])
+        delete(TableName=TableName, Key=Key)
+
+    table.delete_item = recording
+    delivery.cleanup(table, "t", "m - synthetic-1")
+    assert order[0].startswith("cls#") and order[-1] == "c#m - synthetic-1"
+    assert not table.items

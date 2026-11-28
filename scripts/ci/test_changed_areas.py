@@ -480,7 +480,11 @@ def test_docs_only_refuses_an_instruction_path_whatever_its_rule() -> None:
         (".claude/skills/product-demo.md", "demo_recorder"),
         ("docs/demo-videos.md", "demo_recorder"),
         # The synthetic meeting kit's tests read the schema, the channel names and
-        # the transcriber's START fields.
+        # the transcriber's START fields, and the meeting delete's partitions.
+        (
+            "lma-ai-stack/source/lambda_functions/meeting_controls_resolver/index.py",
+            "demo_recorder",
+        ),
         ("lma-ai-stack/source/appsync/schema.graphql", "demo_recorder"),
         (
             "lma-ai-stack/source/lambda_layers/configuration_layer/lma_channels/__init__.py",

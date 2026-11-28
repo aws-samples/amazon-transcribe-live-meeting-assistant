@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,6 +25,8 @@ import kit
 
 #: Kinesis PutRecords takes at most 500 records; smaller batches keep a retry cheap.
 PUT_BATCH = 100
+#: The suffix the transcriber gives a later session's recording: ``_2026-11-28T17-21-24-123Z``.
+SESSION_STAMP = re.compile(r"_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z")
 RETRYABLE = ("ProvisionedThroughputExceededException", "InternalFailure", "ServiceUnavailable")
 
 
@@ -270,12 +273,8 @@ def cleanup(
                 "pass --force to delete it anyway"
             )
             return report
-    for pk in kit.meeting_partitions(call_id):
-        items = query_partition(ddb, table, pk)
-        for item in items:
-            ddb.delete_item(TableName=table, Key={"PK": item["PK"], "SK": item["SK"]})
-        if items:
-            report.rows[pk.split("#", 1)[0] + "#"] = len(items)
+    # The meeting row goes last: it holds the CreatedAt that names the list row and
+    # the recording links, so a cleanup that stops part-way can be run again.
     if meeting and meeting.get("CreatedAt"):
         list_pk, list_sk = kit.list_row_key(call_id, str(meeting["CreatedAt"]))
         key = {"PK": {"S": list_pk}, "SK": {"S": list_sk}}
@@ -289,6 +288,13 @@ def cleanup(
         # A recording named otherwise is found through the link on the meeting row.
         for key in recording_keys(meeting or {}, bucket):
             report.objects += _delete_objects(s3, bucket, key, exact=True)
+    partitions = kit.meeting_partitions(call_id)
+    for pk in partitions[1:] + partitions[:1]:  # c#<CallId> is first in the list
+        items = query_partition(ddb, table, pk)
+        for item in items:
+            ddb.delete_item(TableName=table, Key={"PK": item["PK"], "SK": item["SK"]})
+        if items:
+            report.rows[pk.split("#", 1)[0] + "#"] = len(items)
     return report
 
 
@@ -296,8 +302,9 @@ def _is_own(rest: str, exact: bool) -> bool:
     """Whether a key that begins with the meeting's file name is the meeting's.
 
     ``<name>.wav``, ``<name>.raw``, ``<name>/...``, ``<name>-SUMMARY.txt`` and a
-    later session's ``<name>_<timestamp>.wav`` are; ``<name>_copy.wav`` is another
-    meeting's.
+    later session's ``<name>_<timestamp>.wav`` (recording-upload.ts recordingStamp,
+    an ISO time with ``:`` and ``.`` written as ``-``) are; ``<name>_copy.wav`` and
+    ``<name>_2.wav`` are other meetings'.
     """
     if not rest:
         return True
@@ -305,7 +312,7 @@ def _is_own(rest: str, exact: bool) -> bool:
         return False
     # A file name never holds "-" (it becomes "_"), so "<name>-SUMMARY.txt" is this
     # meeting's: the summary and transcript files the summarizer writes.
-    return rest[0] in "./-" or (rest[0] == "_" and rest[1:2].isdigit())
+    return rest[0] in "./-" or bool(SESSION_STAMP.match(rest))
 
 
 def _delete_objects(s3: Any, bucket: str, prefix: str, exact: bool = False) -> int:

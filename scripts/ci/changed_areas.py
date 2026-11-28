@@ -456,6 +456,8 @@ EXTRA_RULES: tuple[Rule, ...] = _rules(
     ("lma-ai-stack/source/appsync/schema.graphql", "demo_recorder"),
     (f"{LAYERS}/configuration_layer/lma_channels/__init__.py", "demo_recorder"),
     (f"{TRANSCRIBER}/source/app/src/calleventdata/eventtypes.ts", "demo_recorder"),
+    # ...and its cleanup to the partitions the meeting delete removes.
+    (f"{FUNCTIONS}/meeting_controls_resolver/index.py", "demo_recorder"),
     # ...and read the AI stack through the AI stack tests' helper, which inlines its
     # nested templates.
     ("lma-ai-stack/test/ai_stack_templates.py", "vp_template"),
