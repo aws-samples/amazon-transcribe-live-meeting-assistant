@@ -53,8 +53,9 @@ DEFAULT_TURN_PAUSE = 0.7
 #: How long after the previous turn ends a chat message that sets no ``pause`` is typed.
 DEFAULT_CHAT_PAUSE = 1.0
 #: Speaking rate used to estimate a turn's length when no audio is synthesized (the
-#: Kinesis path). Polly's neural voices speak at roughly 150-170 words a minute.
-WORDS_PER_SECOND = 2.6
+#: Kinesis path): the bundled meetings' Polly neural audio measured 2.9 to 3.4 words
+#: a second, 3.07 over all of them.
+WORDS_PER_SECOND = 3.0
 #: Turns shorter than this are hard for speaker diarization to attribute.
 MIN_TURN_SECONDS = 2.5
 #: Amazon Polly accepts at most 3000 characters of plain text per request.

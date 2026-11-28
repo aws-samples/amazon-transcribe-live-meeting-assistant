@@ -36,6 +36,14 @@ script:
     text: "+1 to the preview builds, they saved me hours"
   - speaker: Carlos Mendes
     text: >-
+      I agree on all of those. I would also call out that nobody had to work over the
+      weekend this sprint, which has not happened in a while.
+  - speaker: Grace Kim
+    text: >-
+      Yes, and the release notes were written before the release for once, so support knew
+      what was coming.
+  - speaker: Carlos Mendes
+    text: >-
       Great. Now, what should we improve? Be honest, nothing is off limits.
   - speaker: Yusuf Demir
     text: >-
