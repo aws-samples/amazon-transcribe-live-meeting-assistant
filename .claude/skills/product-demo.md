@@ -113,8 +113,10 @@ build you want to show (`lma deploy --stack-name <STACK> --template-url <url>
 --admin-email <address>`), or with `--from-code` for an unreleased change.
 `AdminEmail` must match `^[\w.+-]+@([\w-]+\.)+[\w-]{2,6}$`, so
 `example.invalid` is refused; `<name>@example.com` (also reserved, never
-delivered) works and keeps a real address out of User Management. Sign in only
-as `ux_test_session.py` users, and delete the stack when the videos are done.
+delivered) works and keeps a real address out of User Management. On such a
+stack, step 3's sign-in as the user is not needed: record as `ux_test_session.py`
+users, so only throwaway addresses are in frame, and delete the stack when the
+videos are done.
 
 ### 4. Recording tools
 
