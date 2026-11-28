@@ -113,6 +113,28 @@ describe('buildEml', () => {
   });
 });
 
+describe('long names', () => {
+  const name = `Summary-${'会議の議事録'.repeat(25)}.pdf`;
+  const message = buildEml({
+    to: [{ name: '山田 太郎'.repeat(10), email: 'yamada@example.jp' }],
+    subject: `${'長い会議名'.repeat(30)} summary`,
+    attachments: [{ filename: name, contentType: 'application/pdf', data: PDF }],
+    boundary: 'b',
+  });
+
+  it('keeps every line short, with a long name, subject and attachment name in another script', () => {
+    message.split('\r\n').forEach((line) => expect(line.length).toBeLessThanOrEqual(78));
+  });
+
+  it("continues a long attachment name's RFC 2231 form in numbered sections that make up the name", () => {
+    const sections = [...message.matchAll(/filename\*(\d+)\*=(?:UTF-8'')?([^;\r\n]+)/g)];
+    expect(sections.length).toBeGreaterThan(2);
+    expect(sections.map((match) => Number(match[1]))).toEqual(sections.map((_, n) => n));
+    expect(decodeURIComponent(sections.map((match) => match[2]).join(''))).toBe(name);
+    expect(message).not.toMatch(/filename\*=/);
+  });
+});
+
 describe('header helpers', () => {
   it('quotes a display name holding commas or quotes', () => {
     expect(formatAddress({ name: 'Lima, "Ana"', email: 'a@example.com' })).toBe('"Lima, \\"Ana\\"" <a@example.com>');

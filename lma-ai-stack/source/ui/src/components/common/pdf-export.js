@@ -93,6 +93,9 @@ export const needsRasterText = (text) => {
 export const isWideTable = (block) =>
   Math.max((block?.header || []).length, ...(block?.rows || []).map((row) => row.length), 0) >= 7;
 
+/** The error a build stops with once a newer build of the same file has replaced it. */
+export class BuildSuperseded extends Error {}
+
 const runsNeedRaster = (runs) => (runs || []).some((run) => needsRasterText(run.text));
 
 const pause = () =>

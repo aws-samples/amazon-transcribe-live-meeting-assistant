@@ -13,6 +13,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { jsPDF } from 'jspdf';
 
 import { SLIDE_WIDTH, buildSlidesPdf, deckFrames, fetchSlidePictures, slidesPdfBlocks } from './slides-pdf';
+import { BuildSuperseded } from './pdf-export';
 
 const PICTURE = { data: new Uint8Array([0xff, 0xd8, 0xff]), width: 1600, height: 900 };
 const frame = (id, seconds, extra = {}) => ({
@@ -57,6 +58,22 @@ describe('fetchSlidePictures', () => {
     const pictures = await fetchSlidePictures([frame('a', 1), frame('b', 2)], { fetchImage, resize });
     expect(pictures[0].from).toBe('https://thumb/a');
     expect(pictures[1]).toBeNull();
+  });
+});
+
+describe('a build a newer one replaced', () => {
+  it('stops fetching pictures once it is cancelled', async () => {
+    let cancelled = false;
+    const fetchImage = vi.fn(async (url) => {
+      cancelled = true;
+      return url;
+    });
+    const frames = Array.from({ length: 20 }, (_, i) => frame(`f${i}`, i));
+    await expect(
+      fetchSlidePictures(frames, { fetchImage, resize: async () => PICTURE, isCancelled: () => cancelled }),
+    ).rejects.toBeInstanceOf(BuildSuperseded);
+    // The four fetches already under way finish; no more start.
+    expect(fetchImage.mock.calls.length).toBeLessThanOrEqual(4);
   });
 });
 

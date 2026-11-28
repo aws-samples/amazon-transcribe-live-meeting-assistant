@@ -74,7 +74,6 @@ const MeetingPackModal = ({
   whiteboardCount = 0,
   whiteboardsDeleted = false,
   keyframeCount = 0,
-  contentKey = '',
   save = saveBlob,
   openMail = (url) => window.open(url),
 }) => {
@@ -104,14 +103,14 @@ const MeetingPackModal = ({
     setOutcome(null);
   }, [visible]);
 
-  // A ticked part that is not built, or no longer current (the summary, the
-  // key frames or a whiteboard changed while the dialog is open), is built.
+  // A ticked part that is not built, or no longer current, is built: the
+  // hook's currency key changes exactly when some part's inputs do.
   useEffect(() => {
     if (!visible) return;
     meetingStates.forEach((part) => {
       if (part.available && selected[part.id]) ensure(part.id);
     });
-  }, [visible, meetingStates, selected, ensure, item.callSummaryText, contentKey]);
+  }, [visible, meetingStates, selected, ensure, pack.key]);
 
   const chosen = states.filter((part) => part.available && selected[part.id]);
   const chosenStates = chosen.map((part) => parts[part.id]);
@@ -332,13 +331,15 @@ MeetingPackModal.propTypes = {
   onDismiss: PropTypes.func.isRequired,
   // eslint-disable-next-line react/forbid-prop-types
   item: PropTypes.object.isRequired,
-  pack: PropTypes.shape({ parts: PropTypes.objectOf(PropTypes.shape({})), ensure: PropTypes.func }).isRequired,
+  pack: PropTypes.shape({
+    parts: PropTypes.objectOf(PropTypes.shape({})),
+    ensure: PropTypes.func,
+    key: PropTypes.string,
+  }).isRequired,
   participants: PropTypes.arrayOf(PropTypes.string),
   whiteboardCount: PropTypes.number,
   whiteboardsDeleted: PropTypes.bool,
   keyframeCount: PropTypes.number,
-  /** Changes when a whiteboard changes, so an open dialog builds the Whiteboards PDF again. */
-  contentKey: PropTypes.string,
   save: PropTypes.func,
   openMail: PropTypes.func,
 };

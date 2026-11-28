@@ -36,7 +36,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import WhiteboardMarkdown from './WhiteboardMarkdown';
 import { loadMermaid } from './MermaidDiagram';
 import { KIND_MERMAID, SOURCE_ASSISTANT, TEMPLATES, mermaidProblem } from './whiteboard-model';
-import { buildPdf, isWideTable } from '../common/pdf-export';
+import { BuildSuperseded, buildPdf, isWideTable } from '../common/pdf-export';
 import { coverBlocks } from '../common/pdf-cover';
 
 const GREY = '5f6b7a';
@@ -316,7 +316,7 @@ export const panelBlocks = async (panel, { draw = drawDiagram } = {}) => {
  */
 export const whiteboardsPdfBlocks = async (
   { title, facts = [], note = '', whiteboards = [] },
-  { draw = drawDiagram, onProgress = () => {} } = {},
+  { draw = drawDiagram, onProgress = () => {}, isCancelled = () => false } = {},
 ) => {
   const boards = whiteboards || [];
   const blocks = coverBlocks({
@@ -327,6 +327,8 @@ export const whiteboardsPdfBlocks = async (
     contents: boards.map((board, index) => ({ text: board.Title || `Whiteboard ${index + 1}`, anchor: `wb-${index}` })),
   });
   for (let index = 0; index < boards.length; index += 1) {
+    // A newer build of the file stops this one between whiteboards.
+    if (isCancelled()) throw new BuildSuperseded('a newer build replaced this one');
     const board = boards[index];
     const panels = board.Panels || [];
     const contents = [];
@@ -379,9 +381,9 @@ export const whiteboardsPdfBlocks = async (
  */
 export const buildWhiteboardsPdf = async (
   meeting,
-  { jsPDF, rasterizeText = null, draw = drawDiagram, onProgress = () => {}, compress = true } = {},
+  { jsPDF, rasterizeText = null, draw = drawDiagram, onProgress = () => {}, isCancelled, compress = true } = {},
 ) => {
-  const blocks = await whiteboardsPdfBlocks(meeting, { draw, onProgress });
+  const blocks = await whiteboardsPdfBlocks(meeting, { draw, onProgress, isCancelled });
   const doc = await buildPdf(blocks, {
     jsPDF,
     compress,

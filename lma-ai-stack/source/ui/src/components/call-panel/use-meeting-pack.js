@@ -13,10 +13,12 @@
  * (the summary's text or the speakers' names, the number of key frames or the
  * chapters, a whiteboard's version), so a meeting still going on gets a fresh snapshot.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ConsoleLogger } from 'aws-amplify/utils';
 
-import { PART_SLIDES, PART_SUMMARY, PartUnavailable, buildPart, defaultBuilders } from './meeting-pack';
+import { PACK_PARTS, PART_SLIDES, PART_SUMMARY, PartUnavailable, buildPart, defaultBuilders } from './meeting-pack';
+
+const PART_IDS = PACK_PARTS.map((part) => part.id);
 
 const logger = new ConsoleLogger('useMeetingPack');
 
@@ -27,6 +29,13 @@ export const partSignature = (id, ctx) => {
   if (id === PART_SLIDES) return JSON.stringify([ctx.keyframeCount ?? 0, ctx.chapters || []]);
   return JSON.stringify((ctx.whiteboards || []).map((board) => [board.WhiteboardId, board.Version]));
 };
+
+/**
+ * The currency key: every part's signature in one string. It changes exactly
+ * when some part's built file is no longer current, so it is the one thing a
+ * dialog needs to watch to build again (MeetingPackModal.jsx).
+ */
+export const currencyKey = (ctx) => JSON.stringify(PART_IDS.map((id) => partSignature(id, ctx)));
 
 const useMeetingPack = (ctx, { builders = defaultBuilders } = {}) => {
   const [parts, setParts] = useState({});
@@ -71,13 +80,16 @@ const useMeetingPack = (ctx, { builders = defaultBuilders } = {}) => {
           const built = await buildPart(id, current, {
             builders,
             onProgress: (done, total) => update(id, token, { done, total }),
+            // A build a newer one has replaced stops, rather than fetch for nothing.
+            isCancelled: () => runs.current[id] !== token,
           });
           const ready = { status: 'ready', signature, ...built };
           update(id, token, ready);
           return ready;
         } catch (error) {
           const unavailable = error instanceof PartUnavailable;
-          if (!unavailable) logger.error('could not build a part of the meeting pack', id, error);
+          if (!unavailable && runs.current[id] === token)
+            logger.error('could not build a part of the meeting pack', id, error);
           const failed = {
             status: unavailable ? 'unavailable' : 'failed',
             signature,
@@ -95,7 +107,23 @@ const useMeetingPack = (ctx, { builders = defaultBuilders } = {}) => {
     [builders, update],
   );
 
-  return { parts, ensure };
+  // Each part as it stands for what the page shows now: a file built from
+  // something that has since changed is not offered as ready, but as being
+  // built, since a dialog watching `key` builds it again.
+  const key = currencyKey(ctx);
+  const current = useMemo(() => {
+    const signatures = Object.fromEntries(PART_IDS.map((id) => [id, partSignature(id, ctxRef.current)]));
+    return Object.fromEntries(
+      Object.entries(parts).map(([id, state]) => [
+        id,
+        state.signature === signatures[id]
+          ? state
+          : { status: 'building', signature: state.signature, done: 0, total: 0 },
+      ]),
+    );
+  }, [parts, key]);
+
+  return { parts: current, ensure, key };
 };
 
 export default useMeetingPack;

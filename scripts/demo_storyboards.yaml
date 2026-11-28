@@ -252,7 +252,7 @@ storyboards:
 
   - id: meeting-page-in-depth
     title: 'The meeting page in depth'
-    source: 'Feature: docs/web-ui-guide.md#meeting-detail-page; CHANGELOG [Unreleased]: Participants panel and invitations, sharing with listed participants, Email summary to participants, whiteboards, retention notices'
+    source: 'Feature: docs/web-ui-guide.md#meeting-detail-page; CHANGELOG [Unreleased]: Participants panel and invitations, sharing with listed participants, Email participants, whiteboards, retention notices'
     audience: 'People who run meetings with LMA'
     hook: >-
       Everything about a meeting is on its page: the transcript with its recording, the summary you can edit, the people who were expected, whiteboards, and how long each part is kept.
@@ -304,7 +304,7 @@ storyboards:
           - 'Perform the steps the narration describes, on the fixtures above.'
       - label: 'Email the summary to the participants'
         say: >-
-          Finally, the Download menu offers the summary as Word, PDF, a web page or Markdown, and Email summary opens your own mail app, addressed to everyone on the participant list.
+          Finally, the Download menu offers the summary as Word, PDF, a web page or Markdown, and Email participants prepares an email to everyone on the participant list, with the summary, slides and whiteboards attached as PDF files.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
     closing: >-
@@ -790,7 +790,7 @@ storyboards:
           - 'Perform the steps the narration describes, on the fixtures above.'
       - label: 'After: action items and every download'
         say: >-
-          After the meeting, the summary follows the chosen profile, with structured action items. The Download menu offers the summary and the transcript as Word, PDF, a web page or Markdown, the recordings, every file as one archive, and a structured export of the whole meeting. Email summary addresses everyone on the participant list.
+          After the meeting, the summary follows the chosen profile, with structured action items. The Download menu offers the summary and the transcript as Word, PDF, a web page or Markdown, the recordings, every file as one archive, and a structured export of the whole meeting. Email participants prepares an email to everyone on the participant list, with the PDF files attached.
         do:
           - 'Perform the steps the narration describes, on the fixtures above.'
       - label: 'Shared with the people who were there'

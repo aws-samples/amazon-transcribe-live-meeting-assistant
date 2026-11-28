@@ -20,7 +20,7 @@
  */
 import { chapterTitlesByFrame } from './chapters';
 import { coverBlocks } from './pdf-cover';
-import { buildPdf } from './pdf-export';
+import { BuildSuperseded, buildPdf } from './pdf-export';
 import { downscaleToJpeg, fetchImageBlob } from './keyframe-thumbnails';
 import { formatFrameTime, frameLabel, isDistinctFrame } from './video-keyframes';
 
@@ -52,11 +52,13 @@ const forEachLimited = async (items, limit, work) => {
  */
 export const fetchSlidePictures = async (
   frames,
-  { fetchImage = fetchImageBlob, resize = downscaleToJpeg, onProgress = () => {} } = {},
+  { fetchImage = fetchImageBlob, resize = downscaleToJpeg, onProgress = () => {}, isCancelled = () => false } = {},
 ) => {
   const pictures = new Array(frames.length).fill(null);
   let done = 0;
   await forEachLimited(frames, CONCURRENT_FETCHES, async (frame, index) => {
+    // A newer build of the deck stops this one before its next fetch.
+    if (isCancelled()) throw new BuildSuperseded('a newer build replaced this one');
     const links = [frame.ImageSignedUrl, frame.ThumbnailSignedUrl].filter(Boolean);
     for (let i = 0; i < links.length; i += 1) {
       try {
@@ -111,10 +113,10 @@ export const slidesPdfBlocks = ({ title, facts = [], note = '', frames = [], cha
  */
 export const buildSlidesPdf = async (
   { title, facts = [], note = '', frames = [], chapters = [] },
-  { jsPDF, rasterizeText = null, fetchImage, resize, onProgress = () => {}, compress = true } = {},
+  { jsPDF, rasterizeText = null, fetchImage, resize, onProgress = () => {}, isCancelled, compress = true } = {},
 ) => {
   const ordered = deckFrames(frames);
-  const pictures = await fetchSlidePictures(ordered, { fetchImage, resize, onProgress });
+  const pictures = await fetchSlidePictures(ordered, { fetchImage, resize, onProgress, isCancelled });
   const blocks = slidesPdfBlocks({ title, facts, note, frames: ordered, chapters, pictures });
   return buildPdf(blocks, {
     jsPDF,

@@ -162,7 +162,7 @@ const loadRasterizer = async () => (await import('../common/text-raster')).brows
  */
 export const defaultBuilders = {
   [PART_SUMMARY]: async (ctx) => summaryPdfBlob(ctx.item, ctx.consent, { participants: ctx.participants || [] }),
-  [PART_SLIDES]: async (ctx, { onProgress }) => {
+  [PART_SLIDES]: async (ctx, { onProgress, isCancelled }) => {
     const [{ loadEveryKeyframe }, { buildSlidesPdf, deckFrames }, jsPDF, rasterizeText] = await Promise.all([
       import('../common/slide-deck'),
       import('../common/slides-pdf'),
@@ -179,11 +179,11 @@ export const defaultBuilders = {
         frames,
         chapters: ctx.chapters || [],
       },
-      { jsPDF, rasterizeText, onProgress },
+      { jsPDF, rasterizeText, onProgress, isCancelled },
     );
     return doc.output('blob');
   },
-  [PART_WHITEBOARDS]: async (ctx, { onProgress }) => {
+  [PART_WHITEBOARDS]: async (ctx, { onProgress, isCancelled }) => {
     const whiteboards = ctx.whiteboards || [];
     if (!whiteboards.length) throw new PartUnavailable(NO_WHITEBOARDS);
     const [{ buildWhiteboardsPdf }, jsPDF, rasterizeText] = await Promise.all([
@@ -198,7 +198,7 @@ export const defaultBuilders = {
         note: isLive(ctx.item) ? LIVE_NOTE : '',
         whiteboards,
       },
-      { jsPDF, rasterizeText, onProgress },
+      { jsPDF, rasterizeText, onProgress, isCancelled },
     );
     return doc.output('blob');
   },
@@ -208,8 +208,12 @@ export const defaultBuilders = {
  * Builds one part: { id, blob, size, filename }. Rejects with PartUnavailable
  * when the part turns out to have nothing in it, and with the error otherwise.
  */
-export const buildPart = async (id, ctx, { onProgress = () => {}, builders = defaultBuilders } = {}) => {
-  const blob = await builders[id](ctx, { onProgress });
+export const buildPart = async (
+  id,
+  ctx,
+  { onProgress = () => {}, isCancelled = () => false, builders = defaultBuilders } = {},
+) => {
+  const blob = await builders[id](ctx, { onProgress, isCancelled });
   return { id, blob, size: blob.size, filename: partFileName(id, ctx.item.callId) };
 };
 
