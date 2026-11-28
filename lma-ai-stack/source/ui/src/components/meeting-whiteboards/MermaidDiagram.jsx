@@ -17,7 +17,8 @@ let mermaidPromise = null;
 /**
  * Mermaid and DOMPurify, loaded the first time a diagram is shown, so a page
  * without one never downloads them. Strict mode: labels are escaped and the
- * diagram is not interactive. The server accepts only the subset
+ * diagram is not interactive. Labels are SVG text rather than HTML, so the
+ * sanitizing below keeps them. The server accepts only the subset
  * rules.check_mermaid allows, and the drawn SVG is sanitized again with
  * DOMPurify's SVG profile before it is inserted.
  */
@@ -25,7 +26,15 @@ export const loadMermaid = () => {
   if (!mermaidPromise) {
     mermaidPromise = Promise.all([import('mermaid'), import('dompurify')])
       .then(([{ default: mermaid }, { default: DOMPurify }]) => {
-        mermaid.initialize({ startOnLoad: false, securityLevel: 'strict' });
+        // Labels are drawn as SVG text: by default flowcharts and mind maps put
+        // them in HTML inside <foreignObject>, which DOMPurify's SVG profile
+        // removes, and the diagram is then drawn with no labels at all.
+        mermaid.initialize({
+          startOnLoad: false,
+          securityLevel: 'strict',
+          htmlLabels: false,
+          flowchart: { htmlLabels: false },
+        });
         return {
           render: async (id, source) => {
             const { svg } = await mermaid.render(id, source);
