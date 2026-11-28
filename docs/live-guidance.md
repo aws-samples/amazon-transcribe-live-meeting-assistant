@@ -87,7 +87,14 @@ Each item:
 - carries a **Mark covered** button when it is an `ask_question`,
   `uncovered_topic` or `time_check` about a checklist item (it sets the item
   covered as the user who presses it), and a question carries **Copy
-  question**.
+  question**;
+- on the meeting page, also carries **Ask the assistant**, which opens the
+  assistant chat with the card attached to the next question (**Send** with
+  nothing typed asks what it means for the meeting and what to say or do next),
+  and **Add to whiteboard**, which adds the card's text to a whiteboard you
+  choose (see [Adding to a whiteboard](meeting-whiteboards.md#adding-to-a-whiteboard)).
+  These are the page's own buttons, not the notification's, and are shown on
+  every guidance card while the page offers them.
 
 When a checklist item stops being open, because a run or a user covered it or a
 user deferred it, the guidance about it is withdrawn: it is published again

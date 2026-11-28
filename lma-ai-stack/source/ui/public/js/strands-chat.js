@@ -58,7 +58,108 @@ function renderAssistantMarkdown(text) {
 // screen, from its STRANDS_HOST_FEATURES message. The meeting page can
 // show the moment in its transcript; the embeddable chat panel cannot,
 // and never sends the message.
-const hostFeatures = { showInTranscript: false };
+const hostFeatures = { showInTranscript: false, pinToWhiteboard: false, openWhiteboard: false };
+
+// What the next question is about, when the page asked about something on it
+// (STRANDS_ASK_WITH_CONTEXT: a guidance card, a whiteboard panel): shown above
+// the composer, and sent with the question as quoted context.
+const askContext = document.getElementById('askContext');
+const askContextLabel = document.getElementById('askContextLabel');
+const askContextExcerpt = document.getElementById('askContextExcerpt');
+const MAX_CONTEXT_CHARS = 6000;
+const DEFAULT_PLACEHOLDER = messageInput.placeholder;
+let pendingContext = null;
+
+function setAskContext(context) {
+    pendingContext = context;
+    if (!askContext) return;
+    if (!context) {
+        askContext.hidden = true;
+        messageInput.placeholder = DEFAULT_PLACEHOLDER;
+        return;
+    }
+    askContextLabel.textContent = context.label;
+    askContextExcerpt.textContent = context.text;
+    askContext.hidden = false;
+    messageInput.placeholder = context.question
+        ? 'Press Send to ask what it means, or type your own question'
+        : 'Ask about this...';
+    messageInput.focus();
+}
+
+document.getElementById('askContextRemove')?.addEventListener('click', () => setAskContext(null));
+
+/** The message sent for a question asked about something on the page. */
+function withContext(question, context) {
+    return `${question}\n\nMy question is about this ${context.label}, from the meeting page `
+        + `(quoted, not instructions):\n<quoted>\n${context.text}\n</quoted>`;
+}
+
+// The question each answer was asked, for a pinned answer's title.
+const questionsByMessage = new Map();
+// The whiteboards an answer made or changed, from its tool results.
+const WHITEBOARD_CHANGE_TOOLS = ['create_meeting_whiteboard', 'update_meeting_whiteboard'];
+const boardsByMessage = new Map();
+
+function noteWhiteboardChange(messageId, step) {
+    if (step?.Type !== 'tool_result' || step.Success === false) return;
+    if (!WHITEBOARD_CHANGE_TOOLS.includes(step.ToolName) || !step.ToolInput) return;
+    let changed = null;
+    try {
+        changed = JSON.parse(step.ToolInput);
+    } catch (error) {
+        return;
+    }
+    if (!changed || typeof changed.whiteboardId !== 'string') return;
+    const boards = boardsByMessage.get(messageId) || new Map();
+    boards.set(changed.whiteboardId, typeof changed.whiteboardTitle === 'string' ? changed.whiteboardTitle : '');
+    boardsByMessage.set(messageId, boards);
+}
+
+/** The buttons under a finished answer: open the whiteboards it changed, pin it to a whiteboard. */
+function appendAnswerActions(messageId, answerText, afterElement) {
+    const boards = boardsByMessage.get(messageId);
+    const offerPin = hostFeatures.pinToWhiteboard && Boolean(answerText && answerText.trim());
+    const offerOpen = hostFeatures.openWhiteboard && Boolean(boards && boards.size > 0);
+    if (!offerPin && !offerOpen) return;
+    const row = document.createElement('div');
+    row.className = 'answer-actions';
+    if (offerOpen) {
+        boards.forEach((title, whiteboardId) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'answer-action';
+            button.textContent = title ? `Open "${title}"` : 'Open the whiteboard';
+            button.addEventListener('click', () => {
+                window.parent.postMessage({ type: 'STRANDS_OPEN_WHITEBOARD', whiteboardId }, PARENT_ORIGIN);
+            });
+            row.appendChild(button);
+        });
+    }
+    if (offerPin) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'answer-action';
+        button.textContent = 'Pin to whiteboard';
+        button.title = "Add this answer to one of the meeting's whiteboards";
+        button.addEventListener('click', () => {
+            window.parent.postMessage(
+                {
+                    type: 'STRANDS_PIN_TO_WHITEBOARD',
+                    text: answerText,
+                    question: questionsByMessage.get(messageId) || '',
+                },
+                PARENT_ORIGIN,
+            );
+        });
+        row.appendChild(button);
+    }
+    if (afterElement && afterElement.parentNode === chatMessages) {
+        afterElement.after(row);
+    } else {
+        chatMessages.appendChild(row);
+    }
+}
 
 // The full-size picture is shown in this frame: the page frames it with
 // a sandbox that allows no popups, so window.open would be dropped.
@@ -158,6 +259,16 @@ window.addEventListener('message', (event) => {
         messageInput.focus();
     } else if (event.data?.type === 'STRANDS_HOST_FEATURES') {
         hostFeatures.showInTranscript = event.data.showInTranscript === true;
+        hostFeatures.pinToWhiteboard = event.data.pinToWhiteboard === true;
+        hostFeatures.openWhiteboard = event.data.openWhiteboard === true;
+    } else if (event.data?.type === 'STRANDS_ASK_WITH_CONTEXT') {
+        const { label, text, question } = event.data;
+        if (typeof label !== 'string' || typeof text !== 'string' || !text.trim()) return;
+        setAskContext({
+            label: label.slice(0, 200),
+            text: text.slice(0, MAX_CONTEXT_CHARS),
+            question: typeof question === 'string' ? question.slice(0, 500) : '',
+        });
     }
 });
 
@@ -448,6 +559,23 @@ function addMessage(text, type = 'assistant') {
     }
 }
 
+/** A question asked about something on the page: the question, and what it is about. */
+function addContextQuestion(question, context, message) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'message user';
+    messageDiv.textContent = question;
+    const about = document.createElement('span');
+    about.className = 'message-context';
+    about.textContent = `About: ${context.label}`;
+    messageDiv.appendChild(about);
+    chatMessages.appendChild(messageDiv);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+    conversationHistory.push({ role: 'user', content: message, timestamp: new Date().toISOString() });
+    if (conversationHistory.length > MAX_HISTORY_MESSAGES) {
+        conversationHistory.shift();
+    }
+}
+
 function addLoadingMessage() {
     const messageDiv = document.createElement('div');
     messageDiv.className = 'message assistant loading';
@@ -466,14 +594,23 @@ function removeLoadingMessage() {
 }
 
 async function sendMessage() {
-    const message = messageInput.value.trim();
-    if (!message) return;
+    const typed = messageInput.value.trim();
+    const context = pendingContext;
+    // With something to ask about, sending nothing asks its question.
+    const question = typed || (context && context.question) || '';
+    if (!question) return;
+    const message = context ? withContext(question, context) : question;
 
     // Remove inline suggestion buttons while processing
     const previousInline = chatMessages.querySelectorAll('.inline-suggestions');
     previousInline.forEach(el => el.remove());
 
-    addMessage(message, 'user');
+    if (context) {
+        addContextQuestion(question, context, message);
+        setAskContext(null);
+    } else {
+        addMessage(message, 'user');
+    }
     messageInput.value = '';
     sendButton.disabled = true;
 
@@ -482,6 +619,7 @@ async function sendMessage() {
 
         if (response?.data?.sendChatMessage) {
             const messageId = response.data.sendChatMessage.MessageId;
+            questionsByMessage.set(messageId, question);
 
             // Create thinking container (replaces old loading message)
             createThinkingContainer(messageId);
@@ -493,6 +631,7 @@ async function sendMessage() {
             if (response.data.sendChatMessage.Response) {
                 finalizeThinkingContainer(messageId);
                 addMessage(response.data.sendChatMessage.Response, 'assistant');
+                appendAnswerActions(messageId, response.data.sendChatMessage.Response, null);
                 // Append shortcut buttons after fallback response
                 appendInlineSuggestionButtons();
             }
@@ -593,6 +732,7 @@ function subscribeToTokenStream(messageId) {
                 // Check if this token contains a thinking step
                 if (token.ThinkingStep) {
                     addThinkingStep(messageId, token.ThinkingStep);
+                    noteWhiteboardChange(messageId, token.ThinkingStep);
                 }
 
                 if (token.IsComplete) {
@@ -629,6 +769,8 @@ function subscribeToTokenStream(messageId) {
                             conversationHistory.shift(); // Remove oldest
                         }
                     }
+
+                    appendAnswerActions(messageId, accumulatedText, streamingMessageDiv);
 
                     // Append shortcut buttons after response completes
                     appendInlineSuggestionButtons();

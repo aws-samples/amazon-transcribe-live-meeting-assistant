@@ -8,6 +8,7 @@ import { generateClient } from 'aws-amplify/api';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
+  Alert,
   Badge,
   Box,
   Button,
@@ -69,6 +70,15 @@ import AgendaPanel from './AgendaPanel';
 import ChecklistPanel from './ChecklistPanel';
 import LiveGuidancePanel from './LiveGuidancePanel';
 import WhiteboardsTab, { useMeetingWhiteboards } from '../meeting-whiteboards';
+import PinToWhiteboardModal from '../meeting-whiteboards/PinToWhiteboardModal';
+import { titleFrom } from '../meeting-whiteboards/pin-to-whiteboard';
+import {
+  ADD_TO_WHITEBOARD,
+  ASK_ASSISTANT,
+  OPEN_WHITEBOARD,
+  requestMeetingAction,
+  useMeetingActions,
+} from '../common/meeting-actions';
 import MeetingContextPanel from './MeetingContextPanel';
 import MeetingLabels from './MeetingLabels';
 import MeetingParticipants from './MeetingParticipants';
@@ -2138,6 +2148,63 @@ export const CallPanel = ({
   // here so the tab's label can count them. See docs/meeting-whiteboards.md.
   const whiteboards = useMeetingWhiteboards(ownerCallId);
   const [activeTab, setActiveTab] = useMeetingTab({ inUrl: tabInUrl, isLive, hasKeyframes });
+
+  // The links between the assistant, the guidance cards and the whiteboards
+  // (common/meeting-actions.js): ask the assistant about something on the
+  // page, add something to a whiteboard, show a whiteboard. Each is the
+  // signed-in user's own request, so the server's rules apply to it.
+  const canChangeWhiteboards = !participantMode && !speakerNamesReadOnly && whiteboards.writable;
+  const [assistantContext, setAssistantContext] = useState(null);
+  const [pinRequest, setPinRequest] = useState(null);
+  const [whiteboardSelect, setWhiteboardSelect] = useState(null);
+  const [whiteboardNotice, setWhiteboardNotice] = useState(null);
+  useEffect(() => {
+    setAssistantContext(null);
+    setPinRequest(null);
+    setWhiteboardSelect(null);
+    setWhiteboardNotice(null);
+  }, [item.callId]);
+  const askAssistant = useCallback(
+    ({ label, text, question }) => {
+      if (!text) return;
+      toggleAssistant(true);
+      setAssistantContext({ label, text, question });
+    },
+    [toggleAssistant],
+  );
+  const openWhiteboard = useCallback(
+    ({ whiteboardId, panelId }) => {
+      setActiveTab(TAB_WHITEBOARDS);
+      setWhiteboardSelect({ whiteboardId, panelId, at: Date.now() });
+      // On a narrow page the assistant lies over the tabs.
+      if (assistantOverlays) setAssistantOpen(false);
+    },
+    [setActiveTab, assistantOverlays, setAssistantOpen],
+  );
+  useMeetingActions(ownerCallId, {
+    [ASK_ASSISTANT]: assistantEnabled ? askAssistant : null,
+    [ADD_TO_WHITEBOARD]: canChangeWhiteboards
+      ? (detail) => setPinRequest({ ...detail, heading: 'Add to whiteboard' })
+      : null,
+    [OPEN_WHITEBOARD]: participantMode ? null : openWhiteboard,
+  });
+  const onPinAnswer = useCallback(
+    ({ text, question }) =>
+      setPinRequest({ text, title: titleFrom(question || text), heading: 'Pin the answer to a whiteboard' }),
+    [],
+  );
+  const onAskAboutPanel = useCallback(
+    (board, panel) =>
+      requestMeetingAction(ownerCallId, ASK_ASSISTANT, {
+        label: `whiteboard panel "${panel.Title}" (whiteboard "${board.Title}")`,
+        text: (panel.Content || '').trim() || '(This panel is empty.)',
+        question:
+          panel.Kind === 'mermaid'
+            ? 'Explain this diagram, and tell me what the meeting said that it is missing.'
+            : 'Summarize this panel, and tell me what the meeting said that it is missing.',
+      }),
+    [ownerCallId],
+  );
   // Opening the live view also opens the tab it is on, wherever it was asked for.
   const setVncPreview = useCallback(
     (show) => {
@@ -2917,6 +2984,8 @@ export const CallPanel = ({
           content: (
             <WhiteboardsTab
               whiteboards={whiteboards}
+              selectRequest={whiteboardSelect}
+              onAskAboutPanel={assistantEnabled ? onAskAboutPanel : undefined}
               readOnly={speakerNamesReadOnly}
               assistantEnabled={typeof item.whiteboardsEnabled === 'boolean' ? item.whiteboardsEnabled : undefined}
               meetingEnded={item.recordingStatusLabel === DONE_STATUS}
@@ -3031,6 +3100,48 @@ export const CallPanel = ({
         />
         <TranscriptionPauseAlert isLive={isLive} transcriptionPause={item.transcriptionPause} />
         {notificationsInline && <MeetingNotificationsInline callId={item.callId} />}
+        {whiteboardNotice && (
+          <Alert
+            type="success"
+            dismissible
+            onDismiss={() => setWhiteboardNotice(null)}
+            action={
+              activeTab === TAB_WHITEBOARDS ? null : (
+                <Button
+                  onClick={() => {
+                    openWhiteboard(whiteboardNotice);
+                    setWhiteboardNotice(null);
+                  }}
+                >
+                  Open whiteboard
+                </Button>
+              )
+            }
+          >
+            {whiteboardNotice.text}
+          </Alert>
+        )}
+        {pinRequest && (
+          <PinToWhiteboardModal
+            whiteboards={whiteboards}
+            text={pinRequest.text}
+            title={pinRequest.title}
+            heading={pinRequest.heading}
+            onDismiss={() => setPinRequest(null)}
+            onDone={(board, panelTitle) => {
+              setPinRequest(null);
+              const panel = (board?.Panels || []).find((p) => p.Title === panelTitle);
+              setWhiteboardNotice({
+                text: `Added to "${board?.Title}"${panelTitle ? `, in the panel "${panelTitle}"` : ''}.`,
+                whiteboardId: board?.WhiteboardId,
+                panelId: panel?.PanelId,
+              });
+              if (activeTab === TAB_WHITEBOARDS) {
+                setWhiteboardSelect({ whiteboardId: board?.WhiteboardId, panelId: panel?.PanelId, at: Date.now() });
+              }
+            }}
+          />
+        )}
         <div ref={bodyRef} className={bodyClass}>
           <div className="meeting-main">
             <Tabs
@@ -3053,6 +3164,9 @@ export const CallPanel = ({
               vpData={vpData}
               loadingVP={loadingVP}
               participantMode={participantMode}
+              contextRequest={assistantContext}
+              onPinAnswer={canChangeWhiteboards ? onPinAnswer : undefined}
+              onOpenWhiteboard={participantMode ? undefined : (whiteboardId) => openWhiteboard({ whiteboardId })}
             />
           )}
         </div>

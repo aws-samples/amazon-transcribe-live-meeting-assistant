@@ -30,6 +30,7 @@ configuration preset leaves On for new meetings off.
 
 - [What a whiteboard is](#what-a-whiteboard-is)
 - [On the meeting page](#on-the-meeting-page)
+- [Adding to a whiteboard](#adding-to-a-whiteboard)
 - [Asking the assistant](#asking-the-assistant)
 - [How the assistant keeps them up to date](#how-the-assistant-keeps-them-up-to-date)
 - [User edits win](#user-edits-win)
@@ -104,6 +105,11 @@ or who last edited it, and when.
 - A panel's menu renames it, moves it, removes it, or hands it back with
   **Let the assistant update this panel**. **Add a Markdown panel** and **Add a
   diagram panel** add one.
+- **Ask the assistant about** a panel (the speech-bubble button in its header,
+  offered to everyone who sees the tab while the meeting assistant is enabled)
+  opens the assistant panel with the panel's content attached to the next
+  question; **Send** with nothing typed asks for a summary of the panel and what
+  the meeting said that it is missing.
 - The whiteboard's menu renames it, changes its instructions, turns the
   assistant's updates of it on or off, shows its **versions**, or deletes it.
 - **Assistant keeps whiteboards updated** turns the assistant's updates on or
@@ -120,6 +126,32 @@ or who last edited it, and when.
 Every change reaches every open meeting page through the `onMeetingWhiteboard`
 subscription, without a reload. Once the meeting's transcript is deleted, the
 tab says its whiteboards were deleted with it.
+
+## Adding to a whiteboard
+
+Two buttons add a piece of text to a whiteboard without retyping it:
+
+- **Pin to whiteboard**, under each of the assistant chat's answers;
+- **Add to whiteboard**, on each guidance card in the
+  [Notifications drawer](live-guidance.md#guidance).
+
+Each opens **Add to whiteboard**: choose one of the meeting's whiteboards (the
+most recent is chosen first) or **New whiteboard…**, then one of its Markdown
+panels (a panel whose title matches the text's is chosen first) or **New
+panel…**, and edit the text before it is added. The text goes at the end of the
+panel, after what it holds, or into a new panel at the end of the whiteboard;
+the dialog shows a preview. Adding to a panel the assistant keeps offers **Let
+the assistant keep updating this panel**, on by default: the panel stays the
+assistant's, and its updates may reword what you added. Untick it to make the
+panel yours, as any edit does.
+
+The change is yours and is held to every rule on this page. If somebody changed
+the whiteboard after the page last read it, the dialog reads it again and adds
+the text to the newer version, rather than refusing or overwriting their change.
+Once it is stored, the page says where it went, with **Open whiteboard**.
+
+The buttons are offered to the people who can change the meeting, while its
+whiteboards can be changed; not on a Participant's page.
 
 ## Asking the assistant
 

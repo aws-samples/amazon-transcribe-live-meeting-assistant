@@ -154,6 +154,14 @@ For example, a "Mark covered" button:
  "payload": {"action": "set_checklist_item_status", "args": {"itemId": "item-3", "status": "covered"}}}
 ```
 
+On the meeting page, a `guidance` notification also has two buttons of the
+page's own, whatever it carries: **Ask the assistant** (the card as the next
+question's context) and **Add to whiteboard**; see
+[Live Guidance](live-guidance.md#guidance). They act only on the page, as the
+signed-in user, and are shown only while the page offers them: Ask the assistant
+while the meeting assistant is enabled, Add to whiteboard to someone who can
+change the meeting's whiteboards.
+
 An action is added by one entry on each side: its name, its arguments and any
 fixed values in the resolver, and its operation and variables in the page. A
 contract test holds the two lists to each other.

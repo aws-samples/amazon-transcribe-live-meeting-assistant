@@ -21,9 +21,15 @@
  * - to the frame: STRANDS_HOST_FEATURES (what this page can do with a frame of
  *   the shared screen) once it has loaded, and STRANDS_FOCUS_INPUT when the
  *   panel is opened, which puts the keyboard focus in the composer;
+ * - to the frame: STRANDS_ASK_WITH_CONTEXT with a label, a text and a question,
+ *   when the page asks the assistant about something on it (a guidance card, a
+ *   whiteboard panel): the frame attaches it to the next question;
  * - from the frame: STRANDS_ESCAPE (Escape pressed in the frame), which closes
- *   the panel, and STRANDS_SHOW_IN_TRANSCRIPT with a FrameId, from the "Show in
- *   transcript" button under a frame the assistant showed.
+ *   the panel, STRANDS_SHOW_IN_TRANSCRIPT with a FrameId, from the "Show in
+ *   transcript" button under a frame the assistant showed, STRANDS_PIN_TO_WHITEBOARD
+ *   with an answer's text, from "Pin to whiteboard" under it, and
+ *   STRANDS_OPEN_WHITEBOARD with a WhiteboardId, from "Open" under an answer that
+ *   changed that whiteboard.
  */
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { generateClient } from 'aws-amplify/api';
@@ -74,8 +80,17 @@ const MeetingAssistantPanel = ({
   vpData = null,
   loadingVP = false,
   participantMode = false,
+  contextRequest = null,
+  onPinAnswer = undefined,
+  onOpenWhiteboard = undefined,
 }) => {
   const regionRef = useRef(null);
+  const onPinAnswerRef = useRef(onPinAnswer);
+  onPinAnswerRef.current = onPinAnswer;
+  const onOpenWhiteboardRef = useRef(onOpenWhiteboard);
+  onOpenWhiteboardRef.current = onOpenWhiteboard;
+  // A question about something on the page, waiting for the frame to load.
+  const pendingContextRef = useRef(null);
   const frameRef = useRef(null);
   const frameLoadedRef = useRef(false);
   const pendingFocusRef = useRef(false);
@@ -380,9 +395,32 @@ const MeetingAssistantPanel = ({
     if (!frameLoadedRef.current) pendingFocusRef.current = true;
   }, [focusRequest]);
 
+  // Something on the page to ask about (a guidance card, a whiteboard panel):
+  // given to the frame as quoted context for the next question.
+  useEffect(() => {
+    if (!contextRequest) return;
+    const message = {
+      type: 'STRANDS_ASK_WITH_CONTEXT',
+      label: contextRequest.label,
+      text: contextRequest.text,
+      question: contextRequest.question,
+    };
+    if (frameLoadedRef.current) postToFrame(message);
+    else pendingContextRef.current = message;
+  }, [contextRequest]);
+
   const onFrameLoad = () => {
     frameLoadedRef.current = true;
-    postToFrame({ type: 'STRANDS_HOST_FEATURES', showInTranscript: Boolean(onShowInTranscriptRef.current) });
+    postToFrame({
+      type: 'STRANDS_HOST_FEATURES',
+      showInTranscript: Boolean(onShowInTranscriptRef.current),
+      pinToWhiteboard: Boolean(onPinAnswerRef.current),
+      openWhiteboard: Boolean(onOpenWhiteboardRef.current),
+    });
+    if (pendingContextRef.current) {
+      postToFrame(pendingContextRef.current);
+      pendingContextRef.current = null;
+    }
     if (pendingFocusRef.current) {
       pendingFocusRef.current = false;
       postToFrame({ type: 'STRANDS_FOCUS_INPUT' });
@@ -399,6 +437,13 @@ const MeetingAssistantPanel = ({
         onCloseRef.current?.({ returnFocus: true });
       } else if (type === 'STRANDS_SHOW_IN_TRANSCRIPT' && typeof event.data.frameId === 'string') {
         onShowInTranscriptRef.current?.(event.data.frameId);
+      } else if (type === 'STRANDS_PIN_TO_WHITEBOARD' && typeof event.data.text === 'string') {
+        onPinAnswerRef.current?.({
+          text: event.data.text,
+          question: typeof event.data.question === 'string' ? event.data.question : '',
+        });
+      } else if (type === 'STRANDS_OPEN_WHITEBOARD' && typeof event.data.whiteboardId === 'string') {
+        onOpenWhiteboardRef.current?.(event.data.whiteboardId);
       }
     };
     window.addEventListener('message', onMessage);
@@ -618,6 +663,16 @@ MeetingAssistantPanel.propTypes = {
   loadingVP: PropTypes.bool,
   /** A Participant's page: the chat alone, without the administrator's settings menu and dialogs. */
   participantMode: PropTypes.bool,
+  /**
+   * Something on the page to ask about, `{ label, text, question }`: a new object each time. The frame
+   * attaches it to the next question as quoted context.
+   */
+  // eslint-disable-next-line react/forbid-prop-types
+  contextRequest: PropTypes.object,
+  /** Called with `{ text, question }` when "Pin to whiteboard" is chosen under an answer; none, no such button. */
+  onPinAnswer: PropTypes.func,
+  /** Called with a WhiteboardId when "Open" is chosen under an answer that changed a whiteboard. */
+  onOpenWhiteboard: PropTypes.func,
 };
 
 export default MeetingAssistantPanel;

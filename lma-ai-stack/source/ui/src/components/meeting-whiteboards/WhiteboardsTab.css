@@ -1,0 +1,46 @@
+/*
+ * Copyright (c) 2025 Amazon.com
+ * This file is licensed under the MIT-0 License.
+ * See the LICENSE file in the project root for full license information.
+ */
+
+/* A drawn diagram fits its panel; a wide one (a long Gantt chart) scrolls. */
+.whiteboard-diagram {
+  overflow-x: auto;
+}
+
+.whiteboard-diagram svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.whiteboard-diagram-source {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* A panel the page was asked to show, picked out for a moment. */
+.whiteboard-panel {
+  border-radius: 16px;
+  transition: box-shadow 0.4s ease;
+}
+
+.whiteboard-panel-highlighted {
+  box-shadow: 0 0 0 3px #0972d3;
+}
+
+.whiteboard-pin-preview {
+  border: 1px solid #c6c6cd;
+  border-radius: 8px;
+  padding: 8px 12px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.awsui-dark-mode .whiteboard-panel-highlighted {
+  box-shadow: 0 0 0 3px #42b4ff;
+}
+
+.awsui-dark-mode .whiteboard-pin-preview {
+  border-color: #414d5c;
+}
