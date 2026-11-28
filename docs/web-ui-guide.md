@@ -779,7 +779,7 @@ what the meeting page shows:
 
 | File | What it is |
 |---|---|
-| **Summary (PDF)** | The PDF **Download › Summary › PDF (.pdf)** saves |
+| **Summary (PDF)** | The PDF **Download › Summary › PDF (.pdf)** saves, without the meeting's consent record, which stays in that download |
 | **Slides (PDF)** | The pages of the deck **Screen share › Slides (PDF)** prints: a cover, then a landscape page per frame of the shared screen with its label, picture, time and text. Each picture is scaled to at most 1,600 pixels wide |
 | **Whiteboards (PDF)** | Every whiteboard, as **Download › Whiteboards (PDF)** saves it ([Meeting Whiteboards › As a PDF](meeting-whiteboards.md#as-a-pdf)) |
 

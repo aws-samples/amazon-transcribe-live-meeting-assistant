@@ -157,11 +157,13 @@ const loadRasterizer = async () => (await import('../common/text-raster')).brows
 
 /**
  * How each part is built, as Blobs: replaced in tests. `ctx` holds what the
- * page has: { item, consent, participants (the header's names), whiteboards,
+ * page has: { item, participants (the header's names), whiteboards,
  * chapters, loadFrames }.
  */
 export const defaultBuilders = {
-  [PART_SUMMARY]: async (ctx) => summaryPdfBlob(ctx.item, ctx.consent, { participants: ctx.participants || [] }),
+  // Without the consent record: these files are made to be shared with the
+  // participants, and the record stays in Download › Summary › PDF (.pdf).
+  [PART_SUMMARY]: async (ctx) => summaryPdfBlob(ctx.item, null, { participants: ctx.participants || [] }),
   [PART_SLIDES]: async (ctx, { onProgress, isCancelled }) => {
     const [{ loadEveryKeyframe }, { buildSlidesPdf, deckFrames }, jsPDF, rasterizeText] = await Promise.all([
       import('../common/slide-deck'),

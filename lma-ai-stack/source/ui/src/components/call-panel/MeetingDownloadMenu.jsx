@@ -95,7 +95,6 @@ const MeetingDownloadMenu = ({
   const pack = useMeetingPack(
     {
       item,
-      consent,
       participants: participantNames,
       whiteboards,
       keyframeCount,
