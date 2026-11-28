@@ -161,17 +161,19 @@ export const mermaidProblem = (text) => {
   if (String(text).includes('%%{') || lines.includes('---')) {
     return 'A diagram may not hold Mermaid directives or front matter.';
   }
+  // A line may hold several statements separated by ";".
+  const statements = meaningful.flatMap((line) => line.split(';').map((part) => part.trim())).filter(Boolean);
   if (
-    meaningful.some((line) =>
-      ['click', 'callback', 'link', 'links', 'href'].includes(line.split(/\s+/)[0].toLowerCase()),
+    statements.some((statement) =>
+      ['click', 'callback', 'link', 'links', 'href'].includes(statement.split(/\s+/)[0].toLowerCase()),
     )
   ) {
     return 'A diagram may not hold click handlers, callbacks or links.';
   }
   const lowered = String(text).toLowerCase();
   if (/javascript\s*:/.test(lowered) || /<\s*\/?\s*[a-z!]/.test(lowered)) return 'A diagram may not hold HTML.';
-  const fetching = meaningful.find((line) => {
-    const styled = line.toLowerCase();
+  const fetching = statements.find((statement) => {
+    const styled = statement.toLowerCase();
     return STYLE_STATEMENTS.includes(styled.split(/\s+/)[0]) && (/url\s*\(/.test(styled) || styled.includes('@import'));
   });
   if (fetching) return `A diagram's styles may not fetch anything (url( or @import): ${fetching.slice(0, 80)}`;

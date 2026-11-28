@@ -155,7 +155,7 @@ TEMPLATES: Dict[str, Dict[str, Any]] = {
             "what the plan depends on and what could move it."
         ),
         "guidance": (
-            "Plan: a Mermaid gantt chart. Start with the line 'dateFormat YYYY-MM-DD', then "
+            "Plan: a Mermaid gantt chart: after the gantt line, a 'dateFormat YYYY-MM-DD' line, then "
             "one 'section' per workstream or owner, and one task per piece of work agreed, "
             "written 'Task name (owner) :id, start, duration', where start is a date or "
             "'after <id>' for a task that waits on another, and duration is like 3d or 2w. "
@@ -327,18 +327,20 @@ def check_mermaid(text: str) -> None:
     lowered = text.lower()
     if "%%{" in text or any(line == "---" for line in lines):
         raise _invalid("A diagram may not hold Mermaid directives or front matter")
-    for line in meaningful:
-        word = line.split(None, 1)[0].lower() if line.split() else ""
+    # A line may hold several statements separated by ";".
+    statements = [part.strip() for line in meaningful for part in line.split(";") if part.strip()]
+    for statement in statements:
+        word = statement.split(None, 1)[0].lower()
         if word in ("click", "callback", "link", "links", "href"):
             raise _invalid("A diagram may not hold click handlers, callbacks or links")
     if re.search(r"javascript\s*:", lowered) or re.search(r"<\s*/?\s*[a-z!]", lowered):
         raise _invalid("A diagram may not hold HTML")
-    for line in meaningful:
-        word = line.split(None, 1)[0].lower()
-        styled = line.lower()
+    for statement in statements:
+        word = statement.split(None, 1)[0].lower()
+        styled = statement.lower()
         if word in STYLE_STATEMENTS and (re.search(r"url\s*\(", styled) or "@import" in styled):
             raise _invalid(
-                "A diagram's styles may not fetch anything (url( or @import): " + line[:80]
+                "A diagram's styles may not fetch anything (url( or @import): " + statement[:80]
             )
 
 

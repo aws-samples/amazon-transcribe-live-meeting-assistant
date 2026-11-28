@@ -261,6 +261,8 @@ def test_diagrams_in_the_subset_are_accepted(text: str) -> None:
         ("flowchart TD\n  a-->b\n  classDef c fill:URL ( x )", "fetch"),
         ("flowchart TD\n  a-->b\n  classDef c @import 'x'", "fetch"),
         ("flowchart TD\n  a-->b\n  linkStyle 0 stroke:url(#g)", "fetch"),
+        ("flowchart TD\n  a-->b; style a fill:url(x)", "fetch"),
+        ("flowchart TD\n  a-->b; click a call go()", "click"),
         ("gantt\n  Task <b>bold</b> :t1, 2026-12-01, 1d", "HTML"),
     ],
 )

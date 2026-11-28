@@ -104,6 +104,8 @@ describe('checks before sending', () => {
     expect(mermaidProblem('flowchart LR\n  api["Orders URL (v2)"] --> imp["@import job"]')).toBeNull();
     expect(mermaidProblem('gantt\n  Update URL (staging) :t1, 2026-12-01, 2d')).toBeNull();
     expect(mermaidProblem('flowchart TD\n a-->b\n linkStyle 0 stroke:url(#g)')).toMatch(/linkStyle 0/);
+    expect(mermaidProblem('flowchart TD\n  a-->b; style a fill:url(x)')).toMatch(/fetch/);
+    expect(mermaidProblem('flowchart TD\n  a-->b; click a call go()')).toMatch(/click/);
   });
 
   // The server's rules (lma_whiteboards/rules.py) are the source of these lists.
