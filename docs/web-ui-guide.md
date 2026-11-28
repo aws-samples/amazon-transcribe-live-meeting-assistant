@@ -549,6 +549,20 @@ panel. Opening it puts the focus in the box where you type a question.
   Under the full-size frame, **Show in transcript** opens the **Transcript**
   tab at that moment and moves the [player](#the-recording-player) there,
   paused. Where the panel lies over the page, it closes to show the transcript.
+- **Whiteboards.** Ask it to "put the options on a whiteboard" or "add this to
+  the open questions", and it makes or changes the meeting's
+  [whiteboards](meeting-whiteboards.md#asking-the-assistant) as you; under an
+  answer that did, **Open "<whiteboard>"** shows it on the **Whiteboards** tab.
+  Under every answer, **Pin to whiteboard** adds the answer to a whiteboard you
+  choose (see [Adding to a whiteboard](meeting-whiteboards.md#adding-to-a-whiteboard)).
+  Neither is offered on a Participant's page, and **Pin to whiteboard** only to
+  someone who can change the meeting.
+- **Asking about something on the page.** **Ask the assistant** on a guidance
+  card in the Notifications drawer, and the **Ask the assistant about** button
+  on a whiteboard panel, open the panel with that card or panel shown above the
+  box you type in. **Send** with the box empty asks what it means; or type your
+  own question. The card or panel is sent with the question as quoted context,
+  and **✕** drops it.
 - **Settings menu** (administrators, in the Lambda assistant mode): **Edit Chat
   Buttons**, **Open VP Live View** / **Close VP Live View**, and **MCP
   Servers**.

@@ -27,6 +27,14 @@ import {
   Toggle,
 } from '@cloudscape-design/components';
 import { notificationActions } from './notification-actions';
+import {
+  ADD_TO_WHITEBOARD,
+  ASK_ASSISTANT,
+  guidanceText,
+  requestMeetingAction,
+  useMeetingActionAvailable,
+} from '../common/meeting-actions';
+import { FROM_GUIDANCE } from '../meeting-whiteboards/pin-to-whiteboard';
 import './MeetingNotificationsPanel.css';
 
 const logger = new ConsoleLogger('MeetingNotificationsPanel');
@@ -57,10 +65,31 @@ const markdownComponents = {
   ),
 };
 
+/** What the assistant is asked about a guidance card when the user sends nothing of their own. */
+export const GUIDANCE_QUESTION = 'What does this mean for the meeting, and what should I say or do next?';
+
 const NotificationCard = ({ notification, dismissed, onDismiss, onRestore, client }) => {
   const [status, setStatus] = useState(null);
   const severity = SEVERITY_DISPLAY[notification.Severity] || SEVERITY_DISPLAY.INFO;
   const actions = notificationActions(notification);
+  // Guidance links to the meeting page's assistant and whiteboards, when the
+  // page offers them for this meeting (see common/meeting-actions.js).
+  const isGuidance = notification.Category === 'guidance';
+  const canAsk = useMeetingActionAvailable(notification.CallId, ASK_ASSISTANT) && isGuidance;
+  const canPin = useMeetingActionAvailable(notification.CallId, ADD_TO_WHITEBOARD) && isGuidance;
+  const title = notification.Title || defaultTitle(notification.Category);
+  const ask = () =>
+    requestMeetingAction(notification.CallId, ASK_ASSISTANT, {
+      label: `Guidance: ${title}`,
+      text: guidanceText(notification),
+      question: GUIDANCE_QUESTION,
+    });
+  const pin = () =>
+    requestMeetingAction(notification.CallId, ADD_TO_WHITEBOARD, {
+      title,
+      text: notification.Body || title,
+      panelTitle: FROM_GUIDANCE,
+    });
   const run = async (action) => {
     setStatus(null);
     try {
@@ -102,6 +131,16 @@ const NotificationCard = ({ notification, dismissed, onDismiss, onRestore, clien
           </div>
         )}
         <div className="meeting-notification-buttons">
+          {canAsk && (
+            <Button variant="inline-link" iconName="contact" onClick={ask}>
+              Ask the assistant
+            </Button>
+          )}
+          {canPin && (
+            <Button variant="inline-link" iconName="add-plus" onClick={pin}>
+              Add to whiteboard
+            </Button>
+          )}
           {actions.map((action) => (
             <Button key={`${action.kind}:${action.label}`} variant="normal" onClick={() => run(action)}>
               {action.label}

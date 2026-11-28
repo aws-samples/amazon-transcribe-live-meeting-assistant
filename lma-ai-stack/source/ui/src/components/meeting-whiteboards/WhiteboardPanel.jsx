@@ -52,7 +52,19 @@ export const OwnerBadge = ({ panel }) =>
  * its content, with editing in place for those who can change the meeting.
  * Every action resolves to { error, conflict } (see use-meeting-whiteboards).
  */
-const WhiteboardPanel = ({ panel, isFirst, isLast, readOnly, assistantOn, onSave, onHandBack, onMove, onRemove }) => {
+const WhiteboardPanel = ({
+  panel,
+  isFirst,
+  isLast,
+  readOnly,
+  assistantOn,
+  onSave,
+  onHandBack,
+  onMove,
+  onRemove,
+  onAsk = undefined,
+  highlighted = false,
+}) => {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(panel.Title);
   const [content, setContent] = useState(panel.Content || '');
@@ -93,8 +105,20 @@ const WhiteboardPanel = ({ panel, isFirst, isLast, readOnly, assistantOn, onSave
     await actions[detail.id]?.();
   };
 
-  const menu = readOnly ? null : (
+  // Asking about a panel changes nothing, so it is offered to readers too.
+  const askButton = onAsk ? (
+    <Button
+      variant="inline-icon"
+      iconName="contact"
+      ariaLabel={`Ask the assistant about ${panel.Title}`}
+      onClick={onAsk}
+    />
+  ) : null;
+  const menu = readOnly ? (
+    askButton
+  ) : (
     <SpaceBetween direction="horizontal" size="xs">
+      {askButton}
       <Button variant="inline-icon" iconName="edit" ariaLabel={`Edit ${panel.Title}`} onClick={startEditing} />
       <ButtonDropdown
         variant="icon"
@@ -120,65 +144,72 @@ const WhiteboardPanel = ({ panel, isFirst, isLast, readOnly, assistantOn, onSave
   );
 
   return (
-    <Container
-      header={
-        <Header
-          variant="h3"
-          actions={editing ? null : menu}
-          description={
-            <SpaceBetween direction="horizontal" size="xs">
-              <OwnerBadge panel={panel} />
-              <span>{formatTime(panel.UpdatedAt)}</span>
-            </SpaceBetween>
-          }
-        >
-          {panel.Title}
-        </Header>
-      }
+    <div
+      className={`whiteboard-panel${isDiagram ? ' whiteboard-panel-wide' : ''}${
+        highlighted ? ' whiteboard-panel-highlighted' : ''
+      }`}
+      data-panel-id={panel.PanelId}
     >
-      {editing ? (
-        <SpaceBetween size="s">
-          <FormField label="Title" constraintText={`At most ${LIMITS.panelTitle} characters.`}>
-            <Input value={title} onChange={({ detail }) => setTitle(detail.value)} ariaLabel="Panel title" />
-          </FormField>
-          <FormField
-            label={isDiagram ? 'Diagram (Mermaid)' : 'Content (Markdown)'}
-            constraintText={
-              isDiagram
-                ? `At most ${LIMITS.mermaid} characters. Starts with ${DIAGRAM_TYPES}.`
-                : `At most ${LIMITS.markdown} characters.`
+      <Container
+        header={
+          <Header
+            variant="h3"
+            actions={editing ? null : menu}
+            description={
+              <SpaceBetween direction="horizontal" size="xs">
+                <OwnerBadge panel={panel} />
+                <span>{formatTime(panel.UpdatedAt)}</span>
+              </SpaceBetween>
             }
           >
-            <Textarea
-              value={content}
-              rows={isDiagram ? 10 : 8}
-              onChange={({ detail }) => setContent(detail.value)}
-              ariaLabel="Panel content"
-            />
-          </FormField>
-          <Toggle checked={preview} onChange={({ detail }) => setPreview(detail.checked)}>
-            Preview
-          </Toggle>
-          {preview && <PanelContent panel={{ ...panel, Content: content }} />}
-          {panel.Source === SOURCE_ASSISTANT && (
-            <Box variant="small" color="text-status-inactive">
-              Once you save a change, this panel is yours and the assistant no longer changes it.
-            </Box>
-          )}
-          {error && <Alert type="error">{error}</Alert>}
-          <SpaceBetween direction="horizontal" size="xs">
-            <Button onClick={() => setEditing(false)} disabled={saving}>
-              Cancel
-            </Button>
-            <Button variant="primary" onClick={save} loading={saving}>
-              Save
-            </Button>
+            {panel.Title}
+          </Header>
+        }
+      >
+        {editing ? (
+          <SpaceBetween size="s">
+            <FormField label="Title" constraintText={`At most ${LIMITS.panelTitle} characters.`}>
+              <Input value={title} onChange={({ detail }) => setTitle(detail.value)} ariaLabel="Panel title" />
+            </FormField>
+            <FormField
+              label={isDiagram ? 'Diagram (Mermaid)' : 'Content (Markdown)'}
+              constraintText={
+                isDiagram
+                  ? `At most ${LIMITS.mermaid} characters. Starts with ${DIAGRAM_TYPES}.`
+                  : `At most ${LIMITS.markdown} characters.`
+              }
+            >
+              <Textarea
+                value={content}
+                rows={isDiagram ? 10 : 8}
+                onChange={({ detail }) => setContent(detail.value)}
+                ariaLabel="Panel content"
+              />
+            </FormField>
+            <Toggle checked={preview} onChange={({ detail }) => setPreview(detail.checked)}>
+              Preview
+            </Toggle>
+            {preview && <PanelContent panel={{ ...panel, Content: content }} />}
+            {panel.Source === SOURCE_ASSISTANT && (
+              <Box variant="small" color="text-status-inactive">
+                Once you save a change, this panel is yours and the assistant no longer changes it.
+              </Box>
+            )}
+            {error && <Alert type="error">{error}</Alert>}
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button onClick={() => setEditing(false)} disabled={saving}>
+                Cancel
+              </Button>
+              <Button variant="primary" onClick={save} loading={saving}>
+                Save
+              </Button>
+            </SpaceBetween>
           </SpaceBetween>
-        </SpaceBetween>
-      ) : (
-        <PanelContent panel={panel} />
-      )}
-    </Container>
+        ) : (
+          <PanelContent panel={panel} />
+        )}
+      </Container>
+    </div>
   );
 };
 

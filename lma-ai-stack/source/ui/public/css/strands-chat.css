@@ -374,3 +374,83 @@ img.lma-keyframe {
     background: #f2f3f3;
     cursor: zoom-in;
 }
+
+/* What the next question is about (a guidance card, a whiteboard panel), above the composer. */
+.ask-context {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 0 20px;
+    margin-top: 10px;
+    padding: 8px 12px;
+    border-left: 3px solid #007bff;
+    background-color: #f1f6ff;
+    border-radius: 6px;
+    font-size: 12px;
+    color: #333;
+}
+.ask-context[hidden] {
+    display: none;
+}
+.ask-context-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.ask-context-label {
+    font-weight: 600;
+}
+.ask-context-excerpt {
+    color: #555;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+.ask-context-remove {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    color: #555;
+    padding: 0 2px;
+}
+.ask-context-remove:hover {
+    color: #000;
+}
+/* The quoted context under a question that carried one. */
+.message.user .message-context {
+    display: block;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(255, 255, 255, 0.4);
+    font-size: 12px;
+    opacity: 0.9;
+}
+/* Actions under a finished answer. */
+.answer-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: -8px;
+    align-self: flex-start;
+}
+.answer-action {
+    padding: 4px 10px;
+    background: white;
+    color: #0056b3;
+    border: 1px solid #b6cff5;
+    border-radius: 12px;
+    cursor: pointer;
+    font-size: 11px;
+}
+.answer-action:hover {
+    background-color: #f1f6ff;
+}
+.answer-action:disabled {
+    color: #6c757d;
+    cursor: default;
+}

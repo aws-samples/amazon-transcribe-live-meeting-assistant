@@ -11,7 +11,6 @@ import {
   Box,
   Button,
   ButtonDropdown,
-  ColumnLayout,
   Container,
   FormField,
   Header,
@@ -26,6 +25,7 @@ import {
 
 import WhiteboardPanel from './WhiteboardPanel';
 import WhiteboardVersions from './WhiteboardVersions';
+import './WhiteboardsTab.css';
 import {
   DEFAULT_TEMPLATE,
   KIND_MARKDOWN,
@@ -196,7 +196,7 @@ const TextModal = ({ visible, header, label, initial, limit, multiline, confirmT
 };
 
 /** One whiteboard: its header and menu, and its panels in two columns. */
-const WhiteboardView = ({ board, readOnly, whiteboards }) => {
+const WhiteboardView = ({ board, readOnly, whiteboards, onAskAboutPanel = undefined, highlightPanelId = null }) => {
   const [dialog, setDialog] = useState(null);
   const [error, setError] = useState(null);
   const [conflict, setConflict] = useState(false);
@@ -287,7 +287,7 @@ const WhiteboardView = ({ board, readOnly, whiteboards }) => {
         {panels.length === 0 ? (
           <Box color="text-status-inactive">This whiteboard has no panels.</Box>
         ) : (
-          <ColumnLayout columns={2}>
+          <div className="whiteboard-panels">
             {panels.map((panel, index) => (
               <WhiteboardPanel
                 key={panel.PanelId}
@@ -300,9 +300,11 @@ const WhiteboardView = ({ board, readOnly, whiteboards }) => {
                 onHandBack={() => apply({ Panels: withPanelHandedBack(panels, panel.PanelId) })}
                 onMove={(delta) => apply({ Panels: withPanelMoved(panels, panel.PanelId, delta) })}
                 onRemove={() => apply({ Panels: withPanelRemoved(panels, panel.PanelId) })}
+                onAsk={onAskAboutPanel ? () => onAskAboutPanel(board, panel) : undefined}
+                highlighted={highlightPanelId === panel.PanelId}
               />
             ))}
-          </ColumnLayout>
+          </div>
         )}
       </SpaceBetween>
 
@@ -403,8 +405,32 @@ const WhiteboardView = ({ board, readOnly, whiteboards }) => {
  * made here is shown from the moment it is stored, and the page's copy is
  * followed again once it moves. `meetingEnded` says the meeting has ended.
  */
-const WhiteboardsTab = ({ whiteboards, readOnly = false, assistantEnabled = undefined, meetingEnded = false }) => {
+const WhiteboardsTab = ({
+  whiteboards,
+  readOnly = false,
+  assistantEnabled = undefined,
+  meetingEnded = false,
+  selectRequest = null,
+  onAskAboutPanel = undefined,
+}) => {
   const [selectedId, setSelectedId] = useState(null);
+  // A whiteboard the page asked to show (a pinned answer, the assistant's
+  // change): selected, and its panel picked out for a few seconds.
+  const [highlight, setHighlight] = useState(null);
+  useEffect(() => {
+    if (!selectRequest?.whiteboardId) return undefined;
+    setSelectedId(selectRequest.whiteboardId);
+    setHighlight(selectRequest.panelId || null);
+    const timer = setTimeout(() => setHighlight(null), 4000);
+    return () => clearTimeout(timer);
+  }, [selectRequest]);
+  useEffect(() => {
+    if (!highlight) return;
+    const element = [...document.querySelectorAll('.whiteboard-panel[data-panel-id]')].find(
+      (panel) => panel.dataset.panelId === highlight,
+    );
+    element?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
+  }, [highlight, selectedId]);
   const [creating, setCreating] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [notice, setNotice] = useState(null);
@@ -491,7 +517,14 @@ const WhiteboardsTab = ({ whiteboards, readOnly = false, assistantEnabled = unde
         />
       )}
       {selected && (
-        <WhiteboardView key={selected.WhiteboardId} board={selected} readOnly={!canChange} whiteboards={whiteboards} />
+        <WhiteboardView
+          key={selected.WhiteboardId}
+          board={selected}
+          readOnly={!canChange}
+          whiteboards={whiteboards}
+          onAskAboutPanel={onAskAboutPanel}
+          highlightPanelId={highlight}
+        />
       )}
       {creating && (
         <NewWhiteboardModal

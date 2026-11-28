@@ -11,7 +11,7 @@
  */
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 
 const mermaid = vi.hoisted(() => ({ initialize: vi.fn(), render: vi.fn() }));
 // The sanitizer stands in for DOMPurify: what the page inserts is its answer,
@@ -60,6 +60,41 @@ describe('MermaidDiagram', () => {
     render(<MermaidDiagram text={'flowchart TD\n  click a call x()'} />);
     expect(screen.getByText(/click handlers/)).toBeTruthy();
     expect(mermaid.render).not.toHaveBeenCalled();
+  });
+
+  it('draws a Gantt chart once its panel is laid out, at its width, and again when it changes', async () => {
+    const observers = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback) {
+          this.callback = callback;
+          observers.push(this);
+        }
+
+        observe() {
+          this.observing = true;
+        }
+
+        disconnect() {
+          this.observing = false;
+        }
+      },
+    );
+    mermaid.render.mockResolvedValue({ svg: '<svg/>' });
+    purify.sanitize.mockReturnValue(SANITIZED);
+    render(<MermaidDiagram text={'gantt\n  Task :t1, 2026-12-01, 3d'} />);
+    // A tab that is not shown has no width yet: nothing is drawn.
+    await new Promise((done) => {
+      setTimeout(done, 10);
+    });
+    expect(mermaid.render).not.toHaveBeenCalled();
+    act(() => observers[0].callback([{ contentRect: { width: 815 } }]));
+    await screen.findByTestId('whiteboard-diagram');
+    expect(mermaid.render.mock.calls[0][1]).toMatch(/"useWidth":800/);
+    act(() => observers[0].callback([{ contentRect: { width: 1210 } }]));
+    await vi.waitFor(() => expect(mermaid.render.mock.calls.at(-1)[1]).toMatch(/"useWidth":1200/));
+    vi.unstubAllGlobals();
   });
 
   it('says when there is no diagram yet', () => {

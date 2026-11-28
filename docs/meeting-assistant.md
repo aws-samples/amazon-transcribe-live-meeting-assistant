@@ -61,6 +61,13 @@ Type questions directly in the chat panel on the meeting details page. The assis
 
 Each token is published through the `addChatToken` AppSync mutation and delivered to the browser over an `onAddChatToken` subscription, which is keyed on both the meeting and the message. The subscription is accepted from the people who can open the meeting: its owner, the users it is shared with, and Admins. All the tokens of one answer are published over a single connection to AppSync, opened when the answer starts and closed when it finishes. Each token carries a `Sequence` number, and the chat panel places the tokens it receives by that number, since a subscription does not guarantee that every message arrives or that messages arrive in order. The final message of an answer (`IsComplete: true`) carries the complete answer text, which replaces the streamed tokens in the panel; an answer too large for one subscription message ends with an empty final message, and the panel keeps the text assembled from the tokens. Callers that do not subscribe -- the Virtual Participant's voice assistant invokes the assistant directly and speaks the complete answer it gets back -- are answered without a token stream being published, since the mutation broadcasts to subscribers and stores nothing. The answer itself is identical either way. This covers the token stream only: the assistant's thinking steps are published on every path, including that one, where there is likewise no subscriber to receive them.
 
+Under each answer in the meeting page's chat, **Pin to whiteboard** adds the
+answer to one of the meeting's whiteboards, and under an answer that made or
+changed a whiteboard, **Open "<whiteboard>"** shows it. A guidance card's **Ask
+the assistant** and a whiteboard panel's **Ask the assistant about** open the
+chat with that card or panel attached to the next question as quoted context.
+See [Adding to a whiteboard](meeting-whiteboards.md#adding-to-a-whiteboard).
+
 ### Chat Shortcut Buttons
 
 Pre-configured suggestion buttons appear in the chat panel, allowing users to trigger common queries with a single click. These buttons are configurable by administrators via the LMA UI settings. See [Chat Shortcut Button Configuration](#chat-shortcut-button-configuration) for details.
