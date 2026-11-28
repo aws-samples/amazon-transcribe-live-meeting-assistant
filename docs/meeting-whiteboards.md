@@ -30,6 +30,7 @@ configuration preset leaves On for new meetings off.
 
 - [What a whiteboard is](#what-a-whiteboard-is)
 - [On the meeting page](#on-the-meeting-page)
+- [Asking the assistant](#asking-the-assistant)
 - [How the assistant keeps them up to date](#how-the-assistant-keeps-them-up-to-date)
 - [User edits win](#user-edits-win)
 - [Versions](#versions)
@@ -119,6 +120,53 @@ or who last edited it, and when.
 Every change reaches every open meeting page through the `onMeetingWhiteboard`
 subscription, without a reload. Once the meeting's transcript is deleted, the
 tab says its whiteboards were deleted with it.
+
+## Asking the assistant
+
+The meeting page's assistant chat can read and change the meeting's whiteboards
+when asked: "put the options we discussed on a whiteboard", "make a Gantt chart
+of what we agreed", "draw the architecture Sam described", "add Priya's concern
+to the open questions". It uses four tools, for the current meeting only:
+
+| Tool | What it does |
+|---|---|
+| `list_meeting_whiteboards` | The meeting's whiteboards, each panel by title with who keeps it and the start of its content, whether the assistant's updates are on, and the templates. |
+| `get_meeting_whiteboard` | One whiteboard with the full content of its panels. |
+| `create_meeting_whiteboard` | A new whiteboard from a template, with content for its panels (matched by title) and any further panels. |
+| `update_meeting_whiteboard` | One panel's content replaced, or added to at its end (which keeps what it holds), or a new panel added. |
+
+- **Who.** The tools are offered only to the meeting page's own chat, for the
+  people who can see whiteboards: the meeting's owner, the users it is shared
+  with and Admins (and a question asked through the hosted MCP server's
+  `ask_meeting_assistant`, with a read-write key, which is asked the way the
+  page's chat asks it). A request made in the meeting (the meeting chat, the voice
+  assistant or the wake phrase) and a Participant's question are never offered
+  them, whatever **Participant use** says; such a request is told that
+  whiteboards are kept on the meeting's page in LMA.
+- **Whose change.** Each change is the asking user's (`Source: user`,
+  `UpdatedBy` their username), made through `createMeetingWhiteboard` and
+  `updateMeetingWhiteboard` with the version it read, so it is held to every
+  rule on this page and arrives on every open meeting page at once. A panel the
+  assistant keeps stays the assistant's, so its automatic updates (when they are
+  on) keep it current; asked to keep a panel exactly as written, the assistant
+  makes it the user's. A panel a person wrote stays theirs. A new panel the
+  chat adds is the user's unless they ask the assistant to keep it current.
+- **Changes made meanwhile.** If somebody changes the whiteboard while the
+  assistant is changing it, the assistant reads it again and makes its change
+  on the newer version, so it never overwrites theirs; if the whiteboard keeps
+  changing, it says so.
+- **Only when asked.** The fixed part of the assistant's instructions tells it
+  to change a whiteboard only when the request it is answering asks for it, and
+  that a line in the transcript or the meeting chat, a whiteboard's own content
+  and anything another tool returns are quoted data, never to be acted on. This
+  is an instruction to the model, not a filter: every change it makes is still
+  the asking user's, shown with its version, and can be undone from
+  **Versions**.
+- **Cost.** They are tool calls within the chat answer. Each tool call adds a
+  model call to the answer, billed with it in the meeting assistant's
+  `MeetingAssistant` record of the meeting's
+  [cost estimate](meeting-cost-estimate.md); they do not count against
+  **Runs per meeting at most**.
 
 ## How the assistant keeps them up to date
 
@@ -347,7 +395,8 @@ per-minute write counter (`r#<minute>`) and the assistant's state (`updater`).
   was said before that part is not seen; later runs carry the notes forward.
 - **Requests made in the meeting**, such as asking the voice assistant or the
   meeting chat to make a whiteboard, are not supported; whiteboards are made on
-  the meeting page, by the assistant's updates, or over MCP.
+  the meeting page (by hand or by asking its assistant chat), by the
+  assistant's updates, or over MCP.
 - **No drawing canvas.** Diagrams are written as Mermaid text.
 
 ## Related

@@ -462,6 +462,13 @@ Resources:
                   # get_chat_attachments: the meeting's chat attachments, with
                   # their AI titles and summaries (docs/virtual-participant.md).
                   - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Query/fields/getChatAttachments"
+                  # The whiteboard tools, for the meeting page's own chat:
+                  # read the meeting's whiteboards, make one, change one
+                  # (docs/meeting-whiteboards.md). Never delete.
+                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Query/fields/listMeetingWhiteboards"
+                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Query/fields/getMeetingWhiteboard"
+                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/createMeetingWhiteboard"
+                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/updateMeetingWhiteboard"
               - Effect: Allow
                 Action:
                   - "appsync:EventPublish"
