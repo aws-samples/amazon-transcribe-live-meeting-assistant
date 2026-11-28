@@ -259,9 +259,17 @@ def test_a_diagram_outside_the_subset_is_refused_before_anything_is_sent() -> No
     assert resolver.writes() == []
 
 
-def test_an_unknown_template_is_refused() -> None:
-    with pytest.raises(rules.WhiteboardError):
+def test_an_unknown_template_is_refused_in_words_the_agent_can_act_on() -> None:
+    with pytest.raises(tools.WhiteboardToolError, match="Template must be one of"):
         tools_for(FakeResolver()).create(template="kanban")
+
+
+def test_a_title_two_panels_share_is_answered_with_their_ids() -> None:
+    start = decisions_board()
+    start["Panels"][1]["Title"] = "Risks"
+    start["Panels"][2]["Title"] = "risks"
+    with pytest.raises(tools.WhiteboardToolError, match="ids open-questions, notes"):
+        tools_for(FakeResolver([start])).update("Launch", "Risks", "x")
 
 
 def test_a_meeting_with_as_many_whiteboards_as_it_may_have_is_told_to_add_a_panel() -> None:
@@ -382,6 +390,7 @@ def test_the_handlers_tool_bodies_report_a_refusal_to_the_agent(monkeypatch) -> 
     listed, _get, create, update = handler_module.create_whiteboard_tools("call-1", USER)
     assert "Launch" in listed()
     assert "Add a panel" in create(template="risks")
+    assert "Template must be one of" in create(template="kanban")
     assert update(whiteboard="Launch", panel="Notes", content="- one").startswith(
         "Rewrote the panel 'Notes'"
     )

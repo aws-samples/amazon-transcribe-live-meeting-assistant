@@ -227,7 +227,10 @@ def _match(items: Sequence[Mapping[str, Any]], wanted: Any, id_key: str) -> Opti
             return dict(item)
     folded = _clean(text).casefold()
     titled = [item for item in items if _clean(item.get("Title")).casefold() == folded]
-    return dict(titled[0]) if len(titled) == 1 else None
+    if len(titled) > 1:
+        ids = ", ".join(str(item.get(id_key)) for item in titled)
+        raise WhiteboardToolError(f"More than one is titled {text!r} (ids {ids}); use the id.")
+    return dict(titled[0]) if titled else None
 
 
 def _owner(panel: Mapping[str, Any]) -> str:
@@ -381,7 +384,10 @@ class Whiteboards:
     ) -> Tuple[Dict[str, Any], str]:
         """A new whiteboard: the template's panels, filled from ``panels`` by title, and the
         panels of ``panels`` the template does not have, after them."""
-        name = rules.check_template(template)
+        try:
+            name = rules.check_template(template)
+        except rules.WhiteboardError as error:
+            raise WhiteboardToolError(f"The change was refused: {error}") from error
         given = _given_panels(panels)
         stored: List[Dict[str, Any]] = []
         used = set()
