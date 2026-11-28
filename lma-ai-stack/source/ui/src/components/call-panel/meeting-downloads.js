@@ -11,24 +11,26 @@
  * Excel for the transcript, which is a table -- and each can be copied to the
  * clipboard as Markdown. The summary's Word, PDF and web page files hold
  * thumbnails of the key frames it names. Every summary format holds every
- * section of the summary, in one reading order (downloadSummarySections). The
- * summary can also be sent as an email.
+ * section of the summary, in one reading order (downloadSummarySections).
+ * Email participants… (in the Summary group) opens the dialog that makes an
+ * email draft with the meeting's PDF files attached (MeetingPackModal.jsx).
  *
  * The menu (downloadMenuItems) has a group for each kind of file: Summary,
  * Transcript, Recordings (each session's audio and video), Screen share (the
- * slide deck, printed by the browser, and the key frames as a .zip), Chat
- * attachments (each file, and all of them as a .zip), the meeting export (one
- * structured JSON record of the meeting, docs/meeting-export.md), and
- * Everything (.zip), which holds the export too.
+ * slide deck, printed by the browser, and the key frames as a .zip),
+ * Whiteboards (PDF), Chat attachments (each file, and all of them as a .zip),
+ * Meeting pack… (the Summary, Slides and Whiteboards PDFs together, built in
+ * the browser; meeting-pack.js), the meeting export (one structured JSON
+ * record of the meeting, docs/meeting-export.md), and Everything (.zip),
+ * which holds the export too.
  * An entry with nothing behind it is disabled with the reason. The .zip
- * archives are built on the server (use-meeting-archive.js); every file is
- * fetched through a time-limited signed link, after the same access check as
- * the meeting.
+ * archives other than the meeting pack are built on the server
+ * (use-meeting-archive.js); every file is fetched through a time-limited
+ * signed link, after the same access check as the meeting.
  */
 import { ConsoleLogger } from 'aws-amplify/utils';
 
-import { participantsInput } from '../common/participant-list';
-import { getEmailFormattedSummary, getTextFileFormattedMeetingDetails } from '../common/summary';
+import { getTextFileFormattedMeetingDetails } from '../common/summary';
 import {
   downloadSummaryAsDocx,
   downloadSummaryAsHtml,
@@ -59,7 +61,7 @@ const COPY_ITEM = { text: 'Copy to clipboard (Markdown)', id: 'copy', iconName: 
 export const SUMMARY_ACTION_ITEMS = [
   ...FORMAT_ITEMS,
   COPY_ITEM,
-  { text: 'Email summary', id: 'email', iconName: 'envelope' },
+  { text: 'Email participants…', id: 'email', iconName: 'envelope' },
 ];
 
 export const TRANSCRIPT_DOWNLOAD_ITEMS = [
@@ -91,22 +93,12 @@ export const copyText = async (text) => {
   }
 };
 
-const summaryEmailRecipients = (item) => {
-  const byAddress = new Map();
-  participantsInput(item.participants).forEach(({ email }) => {
-    const address = email.trim();
-    if (address && !byAddress.has(address.toLowerCase())) byAddress.set(address.toLowerCase(), address);
-  });
-  return [...byAddress.values()].map((address) => encodeURIComponent(address).replace(/%40/g, '@')).join(',');
-};
-
 /**
  * Runs one of SUMMARY_ACTION_ITEMS for a meeting; `consent` is its consent
  * record, when it has one, and `participants` the names the page's header
  * lists, which the downloads write with the meeting's date and duration.
- * The email is addressed to the meeting's participant list
- * (`item.participants`). Resolves to whether a copy reached the clipboard, for
- * 'copy', and to true otherwise.
+ * ('email' opens a dialog, which the menu itself does.) Resolves to whether a
+ * copy reached the clipboard, for 'copy', and to true otherwise.
  */
 export const runSummaryAction = async (id, item, consent = null, { participants = [] } = {}) => {
   const name = `Summary-${item.callId}`;
@@ -123,11 +115,6 @@ export const runSummaryAction = async (id, item, consent = null, { participants 
     await exportToTextFile(getTextFileFormattedMeetingDetails(item, consent, options), name);
   } else if (id === 'copy') {
     return copyText(summaryDownloadMarkdown(item, consent, options));
-  } else if (id === 'email') {
-    const subject = encodeURIComponent(item.callId ?? '');
-    const to = summaryEmailRecipients(item);
-    const body = getEmailFormattedSummary(item.callSummaryText);
-    window.open(`mailto:${to}?subject=${subject}&body=${body}`);
   }
   return true;
 };
@@ -170,6 +157,8 @@ export const recordingSessions = (current, earlier) => {
 
 const NO_SHARED_SCREEN = 'Nothing was shared on screen in this meeting.';
 const NO_ATTACHMENTS = 'No chat attachments were captured for this meeting.';
+const NO_WHITEBOARDS = 'This meeting has no whiteboards.';
+const NO_PACK = 'This meeting has no summary, slides or whiteboards yet.';
 
 const recordingItems = (kind, label, urls) => {
   if (!urls.length) {
@@ -193,7 +182,8 @@ const recordingItems = (kind, label, urls) => {
  * The Download menu's items, as nested groups. `meeting` holds what the page
  * knows: whether there is a summary (and why not), whether the transcript can
  * be downloaded (and why not), each session's recording links, how many key
- * frames the meeting has, and its stored chat attachments.
+ * frames the meeting has, its stored chat attachments, and how many
+ * whiteboards it has (and why none, when its transcript was deleted).
  */
 export const downloadMenuItems = ({
   hasSummary,
@@ -204,6 +194,8 @@ export const downloadMenuItems = ({
   videoUrls = [],
   keyframeCount = 0,
   attachments = [],
+  whiteboardCount = 0,
+  whiteboardsReason = null,
 }) => {
   const stored = (attachments || []).filter((attachment) => attachment?.Status === 'STORED' && attachment.AttachmentId);
   return [
@@ -243,6 +235,13 @@ export const downloadMenuItems = ({
       })),
     },
     {
+      id: 'pack:whiteboards',
+      text: 'Whiteboards (PDF)',
+      iconName: 'file',
+      disabled: !whiteboardCount,
+      disabledReason: whiteboardCount ? undefined : whiteboardsReason || NO_WHITEBOARDS,
+    },
+    {
       text: 'Chat attachments',
       items: [
         ...stored.map((attachment) => ({
@@ -258,6 +257,13 @@ export const downloadMenuItems = ({
           disabledReason: stored.length ? undefined : NO_ATTACHMENTS,
         },
       ],
+    },
+    {
+      id: 'pack:dialog',
+      text: 'Meeting pack (PDF files)…',
+      iconName: 'download',
+      disabled: !(hasSummary || keyframeCount || whiteboardCount),
+      disabledReason: hasSummary || keyframeCount || whiteboardCount ? undefined : NO_PACK,
     },
     { id: 'archive:EXPORT', text: 'Meeting export (.json)', iconName: 'download' },
     { id: 'archive:EVERYTHING', text: 'Everything (.zip)', iconName: 'download' },

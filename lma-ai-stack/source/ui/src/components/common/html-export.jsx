@@ -285,6 +285,81 @@ export const renderSummaryHtml = ({ title, facts = [], sections = [], consentMar
   );
 };
 
+// The email body's styles: in the <head> for the mail apps that read it, and
+// on the main elements themselves for those that drop a <style> element.
+const EMAIL_FONT = "'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, 'Helvetica Neue', Arial, sans-serif";
+export const EMAIL_CSS = `
+body { margin: 0; padding: 16px; color: #16191f; font: 14px/1.5 ${EMAIL_FONT}; }
+h1 { font-size: 20px; line-height: 1.3; margin: 0 0 8px; }
+h2 { font-size: 16px; margin: 22px 0 6px; padding-bottom: 4px; border-bottom: 1px solid #e0e0e0; }
+h3, h4, h5, h6 { font-size: 14px; margin: 14px 0 4px; }
+table.facts td { padding: 1px 14px 1px 0; vertical-align: top; }
+table.facts td.label { color: #414d5c; font-weight: 600; white-space: nowrap; }
+table { border-collapse: collapse; }
+th, td { border: 1px solid #d1d5db; padding: 4px 8px; text-align: left; vertical-align: top; }
+table.facts td { border: 0; }
+th { background: #f2f3f3; }
+code { font-family: Consolas, Menlo, monospace; font-size: 13px; background: #f2f3f3; padding: 0 3px; }
+pre { background: #f2f3f3; padding: 8px; white-space: pre-wrap; }
+blockquote { margin: 6px 0; padding-left: 10px; border-left: 3px solid #d1d5db; color: #414d5c; }
+a { color: #0972d3; }
+p.note { color: #5f6b7a; font-style: italic; }
+p.footer { margin-top: 24px; color: #5f6b7a; font-size: 12px; }
+`;
+
+/**
+ * The summary as the HTML body of an email (a string): the meeting's name and
+ * facts, an optional note (that the meeting is still going on, say), every
+ * section in reading order as the Summary tab renders it, and a line naming
+ * the attached files. Rendered with the same parser and sanitizer as the web
+ * page download; a picture of the shared screen is written as its caption,
+ * since the body holds no pictures.
+ */
+export const renderSummaryEmailHtml = ({ title, facts = [], sections = [], note = '', attachments = [] }) => {
+  const components = componentsFor({});
+  return asDocument(
+    <html lang="en">
+      <head>
+        <meta charSet="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>{title}</title>
+        {/* A constant of this module, not text from the meeting. */}
+        {/* eslint-disable-next-line react/no-danger */}
+        <style dangerouslySetInnerHTML={{ __html: EMAIL_CSS }} />
+      </head>
+      <body style={{ fontFamily: EMAIL_FONT, fontSize: '14px', lineHeight: 1.5, color: '#16191f' }}>
+        <h1 style={{ fontSize: '20px', margin: '0 0 8px' }}>{title}</h1>
+        {facts.length > 0 && (
+          <table className="facts" role="presentation" style={{ borderCollapse: 'collapse' }}>
+            <tbody>
+              {facts.map(({ label, value }) => (
+                <tr key={label}>
+                  <td className="label" style={{ paddingRight: '14px', fontWeight: 600, color: '#414d5c' }}>
+                    {label}
+                  </td>
+                  <td>{value}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {note ? <p className="note">{note}</p> : null}
+        {sections.map((section, index) => (
+          // eslint-disable-next-line react/no-array-index-key -- a hand-written summary can repeat a heading
+          <React.Fragment key={index}>
+            <h2 style={{ fontSize: '16px', margin: '22px 0 6px', borderBottom: '1px solid #e0e0e0' }}>
+              {section.title}
+            </h2>
+            <Markdown markdown={String(section.markdown ?? '')} components={components} />
+          </React.Fragment>
+        ))}
+        {attachments.length > 0 && <p className="footer">Attached: {attachments.join(', ')}</p>}
+        <p className="footer">Prepared with Live Meeting Assistant.</p>
+      </body>
+    </html>,
+  );
+};
+
 /**
  * The transcript as an HTML document (a string): a paragraph per row, the
  * speaker in bold and the time after it, as the other transcript downloads

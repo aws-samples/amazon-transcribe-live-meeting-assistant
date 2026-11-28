@@ -1347,7 +1347,9 @@ describe('the Download menu', () => {
     'Transcript',
     'Recordings',
     'Screen share',
+    'Whiteboards (PDF)',
     'Chat attachments',
+    'Meeting pack (PDF files)…',
     'Meeting export (.json)',
     'Everything (.zip)',
   ];
@@ -1367,7 +1369,7 @@ describe('the Download menu', () => {
       'Summary',
       ...FORMATS,
       'Copy to clipboard (Markdown)',
-      'Email summary',
+      'Email participants…',
       ...GROUPS.slice(1),
     ]);
     expandGroup('Transcript');

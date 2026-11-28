@@ -336,6 +336,26 @@ AWS_PROFILE=default LMA_TEST_MEETING_ARCHIVE=1 \
     .venv/bin/python -m pytest integ-tests/test_meeting_archive.py --stack-name lma-integtest1 -s
 ```
 
+## The meeting pack and Email participants
+
+`test_meeting_pack.py` makes a synthetic meeting owned by the Cognito test user,
+with a participant list, a summary, two key frames with JPEG pictures and a
+whiteboard holding a flowchart, a table and a task list. In headless Chromium,
+signed in as the test user, it opens **Download › Meeting pack (PDF files)…**,
+checks every file is ticked and shows its size, and downloads the .zip: three
+PDF files, the slides with a page per key frame and the whiteboards with the
+flowchart drawn. It downloads **Whiteboards (PDF)** alone, then saves an email
+draft from **Summary › Email participants…** and reads it with Python's `email`
+package (`X-Unsent: 1`, both participants in To:, the summary as text and HTML,
+the three PDFs attached). Everything it wrote is removed afterwards. It needs
+`requirements-video.txt` (playwright, Pillow) and Chromium;
+`LMA_TEST_MEETING_PACK_OUT=<dir>` keeps the screenshots and files.
+
+```bash
+AWS_PROFILE=default LMA_TEST_MEETING_PACK=1 LMA_TEST_USER_SECRET_ID=lma/integ-tests/cognito-user \
+    .venv/bin/python -m pytest integ-tests/test_meeting_pack.py --stack-name lma-integtest1 -s
+```
+
 ## A Virtual Participant in a Google Meet meeting
 
 `test_meet_end_to_end.py` starts a scripted guest in a real Google Meet meeting
