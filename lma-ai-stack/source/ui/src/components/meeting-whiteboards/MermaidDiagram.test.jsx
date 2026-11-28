@@ -30,7 +30,7 @@ afterEach(() => {
 });
 
 describe('MermaidDiagram', () => {
-  it('draws a diagram in strict mode and sanitizes what Mermaid returns', async () => {
+  it('draws a diagram in strict mode with SVG text labels, and sanitizes what Mermaid returns', async () => {
     const raw = '<svg><g>drawn</g><foreignObject>raw</foreignObject></svg>';
     mermaid.render.mockResolvedValue({ svg: raw });
     purify.sanitize.mockReturnValue(SANITIZED);
@@ -38,7 +38,14 @@ describe('MermaidDiagram', () => {
     const drawn = await screen.findByTestId('whiteboard-diagram');
     expect(purify.sanitize.mock.calls[0][0]).toBe(raw);
     expect(drawn.innerHTML).toBe(SANITIZED);
-    expect(mermaid.initialize).toHaveBeenCalledWith({ startOnLoad: false, securityLevel: 'strict' });
+    // Labels as SVG text: HTML labels sit in <foreignObject>, which the SVG
+    // sanitizer removes, leaving a flowchart or mind map with no labels.
+    expect(mermaid.initialize).toHaveBeenCalledWith({
+      startOnLoad: false,
+      securityLevel: 'strict',
+      htmlLabels: false,
+      flowchart: { htmlLabels: false },
+    });
     expect(purify.sanitize).toHaveBeenCalled();
   });
 
