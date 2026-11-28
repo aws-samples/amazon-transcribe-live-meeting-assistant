@@ -377,9 +377,16 @@ def plain(text: Any, limit: int) -> str:
     """
     text = _MD_LINK.sub(r"\1", " ".join(str(text or "").split()))
     text = _URL.sub("", text)
-    text = " ".join(text.split())
-    text = text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
-    return _MD_SPECIAL.sub(r"\\\1", text)
+    text = _MD_SPECIAL.sub(r"\\\1", " ".join(text.split()))
+    # Cut after escaping, so the limit holds for what is published; never
+    # between a backslash and the character it escapes.
+    if len(text) > limit:
+        text = text[: limit - 1].rstrip()
+        trailing = len(text) - len(text.rstrip("\\"))
+        if trailing % 2:
+            text = text[:-1]
+        text = text.rstrip() + "…"
+    return text
 
 
 #: A source address longer than this is shown by its title when the body is long.

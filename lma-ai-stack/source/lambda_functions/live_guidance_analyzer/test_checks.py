@@ -356,6 +356,12 @@ def test_a_source_link_must_be_a_web_address():
     assert "](" not in item.body and "javascript" not in item.body
 
 
+def test_escaped_text_stays_within_its_limit_and_is_never_cut_inside_an_escape():
+    text = checks.plain("_" * 400, 100)
+    assert len(text) <= 100 and text.endswith("…")
+    assert not text[:-1].endswith("\\") or text[:-1].endswith("\\_")
+
+
 def test_plain_text_is_cut_and_escaped():
     assert checks.plain("a * b _c_", 100) == "a \\* b \\_c\\_"
     assert checks.plain("x" * 50, 10) == "x" * 9 + "…"

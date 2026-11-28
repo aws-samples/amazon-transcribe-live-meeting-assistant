@@ -756,7 +756,13 @@ def _analyse(  # pylint: disable=too-many-arguments,too-many-locals
         "dropped": analysis.dropped,
     }
     if research.pending and research.can_research():
-        result["research"] = drain(call_id, settings, segments, until=until)
+        try:
+            result["research"] = drain(call_id, settings, segments, until=until)
+        except Exception:  # pylint: disable=broad-except
+            # The run itself is done and its lease given back; only the
+            # research after it failed, and the queue waits for the next.
+            LOGGER.exception("Guidance research after the run of %s failed", call_id)
+            result["research"] = {"failed": True}
     return result
 
 
@@ -830,8 +836,19 @@ class _ResearchContext:  # pylint: disable=too-many-instance-attributes
         self.pending = [*self.pending, *self.new]
 
     def persist(self, call_id: str, meeting: Mapping[str, Any]) -> None:
-        """Append the new candidates to the queue, and the drops to the drop log."""
+        """Append the new candidates to the queue, and the drops to the drop log.
+
+        The queue holds the meeting's words, so nothing is written once its
+        transcript is deleted: the meeting is read again just before, since a
+        run can finish after the deletion removed the ``gd#`` partition.
+        """
         if not self.new and not self.drops:
+            return
+        current = read_meeting(call_id)
+        if current is None or current.get("TranscriptDeletedAt"):
+            LOGGER.info("Guidance research for %s: transcript deleted, nothing queued", call_id)
+            self.pending = [c for c in self.pending if c not in self.new]
+            self.new, self.drops = [], []
             return
         values: Dict[str, Any] = {
             ":new": {"L": [{"S": json.dumps(c.to_record(), ensure_ascii=False)} for c in self.new]},
@@ -944,7 +961,11 @@ def _drop_when_out_of_runs(call_id: str, settings: pure.Settings) -> None:
             UpdateExpression=(
                 "SET Pending = :empty, DropLog = list_append(if_not_exists(DropLog, :empty), :d)"
             ),
-            ConditionExpression="attribute_not_exists(LeaseUntil) OR LeaseUntil < :now",
+            # attribute_exists(PK): never recreate a row the transcript's
+            # deletion removed.
+            ConditionExpression=(
+                "attribute_exists(PK) AND (attribute_not_exists(LeaseUntil) OR LeaseUntil < :now)"
+            ),
             ExpressionAttributeValues={
                 ":empty": {"L": []},
                 ":d": {"L": [{"S": json.dumps(d.to_record())} for d in drops]},

@@ -199,6 +199,61 @@ def test_the_tool_budget_holds_when_the_model_keeps_searching():
     assert outcome.findings, "the report after the budget is still read"
 
 
+def _run_with(turns, max_tool_calls=1, clock=None):
+    model = ScriptedModel(turns)
+
+    @tool
+    def web_search(query: str) -> str:
+        """Search the web.
+
+        Args:
+            query: the query
+        """
+        return HOSTILE_PAGE
+
+    def make_agent(*, system_prompt, tools, hooks):
+        return Agent(model=model, system_prompt=system_prompt, tools=tools, hooks=hooks, callback_handler=None)
+
+    request = gr.ResearchRequest.parse(
+        {
+            "callId": "call-1",
+            "modelId": "scripted",
+            "maxToolCalls": max_tool_calls,
+            "candidates": [{"id": "C1", "kind": "lookup", "claim": "SOC 2"}],
+        }
+    )
+    kwargs = {"clock": clock} if clock else {}
+    return gr.run(request, [web_search], {"web_search": "Web"}, make_agent, **kwargs), model
+
+
+def test_the_model_call_cap_ends_a_run_that_never_stops_calling_tools():
+    # A model that asks for a tool it was not offered, turn after turn: the
+    # tool budget never moves, so only the model-call cap can end it.
+    endless = [[("delete_all_tickets", {})] for _ in range(40)]
+    outcome, model = _run_with(endless, max_tool_calls=1)
+    assert len(model.seen) == 1 + gr.EXTRA_MODEL_CALLS
+    assert outcome.stopped == "model calls" and outcome.findings == []
+
+
+class SteppingClock:
+    """Each reading advances by ``step`` seconds."""
+
+    def __init__(self, step):
+        self.now, self.step = 1000.0, step
+
+    def __call__(self):
+        self.now += self.step
+        return self.now
+
+
+def test_the_deadline_ends_a_run_that_is_still_searching():
+    searching = [[("web_search", {"query": "q"})] for _ in range(40)]
+    # 60 seconds allowed; each reading of the clock is 25 seconds later.
+    outcome, model = _run_with(searching, max_tool_calls=20, clock=SteppingClock(25.0))
+    assert outcome.stopped == "deadline"
+    assert len(model.seen) <= 3 and outcome.tool_calls <= 2
+
+
 def test_a_model_that_never_reports_leaves_no_findings():
     outcome, _ran, _model = _run(["Everything is fine."])
     assert outcome.findings == []

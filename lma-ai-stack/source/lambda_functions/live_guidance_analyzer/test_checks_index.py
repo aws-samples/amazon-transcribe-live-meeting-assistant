@@ -116,11 +116,10 @@ class TwoRowDynamo(FakeDynamo):
                 self.state["DropLog"] = list(self.state.get("DropLog") or []) + values[":drops"]
             self.state["CallId"] = values[":call"]
             return {}
-        if condition.startswith("attribute_not_exists(LeaseUntil) OR LeaseUntil < :now") and (
-            "Pending = :empty" in expression
-        ):
+        if "Pending = :empty" in expression:
+            assert condition.startswith("attribute_exists(PK) AND")
             lease = self.state.get("LeaseUntil")
-            if lease is not None and lease >= values[":now"]:
+            if not self.state or (lease is not None and lease >= values[":now"]):
                 raise _conditional_failure()
             self.state["Pending"] = []
             self.state["DropLog"] = list(self.state.get("DropLog") or []) + values[":d"]
@@ -489,6 +488,26 @@ def test_once_the_research_runs_are_used_the_run_asks_for_no_more_candidates(wor
     schema = state["bedrock"].calls[-1]["toolConfig"]["tools"][0]["toolSpec"]["inputSchema"]["json"]
     assert "checks" not in schema["properties"]
     assert len(state["requests"]) == 1
+
+
+def test_nothing_is_queued_once_the_transcript_is_deleted(world, monkeypatch):
+    state = world(answers=[with_checks(PRICE)])
+    real = index.read_meeting
+    reads = []
+
+    def read_meeting(call_id):
+        reads.append(call_id)
+        meeting = real(call_id)
+        # Deleted while the run was making its model call.
+        return (
+            {**meeting, "TranscriptDeletedAt": "2026-11-28T00:00:00Z"}
+            if len(reads) > 1
+            else meeting
+        )
+
+    monkeypatch.setattr(index, "read_meeting", read_meeting)
+    automatic()
+    assert research_row(state) == {} and state["requests"] == []
 
 
 def test_fact_checks_share_the_cap_on_guidance_per_ten_minutes(world):
