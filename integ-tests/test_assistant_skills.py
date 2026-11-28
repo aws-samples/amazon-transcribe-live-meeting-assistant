@@ -3,7 +3,7 @@
 # See the LICENSE file in the project root for full license information.
 """The meeting assistant's skills, against a live stack.
 
-Three behaviours, each from the outside:
+Four behaviours, each from the outside:
 
 - **An answer follows a skill.** A probe skill is created with
   ``client.skills.create()``: its description names a made-up procedure, and its
@@ -15,6 +15,10 @@ Three behaviours, each from the outside:
   tools, the skills switch on, and the probe skill's ``inMeetingRequests`` set to
   false, a meeting-chat request is not offered the probe skill while the owner's
   own request still is, as the assistant's ``Skills: offered=`` log line records.
+- **The default skills wait for Participant use.** With the same switch on and
+  no per-skill entries, the skills shipped with LMA are not offered to a
+  meeting-chat request, while the probe skill is, and both are offered to the
+  owner's own request.
 - **The skill library round-trips.** The probe skill's entry from
   ``client.skills.export_library()``, imported back with
   ``client.skills.import_library()``, is found unchanged and not written: its
@@ -153,6 +157,51 @@ def test_a_skill_flagged_off_for_in_meeting_requests_is_not_offered_to_one(
     assert probe_skill not in seen["chat"]["offered"], seen
     assert probe_skill in seen["chat"]["not_offered"], seen
     assert seen["owner"] is not None and probe_skill in seen["owner"]["offered"], seen
+
+
+def test_the_default_skills_are_not_offered_for_participant_use_until_allowed(
+    client, stack, probe_skill, meeting_assist
+):
+    """Selected tools with the skills switch on, and no per-skill entries.
+
+    The probe skill, an ordinary one, follows the switch and is offered to a
+    meeting-chat request; the skills shipped with LMA are not, and are offered to
+    the owner's own request.
+    """
+    from assistant_profile_probe import (
+        APPLY_TIMEOUT_SECONDS,
+        assistant_log_group,
+        invoke_assistant,
+        offered_skills,
+    )
+
+    shipped = {s["SkillId"] for s in client.skills.list() if s.get("SourceFormat") == "shipped"}
+    if not shipped:
+        pytest.skip("this stack holds no default skill")
+    meeting_assist.apply(
+        inMeetingRequestTools="selected",
+        inMeetingSkills=True,
+        toolSelection={"mcpServers": {}, "skills": {}},
+    )
+    log_group = assistant_log_group(stack.session, stack.name)
+    deadline = time.monotonic() + APPLY_TIMEOUT_SECONDS
+    seen = None
+    while time.monotonic() < deadline:
+        started = int(time.time() * 1000) - 1000
+        owner = invoke_assistant(stack.session, stack.name, "Hello.", user_email="integ-tests@example.com")
+        chat = invoke_assistant(stack.session, stack.name, "Hello.", tool_scope="meeting_chat")
+        seen = {
+            "owner": offered_skills(stack.session, log_group, owner["request_id"], started),
+            "chat": offered_skills(stack.session, log_group, chat["request_id"], started),
+        }
+        if seen["chat"] is not None and probe_skill in seen["chat"]["offered"]:
+            break
+        time.sleep(20)
+    assert seen and seen["chat"] is not None, f"the in-meeting request logged no skills line: {seen}"
+    assert probe_skill in seen["chat"]["offered"], seen
+    assert not shipped & seen["chat"]["offered"], seen
+    assert shipped <= seen["chat"]["not_offered"], seen
+    assert seen["owner"] is not None and shipped <= seen["owner"]["offered"], seen
 
 
 def test_a_skill_library_round_trip_changes_no_skill(client, probe_skill):

@@ -9,6 +9,9 @@ title: "Meeting Assistant Skills"
 - [Overview](#overview)
 - [What a Skill Holds](#what-a-skill-holds)
 - [The Skills Page](#the-skills-page)
+- [Default Skills](#default-skills)
+  - [When they are seeded](#when-they-are-seeded)
+  - [Participant use of a default skill](#participant-use-of-a-default-skill)
 - [Importing and Exporting a Skill](#importing-and-exporting-a-skill)
   - [Agent Skills: SKILL.md and a skill folder](#agent-skills-skillmd-and-a-skill-folder)
   - [Amazon Quick skill files](#amazon-quick-skill-files)
@@ -40,7 +43,7 @@ Skills are stored in their own table (`<stack>-Skills`), account-wide, as MCP se
 | Instructions | `Instructions` | Required Markdown, up to 48 KB. |
 | Reference files | `Files` | Up to 20 text files, each up to 32 KB, with a relative path such as `reference/checklist.md`. The types are `.md`, `.markdown`, `.txt`, `.csv`, `.json`, `.yaml` and `.yml`. |
 | Metadata | `Metadata` | The front-matter fields kept from an imported file: `trigger`, `icon`, `inputs`, `license`, `compatibility` and the Agent Skills `metadata` map. Saved unchanged when the skill is edited, and written back on export. Not sent to the assistant. |
-| Source | `SourceFormat` | Where the skill came from: `manual`, `agent-skills`, `amazon-quick` or `library`. |
+| Source | `SourceFormat` | Where the skill came from: `manual`, `agent-skills`, `amazon-quick`, `library`, or `shipped` for a [default skill](#default-skills). An edit keeps the source; an import that replaces a skill gives it the import's. |
 | Audit | `CreatedAt`, `CreatedBy`, `UpdatedAt`, `UpdatedBy` | The user's email address, or the IAM principal's ARN for an SDK or CLI call. |
 
 The instructions and reference files together are at most 64 KB. A skill holds instructions and text only. Nothing in a skill is run: there is no script, no code and no tool definition in it, and a skill cannot give the assistant a tool it is not otherwise offered.
@@ -56,6 +59,38 @@ Every signed-in user can read the skills (see [Who Can Read and Change Skills](#
 - **Delete** (Admin). A profile that names the skill keeps its entry, which then has no effect; the Configuration page shows it as **No such skill** with **Remove**.
 
 **Create skill** opens the same editor for a new skill. **Import / export** offers importing one skill, importing a library, and exporting the library. **When importing a skill, replace a skill of the same name** decides what an import of a skill whose name is taken does: without it the import is refused and nothing changes; with it, the stored skill is replaced and keeps its id, so a profile that names it still does.
+
+## Default Skills
+
+LMA ships five example skills, which the stack stores in the skills table when it is deployed. Each is an ordinary skill that an Admin can edit, export or delete. The Skills page shows its source as **Shipped with LMA** (`SourceFormat: shipped`).
+
+| Skill | What it does |
+|---|---|
+| `follow-up-email` | Drafts a follow-up email for the current meeting: a short summary, the decisions, the action items with their owners and due dates, and the open questions. It reads the transcript (with the meeting chat), the agenda, and the shared screen and chat attachments when they matter. It asks for the recipients or the tone only when the request needs them and the meeting does not make them clear, and it returns a draft rather than sending anything. |
+| `decisions-and-actions` | A table of the meeting's decisions and a table of its actions, with each action's owner, due date and blocker and the transcript time each was agreed. It then lists the actions that have no owner or no due date. |
+| `catch-me-up` | For someone who joined late or stepped away: what happened since a given time, or since they joined, in a few bullets, then the topic being discussed now. Adapted from the Amazon Quick skill `lma-meeting-catchup` in `amazon-quick-desktop-skills-pack/skills/`, with the calendar and Slack steps removed, since the meeting assistant has neither. |
+| `next-meeting-prep` | A draft agenda for the next meeting, built from this meeting's open items. When the request may use the owner's past meetings (`recent_meetings_list` and `meeting_history`), it also adds the items left open in earlier meetings with the same people or on the same subject. When it may not, it drafts from the current meeting alone and says that past meetings were not searched. |
+| `customer-call-notes` | Notes on a customer call: pain points, requirements, objections and concerns, competitors and alternatives mentioned, and next steps with their owners, each with its transcript time. |
+
+The instructions name only tools the meeting assistant has (see [Built-in Tools](meeting-assistant.md#built-in-tools)). Their source files are in the repository, at `lma-ai-stack/source/lambda_functions/configuration_seeder/default_skills/<name>/SKILL.md`, in the Agent Skills format, so they can be reviewed there or imported into another deployment.
+
+### When they are seeded
+
+The configuration seeder, the custom resource that writes the configuration baseline, also seeds the default skills, both when the stack is created and when it is updated. For each default skill it keeps a record of the skill id it stored the skill under and of what it stored. The record is kept in the skills table under a partition of its own, so it is never listed as a skill. The rules for each default skill are these:
+
+- **Not yet seeded, and the name is free.** The skill is created. This applies to a new deployment and to an upgrade from a release that shipped no default skills.
+- **Not yet seeded, and a skill of the same name exists.** The existing skill belongs to an Admin, so it is left untouched and the default is not seeded. The seeder logs this. If the name becomes free later, the next update that runs the seeder (see below for when that is) seeds the default. If the existing skill holds exactly the shipped text and still has the shipped source (as after a seeding run that was interrupted), the seeder records it as the default rather than creating a second copy.
+- **Seeded, then deleted by an Admin.** It stays deleted. No later update creates it again.
+- **Seeded, then edited by an Admin, or replaced by an import.** It is left as the Admin saved it, whatever a later release ships. An import that replaces a default skill counts as an edit even when it holds the same text, because the skill then has the import's source. A skill library import is different: it writes nothing for an entry that matches the stored skill exactly, so re-importing a library that holds a default skill unchanged leaves it a default skill.
+- **Seeded and unchanged.** When a release ships new text for it, the skill is replaced with the new text, and it keeps its id and its creation fields. Otherwise nothing is written.
+
+The seeder decides whether a skill has been edited by comparing its name, display name, description, instructions, files and metadata with what it last stored. Opening a skill and saving it unchanged therefore does not count as an edit. A default skill is not seeded when the deployment already holds 40 skills, which is the limit.
+
+Seeding never fails a deployment. A default skill that cannot be written is reported as deferred, and the next update that runs the seeder tries again. The outcome for each skill is in the seeder's log and in its `DefaultSkills` result, as `name=outcome` pairs; the outcomes are `created`, `adopted`, `name-in-use`, `limit-reached`, `deleted`, `edited`, `updated`, `unchanged` and `deferred`. The seeder runs on an update only when the content it ships, the code that processes it, or one of its parameters has changed (see [Configuration Store](configuration-store.md)), so a release that changes a default skill runs it.
+
+### Participant use of a default skill
+
+A default skill is offered for Owner use, the meeting page's own chat, like any other skill. It is **not** offered for [Participant use](meeting-assistant.md#participant-use), meaning requests made in the meeting and a Participant's questions on a shared meeting's page, until an Admin allows it. To allow one, set its **Participant use** to **Allowed** under **Meeting Assistant › Tool selection** on the Configuration page, which stores `inMeetingRequests: true` for it in the profile. With no entry, the selection shows **Not allowed until allowed here (shipped skill)**, and neither the **Participant use: skills** switch nor **Unrestricted** offers the skill. Every other skill follows the Participant use setting as before. A default skill that an import replaces takes the import's source and from then on follows the Participant use setting like any other skill.
 
 ## Importing and Exporting a Skill
 
@@ -167,17 +202,17 @@ A library of up to 40 skills is read. The pages and the SDK send a large library
 | Setting | Stored as | Effect |
 |---|---|---|
 | **Owner use** | `enabled` | Off: the assistant does not use the skill at all, for Owner use or for Participant use. On, or not set, is the default. |
-| **Participant use** | `inMeetingRequests` | **Allowed** (`true`) or **Not allowed** (`false`) for [Participant use](meeting-assistant.md#participant-use). Not set: the Participant use setting decides, as for every skill: under **Selected tools**, the **Participant use: skills** switch (`inMeetingSkills`); under **Unrestricted**, allowed. |
+| **Participant use** | `inMeetingRequests` | **Allowed** (`true`) or **Not allowed** (`false`) for [Participant use](meeting-assistant.md#participant-use). Not set: the Participant use setting decides: under **Selected tools**, the **Participant use: skills** switch (`inMeetingSkills`); under **Unrestricted**, allowed. A [default skill](#participant-use-of-a-default-skill) that is not set is not allowed. |
 | **Always on** | `alwaysOn` | Reserved for a later always-on mode. It is stored and validated, and nothing reads it yet. |
 
 How a request is offered skills, as for [MCP servers](meeting-assistant.md#choosing-mcp-servers-one-by-one):
 
 - **The meeting page's chat** (the owner's own requests) is offered every skill that is not turned off.
 - **Current meeting only** offers no skill, whatever a skill's own setting.
-- **Selected tools** offers a skill when its own **Participant use** is Allowed, or when it is not set and the **Participant use: skills** switch is on.
-- **Unrestricted** offers every skill not turned off, except one set to Not allowed.
+- **Selected tools** offers a skill when its own **Participant use** is Allowed, or when it is not set, the **Participant use: skills** switch is on and it is not a default skill.
+- **Unrestricted** offers every skill not turned off, except one set to Not allowed and a default skill that is not set.
 
-A skill the profile does not name is offered as the defaults say, so a profile with no skill entries offers every skill for Owner use and none for Participant use under the shipped Participant use setting. The assistant is told, by name, which skills are not available for a request (those turned off or not allowed), so that it says so when a request needs one. A profile entry for a skill that is not stored has no effect.
+A skill the profile does not name is offered as the defaults say, so a profile with no skill entries offers every skill for Owner use and none for Participant use under the shipped Participant use setting, and no default skill for Participant use under any setting. The assistant is told, by name, which skills are not available for a request (those turned off or not allowed), so that it says so when a request needs one. A profile entry for a skill that is not stored has no effect.
 
 The selection is in the profile, and so is versioned, compared, exported and imported with the rest of it; the skills themselves move with the skill library.
 

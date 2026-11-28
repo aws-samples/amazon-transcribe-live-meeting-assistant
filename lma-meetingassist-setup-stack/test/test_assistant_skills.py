@@ -266,6 +266,58 @@ def test_the_always_on_flag_is_stored_but_changes_nothing_yet(built, configured,
     assert _skill_tools(built(VOICE)["tools"]) == set()
 
 
+SHIPPED = meeting_skills.SkillSummary(
+    "follow-up-email",
+    "follow-up-email",
+    "Draft a follow-up email.",
+    "Follow-up email",
+    "2026-11-28T00:00:00Z",
+    source_format="shipped",
+)
+
+
+@pytest.fixture
+def with_shipped_skill(monkeypatch):
+    monkeypatch.setattr(meeting_skills, "load_catalog", lambda: [INCIDENT, LAUNCH, SHIPPED])
+    monkeypatch.setattr(
+        meeting_skills,
+        "load_body",
+        lambda summary: RECORDS.get(summary.skill_id, {"Instructions": "x", "Files": []}),
+    )
+
+
+def test_a_shipped_skill_is_offered_to_the_owners_own_requests(built, with_shipped_skill):
+    assert "follow-up-email" in _offered(built(OWNER)["system_prompt"])
+
+
+@pytest.mark.parametrize("mode", ["selected", "unrestricted"])
+def test_a_shipped_skill_without_a_flag_is_not_offered_for_participant_use(
+    built, configured, with_shipped_skill, mode
+):
+    configured({"inMeetingRequestTools": mode, "inMeetingSkills": True})
+    prompt = built(CHAT)["system_prompt"]
+    assert _offered(prompt) == {"launch-review", "incident-notes"}
+    assert "These skills are not available for this request: follow-up-email." in prompt
+
+
+def test_a_shipped_skill_allowed_by_the_profile_is_offered_for_participant_use(
+    built, configured, with_shipped_skill
+):
+    configured(
+        {
+            "inMeetingRequestTools": "selected",
+            "inMeetingSkills": False,
+            **_selection(**{"follow-up-email": {"inMeetingRequests": True}}),
+        }
+    )
+    assert _offered(built(VOICE)["system_prompt"]) == {"follow-up-email"}
+
+
+def test_only_a_shipped_skill_has_a_participant_use_default_of_its_own():
+    assert meeting_skills.in_meeting_default(SHIPPED) is False
+    assert meeting_skills.in_meeting_default(LAUNCH) is None
+
+
 def test_skills_allowed_with_none_defined_are_named_unavailable(built, configured, monkeypatch):
     monkeypatch.setattr(meeting_skills, "load_catalog", lambda: [])
     configured({"inMeetingRequestTools": "selected", "inMeetingSkills": True})
@@ -311,6 +363,14 @@ def test_the_list_is_cached_for_the_ttl_as_the_mcp_server_list_is(fresh_cache):
     meeting_skills.load_catalog(table, now=1000.0 + meeting_skills.CATALOG_TTL_SECONDS + 1)
     assert table.queries == 2
     assert meeting_skills.CATALOG_TTL_SECONDS == 300
+
+
+def test_the_list_carries_each_skills_source(fresh_cache):
+    table = _Table(
+        [{"SkillId": "a", "Name": "a", "SourceFormat": "shipped"}, {"SkillId": "b", "Name": "b"}]
+    )
+    found = {s.skill_id: s.source_format for s in meeting_skills.load_catalog(table, now=1.0)}
+    assert found == {"a": "shipped", "b": ""}
 
 
 def test_a_failed_read_keeps_the_cached_list(fresh_cache):

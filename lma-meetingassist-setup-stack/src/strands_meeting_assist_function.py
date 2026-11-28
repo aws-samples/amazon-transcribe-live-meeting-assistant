@@ -2762,13 +2762,15 @@ class InMeetingScope(NamedTuple):
         """The request may be offered the tool group ``group``."""
         return group in self.tool_groups
 
-    def allows_item(self, kind: str, item_id: str) -> bool:
+    def allows_item(self, kind: str, item_id: str, in_meeting_default: Optional[bool] = None) -> bool:
         """The request may be offered the item ``item_id`` of ``kind`` (an MCP server by ServerId).
 
         Never when the request is not allowed the kind's tool group, nor when
         the profile turns the item off (``enabled: false``). Otherwise always for
         the meeting page's own chat; and for an in-meeting request, the item's own
-        ``inMeetingRequests`` flag, else the request's default for the kind.
+        ``inMeetingRequests`` flag, else ``in_meeting_default`` when the item has
+        a default of its own (a skill shipped with LMA is not allowed until the
+        profile allows it), else the request's default for the kind.
         """
         group = TOOL_SELECTION_KIND_GROUPS.get(kind)
         if group is None or not self.allows(group):
@@ -2778,7 +2780,11 @@ class InMeetingScope(NamedTuple):
         if not self.tool_scope:
             return True
         flag = self.selection.in_meeting_flag(kind, item_id)
-        return flag if flag is not None else kind in self.item_defaults
+        if flag is not None:
+            return flag
+        if in_meeting_default is not None:
+            return in_meeting_default
+        return kind in self.item_defaults
 
     @property
     def from_meeting_chat(self) -> bool:
@@ -3115,7 +3121,9 @@ def handler(event, context):
             catalog = meeting_skills.load_catalog()
             skills_offered = [
                 skill for skill in catalog
-                if request_scope.allows_item(KIND_SKILLS, skill.skill_id)
+                if request_scope.allows_item(
+                    KIND_SKILLS, skill.skill_id, meeting_skills.in_meeting_default(skill)
+                )
             ]
             skills_unavailable = [skill.name for skill in catalog if skill not in skills_offered]
             if catalog:

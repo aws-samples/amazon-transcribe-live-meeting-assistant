@@ -914,6 +914,10 @@ across the sections of stores that moved in after the profile existed:
 - **Summary sections a release no longer ships** — removed from each Custom
   profile that holds them unchanged. See
   [Summary sections a release no longer ships](#summary-sections-a-release-no-longer-ships).
+- **The meeting assistant's default skills** — written to the skills table, not
+  this one, given as the `SkillsTableName` property. A default skill an Admin
+  edited or deleted is left as it is. Reported as the `DefaultSkills`
+  attribute. See [Default Skills](meeting-assistant-skills.md#when-they-are-seeded).
 
 ### Choosing the default configuration at deploy time
 

@@ -3491,6 +3491,15 @@ Resources:
                   - dynamodb:Scan
                   - dynamodb:DeleteItem
                 Resource: !GetAtt ConfigurationTable.Arn
+              # The meeting assistant's default skills: Query reads the stored
+              # skills and the seeder's own record of what it seeded, and
+              # PutItem writes both. No DeleteItem: a default skill is removed
+              # only by an Admin.
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                  - dynamodb:PutItem
+                Resource: !GetAtt SkillsTable.Arn
               # The CustomConfigPath file, when one is named.
               - !If
                 - HasCustomConfigPath
@@ -3558,6 +3567,11 @@ Resources:
       # on-demand engine is deployed (empty otherwise).
       LegacyChatButtonConfigTableName: !Ref ChatButtonConfigTableName
       LegacyAsrConfigTableName: !Ref AsrConfigTableName
+      # Where the meeting assistant's default skills are seeded, under the
+      # account's partition as the Skills Manager stores skills; see
+      # docs/meeting-assistant-skills.md#default-skills.
+      SkillsTableName: !Ref SkillsTable
+      SkillsAccountId: !Ref AWS::AccountId
       # Changes when the shipped configuration content or the code that
       # processes it changes, and is one of the two reasons CloudFormation
       # re-invokes this resource on a stack update.

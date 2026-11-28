@@ -93,6 +93,10 @@ SOURCE_AGENT_SKILLS = "agent-skills"
 SOURCE_QUICK = "amazon-quick"
 SOURCE_MANUAL = "manual"
 SOURCE_LIBRARY = "library"
+#: A default skill the configuration seeder stores at deploy time
+#: (configuration_seeder/skill_seeder.py). An edit keeps it; an import over it
+#: replaces it with the import's source.
+SOURCE_SHIPPED = "shipped"
 
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _FRONT_MATTER = re.compile(r"\A\ufeff?---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", re.S)

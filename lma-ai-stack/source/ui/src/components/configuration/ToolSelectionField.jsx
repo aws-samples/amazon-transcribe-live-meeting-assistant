@@ -16,7 +16,8 @@
 // and by skill id (meeting_assist.toolSelection.skills). An item with no entry
 // takes its default (an MCP server as it did before the profile could name it; a
 // skill as enabled for Owner use, and for Participant use as the Participant use
-// setting decides, inMeetingSkills under Selected tools),
+// setting decides, inMeetingSkills under Selected tools; a skill shipped with LMA
+// as not allowed for Participant use),
 // so the profile stores only what an administrator changed.
 
 import React, { useContext, useEffect, useState } from 'react';
@@ -47,6 +48,7 @@ export const listSkillsQuery = `
       SkillId
       Name
       DisplayName
+      SourceFormat
     }
   }
 `;
@@ -108,6 +110,17 @@ export const IN_MEETING_OPTIONS = [
   { value: 'false', label: 'Not allowed for participants' },
 ];
 
+// A skill shipped with LMA (SourceFormat "shipped") is not allowed for
+// Participant use until it is allowed here, whatever the Participant use
+// setting says, so its unset choice says that instead.
+export const SHIPPED_SKILL_IN_MEETING_OPTIONS = [
+  { value: 'default', label: 'Not allowed until allowed here (shipped skill)' },
+  ...IN_MEETING_OPTIONS.slice(1),
+];
+
+export const inMeetingOptionsFor = (item) =>
+  item?.SourceFormat === 'shipped' ? SHIPPED_SKILL_IN_MEETING_OPTIONS : IN_MEETING_OPTIONS;
+
 /** The flags of one kind of item, as a table of the items the stack lists. */
 export const ItemSelectionTable = ({ kind, path, schema, load }) => {
   const { values, defaults, set, readOnly, problemsAt } = useContext(SectionContext);
@@ -116,7 +129,6 @@ export const ItemSelectionTable = ({ kind, path, schema, load }) => {
   const [error, setError] = useState(null);
   const itemsPath = [...path, kind];
   const entries = getAt(values, itemsPath) || {};
-  const options = IN_MEETING_OPTIONS;
 
   useEffect(() => {
     let cancelled = false;
@@ -205,6 +217,7 @@ export const ItemSelectionTable = ({ kind, path, schema, load }) => {
               // eslint-disable-next-line react/no-unstable-nested-components
               cell: (row) => {
                 const flag = entries[row.id]?.inMeetingRequests;
+                const options = inMeetingOptionsFor(row.item);
                 const selected = options.find((o) => o.value === (flag === undefined ? 'default' : `${flag}`));
                 return (
                   <Select

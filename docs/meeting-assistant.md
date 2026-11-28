@@ -140,7 +140,7 @@ None of the requests made in the meeting can tell who asked: a chat sender is kn
   | **Participant use: the owner's past meetings** (`inMeetingMeetingHistory`) | `recent_meetings_list` and `meeting_history`, acting for the meeting's LMA user as **Unrestricted** does. With this switch off, no user is acted for. |
   | **Participant use: MCP servers** (`inMeetingMcpServers`) | Every installed MCP server, except one whose own setting says otherwise; see [Choosing MCP servers one by one](#choosing-mcp-servers-one-by-one) |
   | **Participant use: Virtual Participant controls** (`inMeetingVpControls`) | `control_vnc_preview` and `control_vp_browser` |
-  | **Participant use: skills** (`inMeetingSkills`) | Every skill, by `load_skill` and `read_skill_file`, except one whose own setting says otherwise; see [Skills](#skills) |
+  | **Participant use: skills** (`inMeetingSkills`) | Every skill, by `load_skill` and `read_skill_file`, except one whose own setting says otherwise and a [default skill](meeting-assistant-skills.md#participant-use-of-a-default-skill) that is not allowed one by one; see [Skills](#skills) |
 
   A tool that is switched on but that the deployment cannot offer (web search with no Tavily API key, a knowledge base that is not deployed, MCP servers when none is installed or none could be loaded) is named to the assistant as not available, so that it says so when a request needs it. The meeting assistant function's log records, for every in-meeting request, the tool groups allowed, offered and unavailable.
 
@@ -229,6 +229,8 @@ The same structure has a `skills` member, with the same three flags per skill an
 ### Skills
 
 A skill is guidance an administrator writes on the **Skills** page for one kind of request: a name, a description of when it applies, Markdown instructions and text reference files. The assistant's prompt lists the skills a request may use by name and description, and the assistant reads a skill's instructions with `load_skill`, and a reference file with `read_skill_file`, only when a request matches it. What those two tools return is followed as an administrator's guidance, within the fixed part of the instructions, which still applies whatever a skill says. See [Meeting Assistant Skills](meeting-assistant-skills.md).
+
+LMA ships five example skills, which are stored when the stack is deployed: `follow-up-email`, `decisions-and-actions`, `catch-me-up`, `next-meeting-prep` and `customer-call-notes`. An Admin can edit or delete them like any other skill, and a stack update neither replaces one an Admin edited nor re-creates one an Admin deleted. They are offered for Owner use, but not for Participant use until an Admin sets their **Participant use** to Allowed in **Tool selection**. See [Default Skills](meeting-assistant-skills.md#default-skills).
 
 ## Assistant Instructions
 
