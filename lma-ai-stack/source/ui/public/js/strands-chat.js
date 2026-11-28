@@ -104,7 +104,8 @@ function withContext(question, context) {
         let previous;
         do {
             previous = text;
-            text = text.replace(/<\/?\s*quoted\s*>/gi, '');
+            // Any spelling a reader could take for the tag: < / quoted attr="x" >.
+            text = text.replace(/<\s*\/?\s*quoted\b[^>]*>/gi, '');
         } while (text !== previous);
         return text;
     };
