@@ -42,6 +42,12 @@ def test_it_is_answered_from_the_current_meeting_only_by_default(built) -> None:
     assert built(PARTICIPANT_PAGE)["tools"] == CURRENT_MEETING_TOOLS
 
 
+@pytest.mark.parametrize("mode", ["current_meeting_only", "unrestricted", "selected"])
+def test_a_participant_is_offered_the_chat_attachments_and_their_content(built, configured, mode) -> None:  # noqa: F811
+    configured({"inMeetingRequestTools": mode})
+    assert {"get_chat_attachments", "read_chat_attachment"} <= built(PARTICIPANT_PAGE)["tools"]
+
+
 def test_unrestricted_offers_every_tool_but_the_virtual_participant_controls(built, configured) -> None:  # noqa: F811
     configured({"inMeetingRequestTools": "unrestricted"})
     assert built(PARTICIPANT_PAGE)["tools"] == ALL_TOOLS - VP_CONTROLS

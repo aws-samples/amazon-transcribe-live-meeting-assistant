@@ -243,8 +243,9 @@ recording links themselves, the consent record's attestation statement,
 evidence images, verification and status history, the per-line and overall
 sentiment, the cost estimate, the key frames of the shared screen and the chat
 attachments themselves (the meeting assistant panel can describe a key frame in
-words and list the chat attachments with their AI titles and summaries, as it
-does for a request made in the meeting), the capture and transcription details,
+words, list the chat attachments with their AI titles and summaries, and read
+an attachment's content to answer a question about it, as it does for a request
+made in the meeting), the capture and transcription details,
 and the metadata. The
 labels are treated as the owner's: they name engagements and internal
 references, and a Participant has nothing to filter by. The page offers no

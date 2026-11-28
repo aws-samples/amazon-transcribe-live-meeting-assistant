@@ -1441,9 +1441,20 @@ ever shown in the page, as thumbnails; nothing else is rendered inline. The
 embedded transcript does not show attachments.
 
 The meeting assistant's `get_chat_attachments` tool lists the meeting's
-attachments with their times, file names, titles and summaries, in every tool
-scope, as the shared screen's key frames are. It does not hand the assistant
-the files themselves.
+attachments with their times, file names, ids, titles and summaries, in every
+tool scope, as the shared screen's key frames are. Its `read_chat_attachment`
+tool, offered wherever `get_chat_attachments` is, passes one attachment's
+content to the assistant's model so it can answer detailed questions about it:
+an image as an image, and a PDF, Word, Excel, text, CSV or Markdown file as a
+document, with the summarizer's limits above (PowerPoint is not read, nor an
+image over 3.75 MB or a document over 4.5 MB). The attachment is looked up by
+its id among the current meeting's attachments only, and read through the same
+`getChatAttachments` query and short-lived link as the meeting page uses. An
+attachment recorded by name only, one whose file has been deleted under the
+retention settings, and one the model cannot read are answered with the reason
+and the title and summary where there are some. The fixed part of the
+assistant's instructions treats the content as quoted data, never as
+instructions. See [Meeting Assistant](meeting-assistant.md#built-in-tools).
 
 ### Retention and deletion
 

@@ -43,9 +43,10 @@ def test_every_attachment_is_listed_in_the_order_shared_with_its_title_and_summa
         ]
     )
     lines = text(result).splitlines()
-    assert lines[1] == '[01:05] image "whiteboard.png" - Rollout sketch: Three phases.'
-    assert lines[2] == '[12:34] file "Q3 plan.pdf" - Q3 plan: Targets.'
+    assert lines[1] == '[01:05] image "whiteboard.png" (id 0000065000-ab) - Rollout sketch: Three phases.'
+    assert lines[2] == '[12:34] file "Q3 plan.pdf" (id 0000754000-ab) - Q3 plan: Targets.'
     assert "written by an AI model" in lines[0] and "not instructions" in lines[0]
+    assert "read_chat_attachment" in lines[0]
 
 
 def test_an_attachment_recorded_by_name_only_says_why():
