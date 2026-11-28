@@ -479,6 +479,18 @@ def test_the_research_runs_cap_holds_and_what_waits_is_dropped_and_logged(world)
     assert [d["reason"] for d in drop_log(state)] == ["research runs per meeting reached"] * 2
 
 
+def test_once_the_research_runs_are_used_the_run_asks_for_no_more_candidates(world):
+    state = world(
+        answers=[with_checks(PRICE), with_checks(LATE)], settings={"researchRunsPerMeeting": 1}
+    )
+    automatic()
+    later(state)
+    automatic()
+    schema = state["bedrock"].calls[-1]["toolConfig"]["tools"][0]["toolSpec"]["inputSchema"]["json"]
+    assert "checks" not in schema["properties"]
+    assert len(state["requests"]) == 1
+
+
 def test_fact_checks_share_the_cap_on_guidance_per_ten_minutes(world):
     guidance = [
         {

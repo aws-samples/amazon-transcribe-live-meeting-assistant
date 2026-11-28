@@ -781,6 +781,7 @@ class _ResearchContext:  # pylint: disable=too-many-instance-attributes
             isinstance(unavailable_at, (int, float))
             and now - float(unavailable_at) < NO_SOURCES_PAUSE_SECONDS
         )
+        self.research_runs = int(row.get("RunCount") or 0)
         self.new: List[checks.Check] = []
         self.drops: List[checks.Drop] = []
 
@@ -801,8 +802,13 @@ class _ResearchContext:  # pylint: disable=too-many-instance-attributes
         )
 
     def run_settings(self, settings: pure.Settings) -> pure.Settings:
-        """The settings the run asks with: no candidates while research has nowhere to look."""
-        if not self.can_research() or self.room() <= 0:
+        """The settings the run asks with: no candidates while research has nowhere to look.
+
+        Nor once the meeting has used its claims and terms, or its research runs:
+        a candidate then could only be dropped.
+        """
+        runs_left = self.settings.research_runs_per_meeting - self.research_runs
+        if not self.can_research() or self.room() <= 0 or runs_left <= 0:
             return dataclasses.replace(settings, fact_checks_enabled=False, lookups_enabled=False)
         return settings
 

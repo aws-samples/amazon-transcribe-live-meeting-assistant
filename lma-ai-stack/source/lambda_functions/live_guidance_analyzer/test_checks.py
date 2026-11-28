@@ -321,6 +321,34 @@ def test_a_finding_cannot_add_links_or_markup_of_its_own():
     assert item.body.count("](") == 1  # the source's own link only
 
 
+def test_a_long_body_keeps_what_the_sources_say_and_never_cuts_a_link():
+    (check,), _ = parse([entry()])
+    long = {
+        f"R{n}": {
+            "title": f"Intranet page {n}",
+            "url": f"https://intranet.example.com/sites/{n}/" + "a" * 1900,
+            "via": "Documents",
+        }
+        for n in range(1, 4)
+    }
+    item = checks.publication(
+        check,
+        finding(sources=["R1", "R2", "R3"], summary="Prices rose to 46,000. " * 20),
+        long,
+        0.75,
+    )
+    assert len(item.body) <= checks.MAX_BODY_CHARS
+    assert "**What the sources say:**" in item.body and "Confidence: high" in item.body
+    # The long addresses are named by title, whole, rather than cut.
+    assert "Intranet page 1 (Documents)" in item.body and "](<" not in item.body
+    assert item.body.count("(Documents)") == 3
+
+
+def test_a_body_keeps_its_links_when_they_fit():
+    item = publish()
+    assert "[Support price list 2026](<https://example.com/prices>) (Documents)" in item.body
+
+
 def test_a_source_link_must_be_a_web_address():
     (check,), _ = parse([entry()])
     sources = {"R1": {"title": "x", "url": "javascript:alert(1)", "via": "Web"}}

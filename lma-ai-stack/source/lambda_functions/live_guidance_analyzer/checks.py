@@ -382,16 +382,44 @@ def plain(text: Any, limit: int) -> str:
     return _MD_SPECIAL.sub(r"\\\1", text)
 
 
-def _link(source: Mapping[str, Any]) -> str:
+#: A source address longer than this is shown by its title when the body is long.
+MAX_SHOWN_URL_CHARS = 300
+
+
+def _link(source: Mapping[str, Any], title_only: bool = False) -> str:
+    """A source as ``[title](<url>) (via)``, or by its title alone.
+
+    ``title_only`` names a source whose address is longer than
+    MAX_SHOWN_URL_CHARS by its title, to make room in a long body.
+    """
     title = plain(source.get("title"), MAX_TITLE_SOURCE_CHARS) or "Source"
     via = plain(source.get("via"), 40)
     url = str(source.get("url") or "")
-    named = (
-        f"[{title}](<{url}>)"
-        if url.startswith(("https://", "http://")) and " " not in url
-        else title
-    )
+    linkable = url.startswith(("https://", "http://")) and " " not in url
+    if title_only and len(url) > MAX_SHOWN_URL_CHARS:
+        linkable = False
+    named = f"[{title}](<{url}>)" if linkable else title
     return f"{named} ({via})" if via else named
+
+
+def _body(  # pylint: disable=too-many-arguments
+    check: "Check", summary: str, said: str, source_line: str, confidence: float
+) -> str:
+    """A published item's body, from its parts."""
+    if check.kind == "fact_check":
+        parts = [
+            f"> “{plain(check.quote, pure.MAX_QUOTE_CHARS)}” — {said}",
+            f"**What the sources say:** {summary}",
+            source_line,
+            f"Confidence: {confidence_words(confidence)}",
+        ]
+    else:
+        parts = [
+            summary,
+            source_line,
+            f"Mentioned by {said}. Confidence: {confidence_words(confidence)}",
+        ]
+    return "\n\n".join(parts)
 
 
 def confidence_words(confidence: float) -> str:
@@ -450,23 +478,21 @@ def publication(  # pylint: disable=too-many-arguments,too-many-locals
     subject = " ".join(check.subject.split())
     title = pure._cut(f"{TITLE_PREFIX[verdict]}: {subject}", pure.MAX_TITLE_CHARS)  # pylint: disable=protected-access
     said = f"{plain(check.speaker, 60) or 'Someone'}, {pure.format_elapsed(check.start)}"
-    source_line = "**Sources:** " + " · ".join(_link(source) for source in cited[:3])
-    if check.kind == "fact_check":
-        parts = [
-            f"> “{plain(check.quote, pure.MAX_QUOTE_CHARS)}” — {said}",
-            f"**What the sources say:** {summary}",
-            source_line,
-            f"Confidence: {confidence_words(confidence)}",
-        ]
-    else:
-        parts = [
-            summary,
-            source_line,
-            f"Mentioned by {said}. Confidence: {confidence_words(confidence)}",
-        ]
-    body = "\n\n".join(parts)
-    if len(body) > MAX_BODY_CHARS:
-        body = "\n\n".join([*parts[:1], source_line])[:MAX_BODY_CHARS]
+    body = ""
+    # The quote, what the sources say and the confidence always stay: what
+    # gives way when the body is long is the sources, first their long
+    # addresses (named by title), then the later sources. Nothing is cut
+    # through, so no link is ever half-published.
+    for count in range(min(3, len(cited)), 0, -1):
+        for short in (False, True):
+            source_line = "**Sources:** " + " · ".join(
+                _link(source, title_only=short) for source in cited[:count]
+            )
+            body = _body(check, summary, said, source_line, confidence)
+            if len(body) <= MAX_BODY_CHARS:
+                break
+        if len(body) <= MAX_BODY_CHARS:
+            break
     copy_lines = [str(finding.get("summary") or "").strip()]
     copy_lines += [str(s.get("url") or s.get("title") or "") for s in cited[:3]]
     return Publication(

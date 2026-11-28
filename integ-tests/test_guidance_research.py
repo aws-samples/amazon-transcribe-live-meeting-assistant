@@ -126,8 +126,8 @@ def test_the_sources_offered_are_those_the_stack_has(research):
         deadlineSeconds=30,
     )
     expected = [name for name in ("documents", "pastMeetings", "webSearch") if available[name]]
-    if not expected:
+    # A source can be configured and still not offered: web search with Meeting
+    # Assistant > Web search off, or a knowledge base whose model cannot generate.
+    assert set(answer["offered"]) <= set(expected), (answer, available)
+    if not answer["offered"]:
         assert answer["reason"] == "no sources", answer
-    else:
-        # Web search is not offered where Meeting Assistant > Web search is off.
-        assert set(answer["offered"]) <= set(expected) and answer["offered"], (answer, available)
