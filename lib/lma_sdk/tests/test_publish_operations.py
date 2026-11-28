@@ -716,3 +716,155 @@ class TestBrowserExtensionPackage:
         before = manifest.read_text()
         self._publish(client, tmp_path, "0.4.1.dev1")
         assert manifest.read_text() == before
+
+
+class TestAsrMicrovmPackage:
+    """The ASR MicroVM publish path, run over a copy of the real stack directory.
+
+    The image source key is what re-runs AsrImageSource and so rebuilds the
+    image; these tests pin which file changes move it.
+    """
+
+    REPO = Path(__file__).resolve().parents[3]
+    STACK = "lma-asr-microvm-stack"
+    ZIP_ROOTS = {
+        "Dockerfile",
+        "catalog.json",
+        "model.env",
+        "scripts",
+        "asr_protocol",
+        "asr_server",
+        "asr_microvm",
+    }
+
+    @staticmethod
+    def _dockerfile_copy_sources(dockerfile: str) -> set[str]:
+        sources: set[str] = set()
+        # Join continuation lines so a multi-line instruction reads as one.
+        for line in dockerfile.replace("\\\n", " ").splitlines():
+            words = line.split()
+            if not words or words[0].upper() not in {"COPY", "ADD"}:
+                continue
+            assert words[0].upper() == "COPY", f"ADD is not handled by the image key: {line}"
+            args = [w for w in words[1:] if not w.startswith("--")]
+            assert not any(w.startswith("[") for w in args), f"JSON-form COPY: {line}"
+            sources.update(src.rstrip("/") for src in args[:-1])
+        return sources
+
+    def test_image_source_paths_match_the_dockerfile_copy_sources(self):
+        from lma_sdk._core.publish import ASR_IMAGE_SOURCE_PATHS
+
+        dockerfile = (self.REPO / self.STACK / "source" / "Dockerfile").read_text()
+        copied = self._dockerfile_copy_sources(dockerfile)
+        assert copied, "no COPY instructions found in the Dockerfile"
+        assert copied == set(ASR_IMAGE_SOURCE_PATHS) - {"Dockerfile", "catalog.json"}
+
+    def test_copy_source_parser_reads_flags_and_continuations(self):
+        parsed = self._dockerfile_copy_sources(
+            "FROM x\nCOPY --chown=1:1 a.txt \\\n    dir/ /dest/\nRUN echo COPY b /c\n"
+        )
+        assert parsed == {"a.txt", "dir"}
+
+    def _project(self, tmp_path: Path) -> Path:
+        import shutil
+
+        project = tmp_path / "project"
+        shutil.copytree(
+            self.REPO / self.STACK,
+            project / self.STACK,
+            ignore=shutil.ignore_patterns(".venv", "__pycache__", ".pytest_cache", ".ruff_cache"),
+        )
+        return project
+
+    def _publish(self, client, project: Path, out: Path) -> tuple[dict, dict[str, bytes]]:
+        from lma_sdk._core.publish import Publisher
+
+        stack_def = next(s for s in STACK_DEFINITIONS if s.name == self.STACK)
+        uploaded: dict[str, bytes] = {}
+
+        def capture_upload(path, bucket, key):
+            uploaded[key] = Path(path).read_bytes()
+
+        out.mkdir(parents=True)
+        s3 = MagicMock()
+        s3.upload_file.side_effect = capture_upload
+        publisher = Publisher(client)
+        with patch.object(Publisher, "_s3", new=s3), patch.object(Publisher, "_validate_template"):
+            result = publisher._publish_asr_microvm(
+                stack_def=stack_def,
+                project_dir=project,
+                bucket="bucket",
+                prefix_and_version="prefix/1.0.0",
+                region="us-east-1",
+                tmpdir=out,
+            )
+        return result, uploaded
+
+    @staticmethod
+    def _source_key(result: dict) -> str:
+        return result["asr_microvm_src_s3_location"].split("/", 1)[1]
+
+    def _results_around_edit(self, client, tmp_path: Path, rel: str, text: str) -> tuple[dict, dict]:
+        project = self._project(tmp_path)
+        before, _ = self._publish(client, project, tmp_path / "before")
+        path = project / self.STACK / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text((path.read_text() if path.exists() else "") + text)
+        after, _ = self._publish(client, project, tmp_path / "after")
+        return before, after
+
+    def test_zip_holds_only_the_image_inputs(self, client, tmp_path):
+        result, uploaded = self._publish(client, self._project(tmp_path), tmp_path / "out")
+        with zipfile.ZipFile(io.BytesIO(uploaded[self._source_key(result)])) as zf:
+            names = set(zf.namelist())
+        assert {"Dockerfile", "catalog.json", "model.env", "scripts/fetch_model.py"} <= names
+        assert {"asr_server/warmup.py", "asr_microvm/hook_server.py"} <= names
+        assert {name.split("/")[0] for name in names} <= self.ZIP_ROOTS
+        assert "scripts/calibrate.py" not in names
+
+    @pytest.mark.parametrize(
+        "rel",
+        [
+            "source/requirements-dev.txt",
+            "source/pyproject.toml",
+            "source/tests/test_added_by_unit_test.py",
+            "source/scripts/calibrate.py",
+            "README.md",
+            "template.yaml",
+            "lambda_functions/asr_image_source/test_asr_image_source.py",
+            "lambda_functions/asr_launcher/index.py",
+        ],
+    )
+    def test_changes_outside_the_image_inputs_keep_the_source_key(self, client, tmp_path, rel):
+        before, after = self._results_around_edit(client, tmp_path, rel, "\n# changed\n")
+        assert self._source_key(after) == self._source_key(before)
+
+    @pytest.mark.parametrize(
+        "rel",
+        [
+            "source/Dockerfile",
+            "source/catalog.json",
+            "source/model.env",
+            "source/scripts/fetch_model.py",
+            "source/asr_server/warmup.py",
+            "source/asr_protocol/messages.py",
+            "source/asr_microvm/hook_server.py",
+            "lambda_functions/asr_image_source/index.py",
+        ],
+    )
+    def test_changes_to_an_image_input_move_the_source_key(self, client, tmp_path, rel):
+        before, after = self._results_around_edit(client, tmp_path, rel, "\n")
+        assert self._source_key(after) != self._source_key(before)
+
+    def test_lambda_keys_follow_their_own_code(self, client, tmp_path):
+        before, after = self._results_around_edit(
+            client, tmp_path, "lambda_functions/asr_launcher/index.py", "\n# changed\n"
+        )
+        assert after["asr_launcher_s3_key"] != before["asr_launcher_s3_key"]
+        assert after["asr_image_source_s3_key"] == before["asr_image_source_s3_key"]
+
+    def test_missing_image_input_fails_the_publish(self, client, tmp_path):
+        project = self._project(tmp_path)
+        (project / self.STACK / "source" / "scripts" / "fetch_model.py").unlink()
+        with pytest.raises(LMAPublishError, match="fetch_model.py"):
+            self._publish(client, project, tmp_path / "out")

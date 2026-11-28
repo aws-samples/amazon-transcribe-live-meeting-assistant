@@ -362,6 +362,99 @@ def _calculate_dir_hash(directory: str | Path) -> str:
     return hasher.hexdigest()[:16]
 
 
+# What the ASR MicroVM image build reads from lma-asr-microvm-stack/source/: the
+# Dockerfile, the source of each of its COPY instructions, and catalog.json, which
+# the AsrImageSource custom resource reads from the same zip to write model.env.
+# Only these paths are zipped and hashed into the image source key. That key is
+# what re-runs AsrImageSource and so rebuilds the image, so a change elsewhere in
+# source/ (tests, requirements-dev.txt, pyproject.toml, the calibration and smoke
+# scripts) publishes the same key and leaves the image alone.
+# TestAsrMicrovmPackage checks this tuple against the Dockerfile's COPY sources.
+ASR_IMAGE_SOURCE_PATHS: tuple[str, ...] = (
+    "Dockerfile",
+    "catalog.json",
+    "model.env",
+    "scripts/fetch_model.py",
+    "asr_protocol",
+    "asr_server",
+    "asr_microvm",
+)
+
+# AsrImageSource's own code decides what model.env the image is built with, so it
+# is part of the image key too. Its tests are not.
+ASR_IMAGE_RESOLVER_DIR = "lambda_functions/asr_image_source"
+
+_PACKAGE_SKIP_DIRS = frozenset(
+    {
+        "node_modules",
+        "build",
+        "dist",
+        ".git",
+        "__pycache__",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".venv",
+    }
+)
+
+
+def _walk_files(root: Path) -> list[Path]:
+    """Every file under ``root`` outside the packaging skip directories, sorted."""
+    found = []
+    for dirpath, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d not in _PACKAGE_SKIP_DIRS]
+        found.extend(Path(dirpath) / fname for fname in files)
+    return sorted(found)
+
+
+def _is_test_file(path: Path) -> bool:
+    return path.name in {"conftest.py", "pytest.ini"} or (
+        path.name.startswith("test_") and path.suffix == ".py"
+    )
+
+
+def _asr_image_source_files(source_dir: Path) -> list[Path]:
+    """The files under ``source_dir`` that go into the ASR image source zip."""
+    files: list[Path] = []
+    for rel in ASR_IMAGE_SOURCE_PATHS:
+        path = source_dir / rel
+        if path.is_file():
+            files.append(path)
+        elif path.is_dir():
+            files.extend(_walk_files(path))
+        else:
+            raise LMAPublishError(f"ASR MicroVM image input not found: {path}")
+    return sorted(files)
+
+
+def _hash_files(hasher: Any, root: Path, files: list[Path]) -> None:
+    for fpath in files:
+        hasher.update(f"{root.name}/{fpath.relative_to(root).as_posix()}\0".encode())
+        hasher.update(fpath.read_bytes())
+        hasher.update(b"\0")
+
+
+def _files_hash(root: Path, files: list[Path]) -> str:
+    """Hash of exactly the files a zip is written from, so its name follows its contents."""
+    hasher = hashlib.sha256()
+    _hash_files(hasher, root, files)
+    return hasher.hexdigest()[:16]
+
+
+def _asr_image_hash(stack_dir: Path, source_dir: Path) -> str:
+    """Hash of everything that determines the ASR MicroVM image a deploy builds."""
+    resolver_dir = stack_dir / ASR_IMAGE_RESOLVER_DIR
+    if not resolver_dir.is_dir():
+        raise LMAPublishError(f"ASR Lambda directory not found: {resolver_dir}")
+    hasher = hashlib.sha256()
+    for root, files in (
+        (source_dir, _asr_image_source_files(source_dir)),
+        (resolver_dir, [p for p in _walk_files(resolver_dir) if not _is_test_file(p)]),
+    ):
+        _hash_files(hasher, root, files)
+    return hasher.hexdigest()[:16]
+
+
 def _inject_source_hash(template_path: Path, field: str, content_hash: str) -> None:
     """Set ``field`` to ``content_hash`` in the template file at ``template_path``.
 
@@ -988,35 +1081,24 @@ class Publisher:
         only a URI, so a subdirectory cannot be pointed at. The stack's custom
         resource rewrites this zip per deployment with the selected model, so what
         is published here is the model-agnostic build context.
+
+        The zip holds only ASR_IMAGE_SOURCE_PATHS and is named by
+        _asr_image_hash, so its key changes only when the image would. Each
+        Lambda zip is named by the hash of the files it holds.
         """
         stack_dir = project_dir / stack_def.name
-        content_hash = _calculate_dir_hash(stack_dir)
-        # .venv matters here: the ASR runtime's test virtualenv lives inside
-        # source/, and zipping it would bloat the image build context by ~100 MB.
-        skip_dirs = {
-            "node_modules",
-            "build",
-            "dist",
-            ".git",
-            "__pycache__",
-            ".pytest_cache",
-            ".ruff_cache",
-            ".venv",
-        }
 
-        def zip_tree(root: Path, zip_path: Path) -> None:
+        def zip_files(root: Path, files: list[Path], zip_path: Path) -> None:
             with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-                for dirpath, dirs, files in os.walk(root):
-                    dirs[:] = [d for d in dirs if d not in skip_dirs]
-                    for fname in files:
-                        fpath = Path(dirpath) / fname
-                        zf.write(fpath, fpath.relative_to(root))
+                for fpath in files:
+                    zf.write(fpath, fpath.relative_to(root))
 
         source_dir = stack_dir / stack_def.source_dir
         if not source_dir.is_dir():
             raise LMAPublishError(f"ASR MicroVM source directory not found: {source_dir}")
-        source_zip = tmpdir / f"asr-microvm-src-{content_hash}.zip"
-        zip_tree(source_dir, source_zip)
+        image_hash = _asr_image_hash(stack_dir, source_dir)
+        source_zip = tmpdir / f"asr-microvm-src-{image_hash}.zip"
+        zip_files(source_dir, _asr_image_source_files(source_dir), source_zip)
         source_key = f"{prefix_and_version}/{stack_def.name}/{source_zip.name}"
         logger.info("Uploading %s to s3://%s/%s", source_zip.name, bucket, source_key)
         self._s3.upload_file(str(source_zip), bucket, source_key)
@@ -1029,8 +1111,10 @@ class Publisher:
             function_dir = stack_dir / "lambda_functions" / function_name
             if not function_dir.is_dir():
                 raise LMAPublishError(f"ASR Lambda directory not found: {function_dir}")
-            function_zip = tmpdir / f"{function_name.replace('_', '-')}-{content_hash}.zip"
-            zip_tree(function_dir, function_zip)
+            function_files = _walk_files(function_dir)
+            function_hash = _files_hash(function_dir, function_files)
+            function_zip = tmpdir / f"{function_name.replace('_', '-')}-{function_hash}.zip"
+            zip_files(function_dir, function_files, function_zip)
             key = f"{prefix_and_version}/{stack_def.name}/{function_zip.name}"
             logger.info("Uploading %s to s3://%s/%s", function_zip.name, bucket, key)
             self._s3.upload_file(str(function_zip), bucket, key)

@@ -468,6 +468,8 @@ def test_docs_only_refuses_an_instruction_path_whatever_its_rule() -> None:
         # The SDK's publish tests package the browser extension and read its tokens.
         ("lma-browser-extension-stack/public/manifest.json", "sdk_cli"),
         ("lma-browser-extension-stack/template.yaml", "sdk_cli"),
+        # ...and package the ASR MicroVM stack, reading its Dockerfile.
+        ("lma-asr-microvm-stack/source/Dockerfile", "sdk_cli"),
         # The review harness's false-positive test reads every docs page, and the demo
         # recorder's tests read the agent instructions and the demo page.
         ("docs/monitoring.md", "pr_review"),

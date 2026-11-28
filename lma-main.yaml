@@ -2253,8 +2253,6 @@ Resources:
                 Action:
                   - s3:ListBucket
                   - s3:ListBucketVersions
-                  - s3:GetBucketVersioning
-                  - s3:GetBucketLocation
                   - s3:DeleteBucket
                 Resource:
                   - !GetAtt LoggingBucket.Arn
@@ -2348,6 +2346,8 @@ Resources:
           MAX_ATTEMPTS = 8
           BASE_DELAY_SECONDS = 2
           MAX_DELAY_SECONDS = 30
+          # How many objects that could not be deleted a failure reason names.
+          MAX_REPORTED_FAILURES = 3
           # Time kept back for answering CloudFormation; without an answer it waits
           # an hour before failing the deletion.
           RESPONSE_MARGIN_SECONDS = 30
@@ -2358,11 +2358,13 @@ Resources:
 
 
           def empty_bucket(bucket_name):
-              """Delete every object version and delete marker in the bucket.
+              """Delete every object version and delete marker in the bucket, and
+              return the per-object errors S3 reported.
 
               Listing versions covers unversioned buckets too (their objects have
               the version ID "null") and buckets whose versioning is suspended."""
               logger.info("Emptying bucket %s", bucket_name)
+              failures = []
               paginator = s3.get_paginator('list_object_versions')
               for page in paginator.paginate(Bucket=bucket_name):
                   objects = [
@@ -2376,6 +2378,17 @@ Resources:
                       )
                       for failure in result.get('Errors', []):
                           logger.warning("Could not delete %s: %s", failure.get('Key'), failure.get('Code'))
+                          failures.append(failure)
+              return failures
+
+
+          def describe_failures(failures):
+              shown = ', '.join(
+                  '%s (%s)' % (failure.get('Key'), failure.get('Code'))
+                  for failure in failures[:MAX_REPORTED_FAILURES]
+              )
+              hidden = len(failures) - MAX_REPORTED_FAILURES
+              return shown + (' and %d more' % hidden if hidden > 0 else '')
 
 
           def delete_bucket_with_retry(bucket_name, max_attempts=MAX_ATTEMPTS, sleep=time.sleep, seconds_left=None):
@@ -2384,9 +2397,10 @@ Resources:
               `seconds_left` reports the invocation's remaining time; a retry that
               would leave too little to answer CloudFormation raises instead."""
               for attempt in range(1, max_attempts + 1):
+                  failures = []
                   try:
                       logger.info("Attempt %d/%d: emptying and deleting bucket %s", attempt, max_attempts, bucket_name)
-                      empty_bucket(bucket_name)
+                      failures = empty_bucket(bucket_name)
                       s3.delete_bucket(Bucket=bucket_name)
                       logger.info("Deleted bucket %s", bucket_name)
                       return
@@ -2395,15 +2409,23 @@ Resources:
                       if code == 'NoSuchBucket':
                           logger.info("Bucket %s does not exist", bucket_name)
                           return
+                      delay = min(MAX_DELAY_SECONDS, BASE_DELAY_SECONDS * 2 ** (attempt - 1))
                       if code not in RETRYABLE_CODES or attempt == max_attempts:
                           logger.error("Could not delete bucket %s: %s", bucket_name, error)
-                          raise
-                      delay = min(MAX_DELAY_SECONDS, BASE_DELAY_SECONDS * 2 ** (attempt - 1))
-                      if seconds_left and seconds_left() < delay + RESPONSE_MARGIN_SECONDS:
+                      elif seconds_left and seconds_left() < delay + RESPONSE_MARGIN_SECONDS:
                           logger.error("Not enough time left to retry deleting bucket %s", bucket_name)
-                          raise
-                      logger.warning("Deleting bucket %s returned %s; retrying in %d s", bucket_name, code, delay)
-                      sleep(delay)
+                      else:
+                          logger.warning("Deleting bucket %s returned %s; retrying in %d s", bucket_name, code, delay)
+                          sleep(delay)
+                          continue
+                      # The bucket error alone (often BucketNotEmpty) hides why it
+                      # was not empty; name the objects S3 refused to delete.
+                      if failures:
+                          raise RuntimeError(
+                              '%s; objects not deleted from %s: %s'
+                              % (error, bucket_name, describe_failures(failures))
+                          ) from error
+                      raise
 
 
           def handler(event, context):
