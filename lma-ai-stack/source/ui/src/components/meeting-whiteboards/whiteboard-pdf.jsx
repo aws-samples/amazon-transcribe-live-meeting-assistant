@@ -257,13 +257,21 @@ let diagramCount = 0;
 /**
  * A diagram's source drawn as the page draws it, then as a picture: the
  * picture ({ data, width, height, format }), or null when it cannot be drawn.
+ * Mermaid draws in an element it adds to the page (`d<id>`) and, when the
+ * source cannot be drawn, leaves its error picture there; whatever it left
+ * is removed, so the meeting page never shows it.
  */
-export const drawDiagram = async (source, { renderer = loadMermaid, rasterize = svgToPng } = {}) => {
+export const drawDiagram = async (source, { renderer = loadMermaid, rasterize = svgToPng, doc = document } = {}) => {
   diagramCount += 1;
-  const { render } = await renderer();
-  const svg = await render(`wb-pdf-diagram-${diagramCount}`, source);
-  if (!svg) return null;
-  return rasterize(svg);
+  const id = `wb-pdf-diagram-${diagramCount}`;
+  try {
+    const { render } = await renderer();
+    const svg = await render(id, source);
+    if (!svg) return null;
+    return await rasterize(svg);
+  } finally {
+    [`d${id}`, id, `i${id}`].forEach((leftover) => doc.getElementById(leftover)?.remove());
+  }
 };
 
 const metaParagraph = (text, extra = {}) => ({

@@ -15,6 +15,7 @@ import { jsPDF } from 'jspdf';
 import {
   DIAGRAM_NOT_DRAWN,
   buildWhiteboardsPdf,
+  drawDiagram,
   isWideDiagram,
   markdownPdfBlocks,
   panelBlocks,
@@ -196,6 +197,34 @@ describe('the document', () => {
     expect(strings).toContain(`Page 1 of ${doc.getNumberOfPages()}`);
     expect(addImage).toHaveBeenCalledTimes(1);
     addImage.mockRestore();
+  });
+});
+
+describe('drawDiagram', () => {
+  // Mermaid draws in an element it adds to the page, and leaves its error picture there on a failure.
+  const mermaidLike = (fails) => async () => ({
+    render: async (id) => {
+      const holder = document.createElement('div');
+      holder.id = `d${id}`;
+      holder.innerHTML = `<svg id="${id}"><text>Syntax error in text</text></svg>`;
+      document.body.appendChild(holder);
+      if (fails) throw new Error('Parse error');
+      return '<svg viewBox="0 0 10 10"></svg>';
+    },
+  });
+
+  it.each([
+    ['a diagram that cannot be drawn', true],
+    ['a diagram that is drawn', false],
+  ])('leaves nothing on the page after %s', async (_name, fails) => {
+    const drawing = drawDiagram('flowchart LR\n a --> b', {
+      renderer: mermaidLike(fails),
+      rasterize: async () => PICTURE,
+    });
+    if (fails) await expect(drawing).rejects.toThrow('Parse error');
+    else await expect(drawing).resolves.toBe(PICTURE);
+    expect(document.body.textContent).not.toContain('Syntax error');
+    expect(document.querySelector('[id^="dwb-pdf-diagram-"]')).toBeNull();
   });
 });
 
