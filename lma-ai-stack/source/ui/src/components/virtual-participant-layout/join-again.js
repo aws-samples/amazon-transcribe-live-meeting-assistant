@@ -23,6 +23,7 @@
 import { vpPreparationForm } from '../common/meeting-preparation';
 import { consentChoiceOf } from './scheduled-edit';
 import { guidanceChoiceOf } from './guidance-options';
+import { playbookChoiceOf } from '../meeting-playbooks/playbook-choice';
 import { EMPTY_VP_FORM, submittedMeetingFields } from './vp-form';
 
 /** The router state key that carries the values to the list page's create form. */
@@ -161,6 +162,7 @@ export const joinAgainFormFrom = (vp, continueOption = { available: false, reaso
     form,
     consentChoice: consentChoiceOf(vp || {}),
     guidanceChoice: guidanceChoiceOf(vp),
+    playbookChoice: playbookChoiceOf(vp),
     // Absent on rows the form did not write: the launch default is on.
     enableVideoRecording: vp?.enableVideoRecording !== false,
     source: {
@@ -212,6 +214,7 @@ export const joinAgainModeChange = (values, form, mode) => {
     form: { ...values.form },
     consentChoice: values.consentChoice,
     guidanceChoice: values.guidanceChoice,
+    playbookChoice: values.playbookChoice,
     enableVideoRecording: values.enableVideoRecording,
     mode,
     changedNote: false,
@@ -241,6 +244,7 @@ export const joinAgainInputFrom = (sourceVpId, vpInput, { useStoredZoomAccount =
     'checklist',
     'summaryProfile',
     'guidanceEnabled',
+    'playbook',
     'consentMode',
     'consentRule',
     'participants',

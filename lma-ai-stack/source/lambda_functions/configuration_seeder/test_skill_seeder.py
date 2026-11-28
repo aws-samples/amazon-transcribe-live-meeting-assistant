@@ -333,16 +333,74 @@ def test_the_handler_reports_the_default_skills_and_never_fails_for_them():
 # ── the shipped files ───────────────────────────────────────────────────────
 
 EXPECTED_DEFAULT_SKILLS = [
+    "architecture-review",
     "catch-me-up",
     "customer-call-notes",
+    "customer-discovery",
     "decisions-and-actions",
     "follow-up-email",
+    "incident-review",
     "next-meeting-prep",
+    "retrospective",
+    "sprint-planning",
 ]
 
+#: The default skills that are meeting playbooks (docs/meeting-playbooks.md).
+EXPECTED_PLAYBOOKS = {
+    "architecture-review": ["architecture", "decision_log", "decisions"],
+    "customer-discovery": ["blank", "comparison"],
+    "incident-review": ["timeline", "decisions", "blank"],
+    "retrospective": ["retrospective"],
+    "sprint-planning": ["user_stories", "gantt", "risks"],
+}
 
-def test_the_release_ships_the_five_default_skills():
+
+def test_the_release_ships_the_default_skills_and_playbooks():
     assert [s.name for s in skill_seeder.shipped_default_skills()] == EXPECTED_DEFAULT_SKILLS
+
+
+def test_each_shipped_playbook_creates_its_whiteboards_and_names_known_checks():
+    from lma_playbooks import rules  # pylint: disable=import-outside-toplevel
+
+    shipped = {s.name: s for s in skill_seeder.shipped_default_skills()}
+    playbooks = {
+        name: skill.fields["Metadata"]["playbook"]
+        for name, skill in shipped.items()
+        if "playbook" in skill.fields["Metadata"]
+    }
+    assert set(playbooks) == set(EXPECTED_PLAYBOOKS)
+    for name, playbook in playbooks.items():
+        assert [b["template"] for b in playbook["whiteboards"]] == EXPECTED_PLAYBOOKS[name]
+        # Already in the stored, normalised form: parsing it again changes nothing.
+        assert rules.parse_playbook(playbook) == playbook
+        assert playbook["guidance"]["checks"], name
+        assert playbook["quickActions"], name
+        assert playbook["suggestFor"], name
+
+
+def test_a_stored_playbook_read_back_with_decimals_is_unchanged_not_edited():
+    from decimal import Decimal  # pylint: disable=import-outside-toplevel
+
+    table = FakeSkillsTable()
+    seeder = skill_seeder.DefaultSkillSeeder(table, ACCOUNT)
+    skills = skill_seeder.shipped_default_skills()
+    seeder.seed(skills)
+
+    def as_dynamodb(value):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, int):
+            return Decimal(value)
+        if isinstance(value, dict):
+            return {k: as_dynamodb(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [as_dynamodb(v) for v in value]
+        return value
+
+    for key, item in list(table.items.items()):
+        table.items[key] = as_dynamodb(item)
+    outcomes = skill_seeder.DefaultSkillSeeder(table, ACCOUNT).seed(skills)
+    assert set(outcomes.values()) == {"unchanged"}, outcomes
 
 
 @pytest.mark.parametrize("name", EXPECTED_DEFAULT_SKILLS)

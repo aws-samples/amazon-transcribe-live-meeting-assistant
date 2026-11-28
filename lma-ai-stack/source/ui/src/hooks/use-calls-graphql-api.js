@@ -33,6 +33,7 @@ import updateCallSummaryProfile from '../graphql/queries/updateCallSummaryProfil
 import deriveCallAgenda from '../graphql/queries/deriveCallAgenda';
 import updateCallGuidance from '../graphql/queries/updateCallGuidance';
 import updateCallParticipants from '../graphql/queries/updateCallParticipants';
+import applyMeetingPlaybook from '../graphql/queries/applyMeetingPlaybook';
 import requestMeetingDigest from '../graphql/queries/requestMeetingDigest';
 
 import { DEFAULT_DATE_RANGE_HOURS, hoursToDateRange } from '../components/call-list/calls-table-config';
@@ -59,6 +60,8 @@ export const PREPARATION_MUTATIONS = {
   guidance: ['updateCallGuidance', updateCallGuidance],
   // The participant list (docs/virtual-participant.md#participant-list).
   participants: ['updateCallParticipants', updateCallParticipants],
+  // The meeting playbook: apply, switch or remove (docs/meeting-playbooks.md).
+  playbook: ['applyMeetingPlaybook', applyMeetingPlaybook],
 };
 
 /** The server's own words for a refused write, which name the limit that was broken. */
@@ -138,6 +141,10 @@ export const mergeCallUpdate = (existing, call) => ({
   WhiteboardsEnabled: call.WhiteboardsEnabled ?? existing?.WhiteboardsEnabled,
   // Only getCall and updateCallParticipants select the participant list.
   Participants: call.Participants ?? existing?.Participants,
+  // The meeting playbook: an update that names when it changed is the value, a
+  // removed playbook (null) included; any other keeps the stored one.
+  Playbook: call.PlaybookUpdatedAt ? call.Playbook ?? null : existing?.Playbook ?? call.Playbook ?? null,
+  PlaybookUpdatedAt: call.PlaybookUpdatedAt || existing?.PlaybookUpdatedAt,
   ParticipantsUpdatedBy: call.ParticipantsUpdatedBy ?? existing?.ParticipantsUpdatedBy,
   ParticipantsUpdatedAt: call.ParticipantsUpdatedAt ?? existing?.ParticipantsUpdatedAt,
   ...(call.AgendaUpdatedAt

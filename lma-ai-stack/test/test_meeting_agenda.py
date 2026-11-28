@@ -299,6 +299,7 @@ def test_both_mcp_endpoints_offer_the_agenda_argument(resources: dict, tool: str
         "summaryProfile",
         "guidance",
         "participants",
+        "playbook",
     }
     assert set(gateway["Properties"]) == set(api_key["properties"]) - preparation
 

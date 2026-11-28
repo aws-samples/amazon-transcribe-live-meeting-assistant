@@ -148,14 +148,16 @@ def _stored(projection: bool = False) -> List[Dict[str, Any]]:
     items: List[Dict[str, Any]] = []
     while True:
         response = _table().query(**kwargs)
-        items.extend(response.get("Items", []))
+        items.extend(skill_formats.plain_item(i) for i in response.get("Items", []))
         if "LastEvaluatedKey" not in response:
             return items
         kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
 
 
 def _get(skill_id: str) -> Optional[Dict[str, Any]]:
-    return _table().get_item(Key={"AccountId": _account(), "SkillId": skill_id}).get("Item")
+    return skill_formats.plain_item(
+        _table().get_item(Key={"AccountId": _account(), "SkillId": skill_id}).get("Item")
+    )
 
 
 def _file_sizes(skill: skill_formats.Skill) -> Dict[str, int]:

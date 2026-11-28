@@ -260,6 +260,15 @@ class Settings:  # pylint: disable=too-many-instance-attributes
     other way still cannot make the analyzer run more often or publish more.
     """
 
+    #: The guidance types a meeting's playbook turns on (docs/meeting-playbooks.md);
+    #: empty for a meeting without one, which may publish every type. Set by the
+    #: analyzer for the meeting it runs on, never read from the section.
+    playbook_types: Tuple[str, ...] = ()
+
+    def allows(self, guidance_type: str) -> bool:
+        """Whether the meeting may be given guidance of this type."""
+        return not self.playbook_types or guidance_type in self.playbook_types
+
     default_enabled: bool = False
     interval_seconds: int = 90
     min_new_segments: int = 10
@@ -460,6 +469,13 @@ def build_request(  # pylint: disable=too-many-arguments
         f"{_cut(meeting.get('Agenda'), MAX_AGENDA_CHARS) or '(none)'}\n</agenda>\n\n"
         f"<checklist>\n{render_checklist(checklist_items(meeting.get('Checklist')))}\n</checklist>"
     )
+    if settings.playbook_types:
+        # The meeting's playbook: the same on every run, so it stays in the cached part.
+        prepared += (
+            "\n\n<playbook>\nThis meeting runs a playbook that asks only for these guidance "
+            f"types: {', '.join(settings.playbook_types)}. Report no other type of guidance. "
+            "Report checklist progress as usual.\n</playbook>"
+        )
     current = (
         f"{time_line(elapsed, planned_minutes(meeting.get('Labels')))}\n\n"
         f"<summary_so_far>\n{summary or '(this is the first run)'}\n</summary_so_far>\n\n"

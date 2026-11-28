@@ -17,6 +17,7 @@ shared with. Sharing the Virtual Participant itself is a separate thing and is
 not done here.
 """
 
+import re
 from typing import Any, Dict, Mapping, Optional
 
 from tools.preparation import (
@@ -32,6 +33,9 @@ from tools.preparation import (
 from tools.recipients import recipients
 from tools.summary_profiles import profile_argument
 
+#: A meeting playbook: a skill id (docs/meeting-playbooks.md), or "none".
+PLAYBOOK_ID = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
+
 
 def vp_inputs(
     labels: Any = None,
@@ -43,6 +47,7 @@ def vp_inputs(
     *,
     guidance: Any = None,
     participants: Any = None,
+    playbook: Any = None,
     for_update: bool = False,
 ) -> Dict[str, Any]:
     """The mutation input fields for the arguments given, checked.
@@ -70,6 +75,13 @@ def vp_inputs(
         fields["guidanceEnabled"] = guidance
     if participants is not None:
         fields["participants"] = participants_input(participants)
+    if playbook is not None:
+        # "" (an update) removes it, so the profile's default playbook applies.
+        if not isinstance(playbook, str) or (
+            playbook.strip() and not PLAYBOOK_ID.fullmatch(playbook.strip())
+        ):
+            raise ValueError("playbook must be a playbook's skill id, or none")
+        fields["playbook"] = playbook.strip()
     if not for_update:
         fields = {name: value for name, value in fields.items() if value not in ("", [], None)}
     return fields
@@ -100,6 +112,8 @@ def vp_preparation_output(vp: Mapping[str, Any]) -> Dict[str, Any]:
         else None,
         "shareWith": share_with,
         "participants": participants_output(vp.get("participants")),
+        # null: the profile's default playbook applies when the meeting starts.
+        "playbook": vp.get("playbook") or None,
     }
 
 

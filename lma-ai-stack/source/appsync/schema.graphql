@@ -147,6 +147,15 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	# and edited by hand. Changed through updateCallWhiteboards. See
 	# docs/meeting-whiteboards.md.
 	WhiteboardsEnabled: Boolean
+	# The meeting playbook applied to the meeting: the skill it is, the
+	# whiteboards it made, the live guidance checks it chose, its quick actions,
+	# and what was on before it, so that removing it puts that back. Null when no
+	# playbook is applied. Changed through applyMeetingPlaybook; see
+	# docs/meeting-playbooks.md.
+	Playbook: CallPlaybook
+	# When Playbook was last changed, so a page tells a removed playbook from an
+	# update that did not select it.
+	PlaybookUpdatedAt: AWSDateTime
 	# The meeting platform a Virtual Participant joined (Zoom, Teams, Chime,
 	# Webex, Google Meet), written when it creates the meeting. Absent for
 	# other capture sources and for meetings created before it was recorded.
@@ -519,6 +528,12 @@ type Mutation @aws_iam {
 	deleteMeetingWhiteboard(input: DeleteMeetingWhiteboardInput!): MeetingWhiteboard @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	# Turns the assistant's updates of the meeting's whiteboards on or off.
 	updateCallWhiteboards(input: UpdateCallWhiteboardsInput!): Call @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	# Applies a meeting playbook to a meeting, switches it to another, or
+	# removes it (SkillId null): creates the playbook's whiteboards, turns on
+	# the live guidance checks and the whiteboard updates it names, and records
+	# its quick actions on the meeting. For the meeting's owner and Admins. See
+	# docs/meeting-playbooks.md.
+	applyMeetingPlaybook(input: ApplyMeetingPlaybookInput!): Call @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	# Updates the meeting's whiteboards from the transcript now, rather than at
 	# the next run. One model call, billed to the meeting, within the meeting's
 	# runs at most.
@@ -748,6 +763,12 @@ type Query @aws_iam {
 	# each; one whiteboard, or one earlier version of it (Version); and the
 	# versions of one, newest first. Answered to the callers getCall answers.
 	listMeetingWhiteboards(CallId: ID!): MeetingWhiteboardList @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
+	# The meeting playbooks a meeting can run, each with what applying it turns
+	# on and an estimate of what that may cost; the ones a title, agenda or
+	# invitation suggest; the profile's default; and, with a CallId the caller
+	# can see, the playbook the meeting runs. An object (AWSJSON); see
+	# docs/meeting-playbooks.md.
+	meetingPlaybookOptions(CallId: ID, Title: String, Agenda: String, Invitation: String): AWSJSON @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	getMeetingWhiteboard(CallId: ID!, WhiteboardId: ID!, Version: Int): MeetingWhiteboard @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	listMeetingWhiteboardVersions(CallId: ID!, WhiteboardId: ID!, Limit: Int, NextToken: String): MeetingWhiteboardVersionPage @aws_cognito_user_pools(cognito_groups: ["Admin", "User"]) @aws_iam
 	# The deployment's consent mode and rule, and whether a meeting may choose a
@@ -921,6 +942,10 @@ type VirtualParticipant @aws_cognito_user_pools @aws_iam {
 	# Whether live guidance is on for the meeting it creates; absent, the
 	# deployment's setting decides. Put on the meeting like the inputs above.
 	guidanceEnabled: Boolean
+	# The meeting playbook applied to the meeting it creates: a skill id, or
+	# "none" for no playbook; absent, the configuration profile's default
+	# playbook, if it names one. See docs/meeting-playbooks.md.
+	playbook: String
 	# The people the meeting is to be shared with once the VP creates it, as
 	# comma-separated email addresses. Only the meetingSharedWith input sets it,
 	# and it does not share the Virtual Participant itself (that is SharedWith).
@@ -1052,6 +1077,9 @@ input CreateVirtualParticipantInput {
 	# Optional: live guidance on (true) or off (false) for the meeting; left
 	# out, or sent as null on an edit, the deployment's setting decides.
 	guidanceEnabled: Boolean
+	# Optional: the meeting playbook for the meeting, a skill id, or "none";
+	# left out, or sent as null on an edit, the profile's default playbook.
+	playbook: String
 	# Optional: email addresses the meeting is shared with when the VP creates
 	# it (at most 50). Stored on the row as meetingSharedWith; the Virtual
 	# Participant itself is not shared.
@@ -1136,6 +1164,9 @@ input UpdateScheduledVirtualParticipantInput {
 	# Optional: live guidance on (true) or off (false) for the meeting; left
 	# out, or sent as null on an edit, the deployment's setting decides.
 	guidanceEnabled: Boolean
+	# Optional: the meeting playbook for the meeting, a skill id, or "none";
+	# left out, or sent as null on an edit, the profile's default playbook.
+	playbook: String
 	# Replaces who the meeting is shared with when the VP creates it; sent
 	# empty, removes it.
 	meetingSharedWith: [String!]
@@ -1183,6 +1214,9 @@ input JoinAgainVirtualParticipantInput {
 	# Optional: live guidance on (true) or off (false) for the meeting; left
 	# out, or sent as null on an edit, the deployment's setting decides.
 	guidanceEnabled: Boolean
+	# Optional: the meeting playbook for the meeting, a skill id, or "none";
+	# left out, or sent as null on an edit, the profile's default playbook.
+	playbook: String
 	consentMode: String
 	consentRule: String
 	useStoredZoomAccount: Boolean
@@ -1312,7 +1346,7 @@ type Subscription @aws_iam {
 	onCreateCall: CreateCallOutput
 		@aws_subscribe(mutations: ["createCall"]) @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	onUpdateCall(CallId: ID): Call
-		@aws_subscribe(mutations: ["updateCallStatus", "updateCallAggregation", "updateRecordingUrl", "updateVideoRecordingUrl", "updateAgent", "updateTranscriptionPause", "updateSpeakerIdentities", "updateCallSummaryText", "updateCallAgenda", "updateCallMeetingContext", "updateCallChecklist", "updateCallChecklistItem", "updateCallLabels", "updateCallAudience", "updateCallSummaryProfile", "updateCallGuidance", "updateCallWhiteboards", "addCallSummaryText", "addCallDetectedLanguage", "startCallSession"]) @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
+		@aws_subscribe(mutations: ["updateCallStatus", "updateCallAggregation", "updateRecordingUrl", "updateVideoRecordingUrl", "updateAgent", "updateTranscriptionPause", "updateSpeakerIdentities", "updateCallSummaryText", "updateCallAgenda", "updateCallMeetingContext", "updateCallChecklist", "updateCallChecklistItem", "updateCallLabels", "updateCallAudience", "updateCallSummaryProfile", "updateCallGuidance", "updateCallWhiteboards", "applyMeetingPlaybook", "addCallSummaryText", "addCallDetectedLanguage", "startCallSession"]) @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	onAddTranscriptSegment(CallId: ID, Channel: String): TranscriptSegment
 		@aws_subscribe(mutations: ["addTranscriptSegment"]) @aws_cognito_user_pools(cognito_groups: ["Admin", "User"])
 	onAddVideoKeyframe(CallId: ID): VideoKeyframe
@@ -3628,6 +3662,69 @@ input DeleteMeetingWhiteboardInput {
 input UpdateCallWhiteboardsInput {
 	CallId: ID!
 	WhiteboardsEnabled: Boolean!
+}
+
+# The meeting playbook a meeting runs (Call.Playbook). See
+# docs/meeting-playbooks.md.
+type CallPlaybook @aws_cognito_user_pools @aws_iam {
+	# The playbook's skill; absent when the one asked for (Requested) no longer
+	# existed and none was applied.
+	SkillId: String
+	Name: String
+	DisplayName: String
+	Requested: String
+	AppliedAt: AWSDateTime
+	AppliedBy: String
+	# chosen (on the meeting page or over the API), virtual-participant, or
+	# profile-default.
+	Origin: String
+	Guidance: CallPlaybookGuidance
+	QuickActions: [CallPlaybookQuickAction]
+	Whiteboards: [CallPlaybookWhiteboard]
+	# What was left out or did not run, in a sentence each.
+	Notes: [String]
+	# The meeting's switches before its first playbook, put back when the last
+	# one is removed.
+	Previous: CallPlaybookSwitches
+}
+
+type CallPlaybookGuidance @aws_cognito_user_pools @aws_iam {
+	# The live guidance types the meeting publishes while the playbook applies.
+	Checks: [String]
+	# quiet, balanced or assertive: the confidence an item needs.
+	Assertiveness: String
+	MaxItemsPer10Min: Int
+}
+
+type CallPlaybookQuickAction @aws_cognito_user_pools @aws_iam {
+	Label: String
+	Prompt: String
+}
+
+type CallPlaybookWhiteboard @aws_cognito_user_pools @aws_iam {
+	WhiteboardId: String
+	Title: String
+	Template: String
+	# True when the meeting already had this whiteboard and the playbook kept it.
+	Reused: Boolean
+}
+
+type CallPlaybookSwitches @aws_cognito_user_pools @aws_iam {
+	GuidanceEnabled: Boolean
+	WhiteboardsEnabled: Boolean
+}
+
+input ApplyMeetingPlaybookInput {
+	CallId: ID!
+	# The playbook's skill id. Null or empty removes the meeting's playbook.
+	SkillId: ID
+	# When the meeting's playbook is removed or switched: also delete the
+	# whiteboards it made that nobody has changed. Left out, they are kept.
+	DeleteWhiteboards: Boolean
+	# For a backend caller only: why the playbook is applied
+	# ("virtual-participant" or "profile-default") and whom to record.
+	Origin: String
+	UpdatedBy: String
 }
 
 schema {

@@ -98,6 +98,8 @@ The **Create Virtual Participant** button opens a modal where you enter meeting 
 
 For the full sign-in flow, join-reliability notes, and operational caveats, see [Zoom Sign-in & Join Reliability](zoom-credentials-and-join-reliability.md).
 
+The modal has a **Meeting playbook** choice: the configuration profile's default, no playbook, or a [meeting playbook](meeting-playbooks.md), which sets the meeting up with whiteboards, live guidance checks and chat quick actions when it starts. A playbook the meeting name or agenda suggests is shown with the reason and **Use it**; it is never chosen by itself. **What … does** lists what the chosen one makes and turns on, and its estimated cost.
+
 The modal also has an optional **Agenda** field, one item per line. **Paste Meeting Invitation** fills it from the invitation when the invitation lists an agenda. The agenda is stored with the VP and placed on the meeting record when the meeting starts, for meetings started now and scheduled ones alike. See [Meeting Agenda](meeting-agenda.md).
 
 ### Virtual Participant detail page
@@ -254,6 +256,14 @@ recording that began before transcription can be longer than either.
   tab at its time and, after the meeting, plays the recording from there in the
   [player](#the-recording-player). See
   [Meeting Video and Key Frames](meeting-video.md#chapters).
+- **Meeting playbook** — which [meeting playbook](meeting-playbooks.md) the
+  meeting runs and what it turned on, with any note on what it could not apply.
+  For the meeting's owner and Admins, **Choose a playbook** (or **Change**)
+  lists the playbooks with the suggested ones marked, what each makes, turns on
+  and may cost, and applies one; **Remove** takes it off. With no playbook, a
+  playbook the meeting's name or agenda suggests is shown with **Review**. Not
+  shown to Participants. While the meeting is in progress it is also on the
+  **Transcript** tab.
 - **Agenda** — the meeting's agenda, who last changed it, and its coverage. A
   meeting without an agenda shows one line with **Derive agenda** and **Add
   agenda** for those who can change it. The agenda is also at the top of the

@@ -27,6 +27,13 @@ part of what holds whatever a skill says.
 The list of skills is cached for CATALOG_TTL_SECONDS, as the MCP server list
 is; a skill's instructions and files are cached by the skill's UpdatedAt, so an
 edit is read on the next list refresh.
+
+A meeting that runs a **playbook** (a skill with a playbook section, applied to
+the meeting; see docs/meeting-playbooks.md) has that skill's instructions in
+the prompt from the start (``playbook_prompt``), as if ``load_skill`` had been
+called, for every request about the meeting that may use the skill. A request
+that may not use it (the profile turns it off, or it is not allowed for
+Participant use) is not given it.
 """
 
 from __future__ import annotations
@@ -170,6 +177,24 @@ def load_body(summary: SkillSummary, table: Any = None) -> Optional[Dict[str, An
     return item
 
 
+def meeting_playbook_id(meeting_table: Any, call_id: str) -> str:
+    """The skill id of the playbook a meeting runs, or '' (none, or it cannot be read)."""
+    if not call_id or meeting_table is None:
+        return ""
+    try:
+        item = meeting_table.get_item(
+            Key={"PK": f"c#{call_id}", "SK": f"c#{call_id}"},
+            ProjectionExpression="#p",
+            ExpressionAttributeNames={"#p": "Playbook"},
+        ).get("Item")
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.warning("Could not read the meeting's playbook: %s", exc)
+        return ""
+    playbook = (item or {}).get("Playbook")
+    skill_id = playbook.get("SkillId") if isinstance(playbook, dict) else None
+    return skill_id if isinstance(skill_id, str) else ""
+
+
 # ── the prompt ──────────────────────────────────────────────────────────────
 
 
@@ -191,6 +216,30 @@ def catalog_prompt(skills: Sequence[SkillSummary]) -> str:
         "request does not need.\n"
         f"<available_skills>\n{lines}\n</available_skills>"
     )
+
+
+PLAYBOOK_TAG = "meeting_playbook"
+
+
+def playbook_prompt(skill: Optional[SkillSummary], record: Optional[Dict[str, Any]]) -> str:
+    """The system prompt's part for the playbook a meeting runs: its skill, loaded in advance."""
+    if skill is None or not record:
+        return ""
+    title = f"{skill.display_name} ({skill.name})" if skill.display_name else skill.name
+    return (
+        f"\n\n**This meeting's playbook.** The people running this meeting chose the playbook "
+        f"{title}. Its instructions are below, as {LOAD_SKILL} would return them, so you need "
+        "not load it: follow them for requests about this meeting, as for any skill you load.\n"
+        f"<{PLAYBOOK_TAG}>\n{describe_skill(skill, record)}\n</{PLAYBOOK_TAG}>"
+    )
+
+
+#: Appended after SKILL_RULES when a meeting's playbook is in the prompt.
+PLAYBOOK_RULE = (
+    f"\n- The instructions inside <{PLAYBOOK_TAG}> are a skill, given in advance because "
+    "this meeting runs it as its playbook. The rule above applies to them as to what "
+    f"{LOAD_SKILL} returns."
+)
 
 
 #: Appended after the meeting assistant's fixed instructions when skills are

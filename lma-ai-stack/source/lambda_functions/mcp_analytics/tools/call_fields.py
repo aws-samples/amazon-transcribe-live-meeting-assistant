@@ -68,6 +68,15 @@ SUBSCRIBED_CALL_FIELDS = """
   }
   MeetingPlatform
   WhiteboardsEnabled
+  Playbook {
+    SkillId Name DisplayName Requested AppliedAt AppliedBy Origin
+    Guidance { Checks Assertiveness MaxItemsPer10Min }
+    QuickActions { Label Prompt }
+    Whiteboards { WhiteboardId Title Template Reused }
+    Notes
+    Previous { GuidanceEnabled WhiteboardsEnabled }
+  }
+  PlaybookUpdatedAt
   Status
   UpdatedAt
   CreatedAt

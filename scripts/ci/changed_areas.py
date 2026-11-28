@@ -368,6 +368,9 @@ EXTRA_RULES: tuple[Rule, ...] = _rules(
     (f"{UI}/src/components/virtual-participant-layout/**", "vp"),
     (f"{UI}/src/components/configuration/inference-geography-cases.json", "vp"),
     ("lma-ai-stack/deployment/lma-ai-stack.yaml", ("vp", "lambdas", "vp_template")),
+    # The meeting whiteboards function's tests read the resolvers' template for the
+    # response template of the meeting playbook options (test_awsjson_encoding.py).
+    ("lma-ai-stack/deployment/lma-ai-lambda-resolvers.yaml", "lambdas"),
     ("lma-llm-template-setup-stack/**", "vp"),
     # The UI's whiteboard model tests hold its templates and diagram types to the
     # whiteboard rules (whiteboard-model.test.js).

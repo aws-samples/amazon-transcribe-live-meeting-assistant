@@ -98,7 +98,10 @@ time, its panels side by side. Each panel shows whether the assistant keeps it
 or who last edited it, and when.
 
 - **New whiteboard** asks for a title, a template, optional instructions and
-  whether the assistant keeps it updated.
+  whether the assistant keeps it updated. A [meeting playbook](meeting-playbooks.md)
+  applied to the meeting makes its own whiteboards the same way, each from its
+  template with its title and instructions, and turns the assistant's updates
+  on when it keeps any of them updated.
 - **Edit** on a panel opens its source with a preview. Saving sends the change
   made from the version you opened; if somebody (or the assistant) changed the
   whiteboard since, the page says so and offers to reload it, rather than
@@ -341,14 +344,17 @@ shown as **Meeting whiteboards** in the meeting's
 context come first in each request, so on models that cache a prompt prefix that
 part is read from the cache. The whiteboards themselves and the new transcript
 change from run to run and are not. The model is asked for a low reasoning
-effort where it takes one, and its answer is capped at 2,500 output tokens.
+effort where it takes one, and its answer is capped at 2,500 output tokens for
+one whiteboard and 1,500 more for each further whiteboard the run updates, at
+most 8,000, so a meeting with several whiteboards (one a
+[meeting playbook](meeting-playbooks.md) set up, for example) is not cut short.
 
 These figures are **estimates** from the shipped price table, for a run that
 sends about 4,000 uncached input tokens, reads about 2,000 from the cache and
 writes about 1,500 output tokens. They have not yet been measured on a recorded
 meeting; a meeting's own cost estimate shows what it actually used.
 
-| Model | Per run | Per meeting-hour (20 runs at 180 seconds) | At the 60-run cap | At the cap, every run at the output limit |
+| Model | Per run | Per meeting-hour (20 runs at 180 seconds) | At the 60-run cap | At the cap, every run at the one-whiteboard output limit |
 |---|---|---|---|---|
 | Claude Haiku 5.5 (the shipped Meeting assistant model) | about $0.0012 | about $0.024 | about $0.07 | about $0.10 |
 | Claude Sonnet 5.5 | about $0.023 | about $0.47 | about $1.40 | about $1.99 |
@@ -481,6 +487,7 @@ per-minute write counter (`r#<minute>`) and the assistant's state (`updater`).
 ## Related
 
 - [Live Guidance](live-guidance.md)
+- [Meeting Playbooks](meeting-playbooks.md)
 - [Meeting Context, Labels, Audience and Checklist](meeting-context-and-checklist.md)
 - [Meeting Export](meeting-export.md)
 - [Transcript and Recording Deletion After the Summary](transcript-deletion.md)

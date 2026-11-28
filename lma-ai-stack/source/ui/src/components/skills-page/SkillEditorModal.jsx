@@ -5,9 +5,10 @@
  */
 
 // Create or edit one skill: its name, description, Markdown instructions (with a
-// preview) and its text reference files. Metadata kept from an imported file
-// (an Amazon Quick skill's trigger, icon and inputs, for example) is shown and
-// saved unchanged.
+// preview) and its text reference files, and, for a meeting playbook, its
+// playbook section (docs/meeting-playbooks.md). Metadata kept from an imported
+// file (an Amazon Quick skill's trigger, icon and inputs, for example) is shown
+// and saved unchanged.
 
 import React, { useEffect, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
@@ -25,14 +26,31 @@ import {
   SpaceBetween,
   Tabs,
   Textarea,
+  Toggle,
 } from '@cloudscape-design/components';
+
+import PlaybookSectionEditor from '../meeting-playbooks/PlaybookSectionEditor';
+import { PLAYBOOK_KEY, emptyPlaybook, playbookForm } from '../meeting-playbooks/playbook-model';
 
 import { byteSize, formProblems, MAX_FILE_BYTES } from './skills-api';
 
-const EMPTY_FORM = { name: '', displayName: '', description: '', instructions: '', files: [], metadata: {} };
+const PLAYBOOK_TEXT =
+  'A playbook sets a meeting up when it is chosen for it: whiteboards, live guidance checks and quick actions ' +
+  'in the assistant chat. Its instructions above are what the assistant follows in that meeting.';
+
+const EMPTY_FORM = {
+  name: '',
+  displayName: '',
+  description: '',
+  instructions: '',
+  files: [],
+  metadata: {},
+  playbook: null,
+};
 
 const MetadataSummary = ({ metadata = {} }) => {
-  const entries = Object.entries(metadata || {});
+  // The playbook section has its own editor.
+  const entries = Object.entries(metadata || {}).filter(([key]) => key !== PLAYBOOK_KEY);
   if (!entries.length) return null;
   return (
     <FormField label="Metadata kept from the imported file" description="Saved unchanged with the skill.">
@@ -238,6 +256,35 @@ const SkillEditorModal = ({ visible, initial = null, saving = false, error = nul
               </SpaceBetween>
             ))}
           </SpaceBetween>
+        </Container>
+        <Container
+          header={
+            <Header
+              variant="h3"
+              description={PLAYBOOK_TEXT}
+              actions={
+                <Toggle
+                  checked={Boolean(form.playbook)}
+                  onChange={({ detail }) => set('playbook')(detail.checked ? playbookForm(emptyPlaybook()) : null)}
+                >
+                  This skill is a meeting playbook
+                </Toggle>
+              }
+            >
+              Meeting playbook
+            </Header>
+          }
+        >
+          {form.playbook ? (
+            <PlaybookSectionEditor
+              value={form.playbook}
+              onChange={set('playbook')}
+              displayName={form.displayName || form.name}
+              description={form.description}
+            />
+          ) : (
+            <Box color="text-status-inactive">Not a playbook.</Box>
+          )}
         </Container>
         <MetadataSummary metadata={form.metadata} />
       </SpaceBetween>

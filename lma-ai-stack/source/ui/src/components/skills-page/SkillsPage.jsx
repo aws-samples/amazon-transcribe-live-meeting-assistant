@@ -17,6 +17,7 @@ import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import {
   Alert,
+  Badge,
   Box,
   Button,
   ButtonDropdown,
@@ -67,6 +68,9 @@ const download = (blob, name) => {
 };
 
 const errorText = (err, fallback) => err?.message || err?.errors?.[0]?.message || fallback;
+
+// The Meeting playbook column: a badge for a skill that is a playbook (docs/meeting-playbooks.md).
+const playbookCell = (skill) => (skillMetadata(skill.Metadata).playbook ? <Badge color="blue">Playbook</Badge> : '');
 
 const SOURCE_LABELS = {
   manual: 'Written here',
@@ -384,6 +388,11 @@ const SkillsPage = () => {
             id: 'name',
             header: 'Name',
             cell: (skill) => (skill.DisplayName ? `${skill.DisplayName} (${skill.Name})` : skill.Name),
+          },
+          {
+            id: 'playbook',
+            header: 'Meeting playbook',
+            cell: playbookCell,
           },
           { id: 'description', header: 'Description', cell: (skill) => skill.Description },
           { id: 'files', header: 'Reference files', cell: (skill) => (skill.Files || []).length },

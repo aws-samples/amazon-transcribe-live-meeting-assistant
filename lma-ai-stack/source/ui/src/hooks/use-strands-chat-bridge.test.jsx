@@ -170,6 +170,20 @@ describe('useStrandsChatBridge', () => {
     });
   });
 
+  it("puts the meeting playbook's quick actions before the deployment's buttons", async () => {
+    const client = fakeClient(async () => ({
+      data: {
+        default: { ChatButtonConfigId: JSON.stringify({ '1#SUMMARIZE': 'Summarize' }) },
+        custom: { ChatButtonConfigId: JSON.stringify({}) },
+      },
+    }));
+    const source = { postMessage: vi.fn() };
+    hook = renderHook(() => useStrandsChatBridge('c-1', { client, extraButtons: { '0#Scope': 'Add up.' } }));
+    ask(source, { type: 'STRANDS_BUTTON_CONFIG_REQUEST', requestId: 'r-2' });
+    await waitFor(() => expect(source.postMessage).toHaveBeenCalled());
+    expect(source.postMessage.mock.calls[0][0].config).toEqual({ '0#Scope': 'Add up.', '1#SUMMARIZE': 'Summarize' });
+  });
+
   it('answers a user context request with the signed-in user and groups', async () => {
     const source = { postMessage: vi.fn() };
     hook = renderHook(() => useStrandsChatBridge('c-1', { client: fakeClient(async () => ({})) }));

@@ -43,6 +43,9 @@ logger = logging.getLogger(__name__)
 #: The bounds the createVirtualParticipant resolver holds.
 MAX_AGENDA_CHARS = 10000
 MAX_TIME_ZONE_CHARS = 64
+#: A meeting playbook, as createVirtualParticipant checks it: a skill id, or "none".
+MAX_PLAYBOOK_CHARS = 80
+PLAYBOOK_PATTERN = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
 CONSENT_MODES = ("off", "notify", "opt_in")
 CONSENT_RULES = ("each_participant", "owner_attests")
 
@@ -182,6 +185,12 @@ def new_row(
     # Live guidance for the new meeting; absent, the deployment's setting decides.
     if isinstance(request.get("guidanceEnabled"), bool):
         row["guidanceEnabled"] = request["guidanceEnabled"]
+    # The meeting playbook (a skill id, or "none"); absent, the profile's default.
+    playbook = _text(request.get("playbook")).strip()
+    if playbook:
+        if len(playbook) > MAX_PLAYBOOK_CHARS or not PLAYBOOK_PATTERN.fullmatch(playbook):
+            raise JoinAgainRefused("playbook must be a skill id, or none")
+        row["playbook"] = playbook
 
     agenda = _text(request.get("agenda"))
     if agenda.strip():

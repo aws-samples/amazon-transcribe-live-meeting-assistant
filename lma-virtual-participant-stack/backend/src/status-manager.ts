@@ -746,6 +746,7 @@ export class VirtualParticipantStatusManager {
             summaryProfile
             meetingSharedWith
             guidanceEnabled
+            playbook
             participants { name email }`;
 
   /** The agenda and meeting preparation from the startup read, once it has been made. */

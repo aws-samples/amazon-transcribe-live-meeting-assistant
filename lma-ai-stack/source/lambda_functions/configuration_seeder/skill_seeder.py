@@ -9,6 +9,8 @@ The skills a release ships are in ``default_skills/<name>/SKILL.md`` beside this
 module, in the Agent Skills format the Skills page imports. Each is stored as an
 ordinary skill, with ``SourceFormat: shipped``, which an Admin can edit or
 delete like any other. See docs/meeting-assistant-skills.md#default-skills.
+The shipped meeting playbooks (docs/meeting-playbooks.md) are default skills
+with a ``playbook`` section, seeded by the same rules.
 
 What a run may write, per default skill, is decided by a **ledger**: one record
 per default skill in the same table, under the partition
@@ -61,6 +63,11 @@ from typing import Any, Dict, List, NamedTuple, Optional
 import yaml
 from botocore.exceptions import ClientError
 
+# pylint: disable=import-error
+from lma_playbooks import rules as playbook_rules
+
+# pylint: enable=import-error
+
 LOGGER = logging.getLogger()
 
 #: Where the shipped skills live inside this function's package.
@@ -83,7 +90,15 @@ LEDGER_SUFFIX = "#default-skills"
 
 #: The front-matter fields kept as a skill's metadata, as the Skills Manager
 #: keeps them (skill_formats.METADATA_*).
-METADATA_FIELDS = ("trigger", "icon", "license", "compatibility", "inputs", "metadata")
+METADATA_FIELDS = (
+    "trigger",
+    "icon",
+    "license",
+    "compatibility",
+    "inputs",
+    "metadata",
+    playbook_rules.PLAYBOOK_KEY,
+)
 
 #: The Skills Manager's bound on how many skills a deployment stores
 #: (skill_formats.MAX_SKILLS). A default is not seeded past it.
@@ -119,13 +134,20 @@ def read_skill_md(text: str) -> Dict[str, Any]:
         raise ValueError("a default skill's front matter gives its name and description")
     if not body.strip():
         raise ValueError(f"the default skill {name} has no instructions")
+    metadata = {key: front[key] for key in METADATA_FIELDS if key in front}
+    if playbook_rules.PLAYBOOK_KEY in metadata:
+        # Stored normalised, as the Skills Manager stores an imported playbook;
+        # a shipped playbook the rules refuse fails the build's tests, not a deploy.
+        metadata[playbook_rules.PLAYBOOK_KEY] = playbook_rules.parse_playbook(
+            metadata[playbook_rules.PLAYBOOK_KEY]
+        )
     return {
         "Name": name,
         "DisplayName": str(front.get("display_name") or ""),
         "Description": description.strip(),
         "Instructions": body,
         "Files": [],
-        "Metadata": {key: front[key] for key in METADATA_FIELDS if key in front},
+        "Metadata": metadata,
     }
 
 
@@ -141,8 +163,12 @@ def shipped_default_skills(directory: Path = DEFAULT_SKILLS_DIR) -> List[Default
 
 
 def content_digest(item: Optional[Dict[str, Any]]) -> str:
-    """A digest of a skill's content fields, whatever else the record holds."""
-    item = item or {}
+    """A digest of a skill's content fields, whatever else the record holds.
+
+    DynamoDB returns numbers as Decimals: they are read as the ints and floats the
+    shipped file gives, so a stored playbook digests as the file it came from.
+    """
+    item = playbook_rules.plain(item or {})
     content = {
         "Name": item.get("Name"),
         "DisplayName": item.get("DisplayName") or "",

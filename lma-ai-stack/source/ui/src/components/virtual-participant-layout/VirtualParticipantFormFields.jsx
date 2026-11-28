@@ -17,6 +17,7 @@ import {
   Toggle,
   SpaceBetween,
 } from '@cloudscape-design/components';
+import PlaybookChoiceField from '../meeting-playbooks/PlaybookChoiceField';
 
 import { MAX_AGENDA_CHARS } from '../common/agenda';
 import {
@@ -81,6 +82,9 @@ const VirtualParticipantFormFields = ({
   // Live guidance for the meeting (guidance-options.js); not offered when omitted.
   guidanceChoice = undefined,
   onGuidanceChoiceChange = undefined,
+  // The meeting playbook (meeting-playbooks/playbook-choice.js); not offered when omitted.
+  playbookChoice = undefined,
+  onPlaybookChoiceChange = undefined,
 }) => {
   // A meetingId that is a full join URL (http/https) carries its own password
   // server-side, so the field is relabelled and the password input hidden.
@@ -357,6 +361,16 @@ const VirtualParticipantFormFields = ({
         />
       </FormField>
 
+      {onPlaybookChoiceChange && (
+        <PlaybookChoiceField
+          choice={playbookChoice}
+          onChange={onPlaybookChoiceChange}
+          meetingName={form.meetingName}
+          agenda={form.agenda}
+          disabled={settingsLocked}
+        />
+      )}
+
       {onGuidanceChoiceChange && (
         <FormField
           label="Live guidance"
@@ -446,6 +460,8 @@ VirtualParticipantFormFields.propTypes = {
   ),
   guidanceChoice: PropTypes.oneOf(['default', 'on', 'off']),
   onGuidanceChoiceChange: PropTypes.func,
+  playbookChoice: PropTypes.string,
+  onPlaybookChoiceChange: PropTypes.func,
 };
 
 export default VirtualParticipantFormFields;

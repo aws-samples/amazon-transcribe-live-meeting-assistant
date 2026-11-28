@@ -577,6 +577,10 @@ MCP_TOOLS = [
                     "type": "boolean",
                     "description": "Optional: live guidance on (true) or off (false) for the meeting, which marks its checklist items covered and offers guidance to the people running it, each run a model call billed to the meeting. Omitted, the deployment's setting decides (off unless an administrator changed it)",
                 },
+                "playbook": {
+                    "type": "string",
+                    "description": "Optional meeting playbook for the meeting: a playbook's skill id, such as sprint-planning, architecture-review, customer-discovery, incident-review or retrospective (a deployment's own are listed on its Skills page), or none for no playbook. Applied when the meeting starts: it makes the playbook's whiteboards and turns on the live guidance checks it names, each run a model call billed to the meeting. Omitted, the configuration profile's default playbook, if it names one",
+                },
             },
             "required": ["meetingName", "meetingPlatform", "meetingId", "scheduledTime"],
         },
@@ -728,6 +732,10 @@ MCP_TOOLS = [
                     "type": "boolean",
                     "description": "Optional: live guidance on (true) or off (false) for the meeting, which marks its checklist items covered and offers guidance to the people running it, each run a model call billed to the meeting. Omitted, the deployment's setting decides (off unless an administrator changed it)",
                 },
+                "playbook": {
+                    "type": "string",
+                    "description": "Optional meeting playbook for the meeting: a playbook's skill id, such as sprint-planning, architecture-review, customer-discovery, incident-review or retrospective (a deployment's own are listed on its Skills page), or none for no playbook. Applied when the meeting starts: it makes the playbook's whiteboards and turns on the live guidance checks it names, each run a model call billed to the meeting. Omitted, the configuration profile's default playbook, if it names one",
+                },
             },
             "required": ["meetingName", "meetingPlatform", "meetingId"],
         },
@@ -840,6 +848,7 @@ PREPARATION_ARGUMENTS = (
     "summaryProfile",
     "guidance",
     "participants",
+    "playbook",
 )
 
 
@@ -867,6 +876,7 @@ def _vp_preparation(caller: CallerInfo, tool_name: str, a: Dict[str, Any]) -> Di
         a.get("summaryProfile"),
         guidance=a.get("guidance"),
         participants=a.get("participants"),
+        playbook=a.get("playbook"),
     )
 
 
@@ -1024,6 +1034,7 @@ TOOL_HANDLERS: Dict[str, Callable[[Any, Dict[str, Any]], Any]] = {
         summary_profile=a.get("summaryProfile"),
         guidance=a.get("guidance"),
         participants=a.get("participants"),
+        playbook=a.get("playbook"),
     ),
     "end_meeting": lambda caller, a: meeting_actions.end_meeting(
         _meeting(caller), a.get("meetingId"), reason=a.get("reason")

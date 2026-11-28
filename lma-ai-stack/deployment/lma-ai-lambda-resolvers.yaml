@@ -86,6 +86,14 @@ Parameters:
     Description: >-
       The recordings bucket. The Participant view signs links to the audio
       and video recordings in it.
+  SkillsTable:
+    Type: String
+    Description: >-
+      The meeting assistant's skills table. The meeting whiteboards function
+      reads the meeting playbooks from it (docs/meeting-playbooks.md).
+  SkillsTableArn:
+    Type: String
+    Description: The skills table's ARN, for the read-only grant.
   UserManagementDataSourceName:
     Type: String
     Description: >-
@@ -1301,7 +1309,10 @@ Resources:
   # its transcript: invoked asynchronously by the call event processor, at most
   # every intervalSeconds per meeting, for a meeting whose WhiteboardsEnabled is
   # true and once at each meeting's end, and through requestWhiteboardUpdate.
-  # See docs/meeting-whiteboards.md.
+  # See docs/meeting-whiteboards.md. It also applies meeting playbooks
+  # (applyMeetingPlaybook, meetingPlaybookOptions, and a playbook for a new
+  # meeting from the call event processor), which make whiteboards and change
+  # the meeting's switches; see docs/meeting-playbooks.md.
   # ----------------------------------------------------------------------------
   MeetingWhiteboardsFunction:
     Type: AWS::Serverless::Function
@@ -1328,6 +1339,10 @@ Resources:
           # Token usage per run, for the meeting cost estimate.
           METERING_TABLE_NAME: !Ref EventSourcingTable
           METERING_EXPIRATION_DAYS: !Ref MeetingRecordExpirationInDays
+          # The meeting playbooks, read from the skills table under the
+          # account's partition, as the Skills Manager stores them.
+          SKILLS_TABLE: !Ref SkillsTable
+          SKILLS_ACCOUNT_ID: !Ref AWS::AccountId
       Layers:
         - !Ref ConfigurationPythonLayer
       LoggingConfig:
@@ -1425,13 +1440,23 @@ Resources:
                     "dynamodb:LeadingKeys":
                       - "mtr#*"
               # The assistant's changes go through AppSync, so open meeting pages
-              # update and the resolver's rules apply to it as to anyone.
+              # update and the resolver's rules apply to it as to anyone; so do
+              # a playbook's whiteboards, its removal of the ones nobody changed,
+              # and a playbook applied to a new meeting.
               - Effect: Allow
                 Action:
                   - appsync:GraphQL
                 Resource:
                   - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/types/Mutation/fields/createMeetingWhiteboard"
                   - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/types/Mutation/fields/updateMeetingWhiteboard"
+                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/types/Mutation/fields/deleteMeetingWhiteboard"
+                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/types/Mutation/fields/applyMeetingPlaybook"
+              # Read-only, on the skills table: the meeting playbooks.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                Resource: !Ref SkillsTableArn
               # Read-only, on the shared configuration table: the Whiteboards
               # settings, the model and the transcript retention.
               - Effect: Allow
@@ -2968,6 +2993,34 @@ Resources:
         }
       ResponseMappingTemplate: |
         #if($ctx.error)
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        $util.toJson($ctx.result)
+
+  # Meeting playbooks, answered by the meeting whiteboards function above;
+  # applyMeetingPlaybook is published to onUpdateCall, so it answers through the
+  # template that shapes SharedWith for the subscription's filter. See
+  # docs/meeting-playbooks.md.
+  ApplyMeetingPlaybookAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref AppSyncApiId
+      DataSourceName: !GetAtt MeetingWhiteboardsLambdaDataSource.Name
+      TypeName: Mutation
+      FieldName: applyMeetingPlaybook
+      RequestMappingTemplateS3Location: ../source/appsync/meetingWhiteboards.request.vtl
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
+  MeetingPlaybookOptionsAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref AppSyncApiId
+      DataSourceName: !GetAtt MeetingWhiteboardsLambdaDataSource.Name
+      TypeName: Query
+      FieldName: meetingPlaybookOptions
+      RequestMappingTemplateS3Location: ../source/appsync/meetingWhiteboards.request.vtl
+      ResponseMappingTemplate: |
+        #if( $ctx.error )
           $util.error($ctx.error.message, $ctx.error.type)
         #end
         $util.toJson($ctx.result)

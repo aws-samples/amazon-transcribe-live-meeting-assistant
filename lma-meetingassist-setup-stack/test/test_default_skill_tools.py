@@ -63,7 +63,8 @@ def test_the_registry_holds_the_assistants_tools():
 
 
 def test_the_default_skills_are_found():
-    assert len(DEFAULT_SKILLS) == 5
+    # The five default skills and the five shipped meeting playbooks.
+    assert len(DEFAULT_SKILLS) == 10
 
 
 @pytest.mark.parametrize("path", DEFAULT_SKILLS, ids=lambda p: p.parent.name)

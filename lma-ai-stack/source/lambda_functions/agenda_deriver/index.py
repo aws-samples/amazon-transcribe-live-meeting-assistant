@@ -119,6 +119,15 @@ _CALL_FIELDS = """
       SummaryProfile
       GuidanceEnabled
       WhiteboardsEnabled
+      Playbook {
+        SkillId Name DisplayName Requested AppliedAt AppliedBy Origin
+        Guidance { Checks Assertiveness MaxItemsPer10Min }
+        QuickActions { Label Prompt }
+        Whiteboards { WhiteboardId Title Template Reused }
+        Notes
+        Previous { GuidanceEnabled WhiteboardsEnabled }
+      }
+      PlaybookUpdatedAt
       ActionItems {
         Text
         Owner

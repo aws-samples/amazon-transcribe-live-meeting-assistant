@@ -45,6 +45,7 @@ GATEWAY_WITHOUT = (
     "summaryProfile",
     "guidance",
     "participants",
+    "playbook",
 )
 
 

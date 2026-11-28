@@ -350,6 +350,11 @@ OTHER_FIELDS = [
     ("Mutation", "deleteMeetingWhiteboard"),
     ("Mutation", "updateCallWhiteboards"),
     ("Mutation", "requestWhiteboardUpdate"),
+    # A meeting's playbook: the same Lambda resolver lets the meeting's owner and
+    # Admins apply one (and refuses Participants), and answers the options with
+    # the getCall rule when a meeting is named.
+    ("Query", "meetingPlaybookOptions"),
+    ("Mutation", "applyMeetingPlaybook"),
     # The consent record of one meeting: one Lambda resolver applies each
     # operation's rule against the meeting's owner and share list, and the
     # evidence mutation accepts backend roles only.
@@ -665,6 +670,7 @@ LAMBDA_AWSJSON_FIELDS = {
     ("Query", "getSkill"): "skills_manager/test_awsjson_encoding.py",
     ("Query", "exportSkill"): "skills_manager/test_awsjson_encoding.py",
     ("Query", "exportSkillLibrary"): "skills_manager/test_awsjson_encoding.py",
+    ("Query", "meetingPlaybookOptions"): "meeting_whiteboards/test_awsjson_encoding.py",
 }
 
 

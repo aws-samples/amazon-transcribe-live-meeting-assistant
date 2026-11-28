@@ -361,3 +361,24 @@ def test_live_guidance_is_turned_on_with_its_own_mutation(meeting, appsync):
     assert "mutation UpdateCallGuidance" in query
     assert variables["input"] == {"CallId": "m1", "GuidanceEnabled": True}
     assert answer["guidance"] is True
+
+
+# ── a meeting playbook on a Virtual Participant (docs/meeting-playbooks.md) ──
+
+
+def test_a_vp_carries_the_playbook_it_is_given_or_none():
+    from tools import vp_preparation  # pylint: disable=import-outside-toplevel
+
+    assert vp_preparation.vp_inputs(playbook="sprint-planning") == {"playbook": "sprint-planning"}
+    assert vp_preparation.vp_inputs(playbook="none") == {"playbook": "none"}
+    # Omitted, or empty on a new VP: the profile's default applies.
+    assert vp_preparation.vp_inputs(playbook="") == {}
+    # An update sends it empty, which removes the choice.
+    assert vp_preparation.vp_inputs(playbook="", for_update=True) == {"playbook": ""}
+    for bad in ("Sprint Planning", "../x", 7):
+        with pytest.raises(ValueError, match="playbook"):
+            vp_preparation.vp_inputs(playbook=bad)
+    assert vp_preparation.vp_preparation_output({"playbook": "retrospective"})["playbook"] == (
+        "retrospective"
+    )
+    assert vp_preparation.vp_preparation_output({})["playbook"] is None
