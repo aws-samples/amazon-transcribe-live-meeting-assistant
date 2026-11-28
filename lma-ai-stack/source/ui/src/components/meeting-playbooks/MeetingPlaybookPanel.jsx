@@ -24,6 +24,9 @@ const ORIGINS = {
   'profile-default': "the configuration profile's default",
 };
 
+const REMOVE_BOARDS_LABEL =
+  'Also delete the whiteboards it made that only the assistant has written on (what it wrote on them is lost)';
+
 const DESCRIPTION = 'Sets the meeting up: whiteboards, live guidance checks and quick actions in the assistant chat.';
 
 const timeOf = (value) => {
@@ -194,7 +197,7 @@ const MeetingPlaybookPanel = ({ item, canChoose = false, isLive = false, onApply
             leave the assistant chat. Its whiteboards are kept unless you choose otherwise.
           </Box>
           <Checkbox checked={deleteBoards} onChange={({ detail }) => setDeleteBoards(detail.checked)}>
-            Also delete the whiteboards it made that only the assistant has written on (what the assistant wrote on them is lost)
+            {REMOVE_BOARDS_LABEL}
           </Checkbox>
         </SpaceBetween>
       </Modal>

@@ -38,6 +38,11 @@ export const outline = (playbook) => {
   return parts.join(' · ') || undefined;
 };
 
+/** The switch's choice to delete what the current playbook made. */
+export const deleteLabel = (name) =>
+  `Delete the whiteboards ${name || 'the current playbook'} made that only the assistant has written on ` +
+  '(what it wrote on them is lost)';
+
 const ChoosePlaybookModal = ({
   visible,
   options,
@@ -160,7 +165,7 @@ const ChoosePlaybookModal = ({
         )}
         {switching && (
           <Checkbox checked={deleteBoards} onChange={({ detail }) => setDeleteBoards(detail.checked)}>
-            Delete the whiteboards {current?.DisplayName || 'the current playbook'} made that only the assistant has written on (what it wrote on them is lost)
+            {deleteLabel(current?.DisplayName)}
           </Checkbox>
         )}
         {failure && <Alert type="error">{failure}</Alert>}
