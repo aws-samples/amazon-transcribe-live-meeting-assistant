@@ -197,8 +197,10 @@ def test_the_role_grants_the_s3_actions_the_function_uses(resources):
     """ListBucketVersions for the paginator, DeleteObject and DeleteObjectVersion
     for delete_objects, DeleteBucket, and ListBucket for the HeadBucket call
     botocore makes when it has to find a bucket's Region."""
-    statements = resources["S3BucketCleanupRole"]["Properties"]["Policies"][0]["PolicyDocument"][
-        "Statement"
+    (statements,) = [
+        policy["PolicyDocument"]["Statement"]
+        for policy in resources["S3BucketCleanupRole"]["Properties"]["Policies"]
+        if policy["PolicyName"] == "S3BucketCleanupPolicy"
     ]
     actions = {action for statement in statements for action in statement["Action"]}
     assert actions == {
