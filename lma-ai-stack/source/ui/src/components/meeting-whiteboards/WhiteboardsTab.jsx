@@ -426,7 +426,9 @@ const WhiteboardsTab = ({
   }, [selectRequest]);
   useEffect(() => {
     if (!highlight) return;
-    const element = document.querySelector(`.whiteboard-panel[data-panel-id="${CSS.escape(highlight)}"]`);
+    const element = [...document.querySelectorAll('.whiteboard-panel[data-panel-id]')].find(
+      (panel) => panel.dataset.panelId === highlight,
+    );
     element?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
   }, [highlight, selectedId]);
   const [creating, setCreating] = useState(false);

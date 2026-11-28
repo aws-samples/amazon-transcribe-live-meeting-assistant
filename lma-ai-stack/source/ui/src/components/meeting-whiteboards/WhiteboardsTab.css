@@ -4,7 +4,7 @@
  * See the LICENSE file in the project root for full license information.
  */
 
-/* A drawn diagram fits its panel; a wide one (a long Gantt chart) scrolls. */
+/* A drawn diagram is scaled to fit its panel; a Gantt chart is drawn at the panel's width (MermaidDiagram). */
 .whiteboard-diagram {
   overflow-x: auto;
 }

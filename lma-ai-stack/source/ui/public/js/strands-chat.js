@@ -94,11 +94,12 @@ document.getElementById('askContextRemove')?.addEventListener('click', () => set
 
 /** The message sent for a question asked about something on the page. */
 function withContext(question, context) {
-    // The attached text cannot close the quoting itself: the assistant's fixed
-    // instructions treat a <quoted> block of the request as quoted data.
-    const text = context.text.replace(/<\/?\s*quoted\s*>/gi, '');
-    return `${question}\n\nMy question is about this ${context.label}, from the meeting page:\n`
-        + `<quoted>\n${text}\n</quoted>`;
+    // The label and the text come from the meeting (a card's title, a panel's),
+    // so both go inside the quoting, which they cannot close: the assistant's
+    // fixed instructions treat a <quoted> block of the request as quoted data.
+    const unquoted = (value) => value.replace(/<\/?\s*quoted\s*>/gi, '');
+    return `${question}\n\nMy question is about this, from the meeting page:\n`
+        + `<quoted>\n${unquoted(context.label)}\n\n${unquoted(context.text)}\n</quoted>`;
 }
 
 // The whiteboards an answer made or changed, from its tool results.
