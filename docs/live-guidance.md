@@ -454,6 +454,11 @@ when the meeting is deleted.
   checked; where only the owner's past meetings are (a stack with neither a
   document knowledge base nor web search), mostly claims made in earlier
   meetings can be checked.
+- **It needs the Strands meeting assistant.** Research is done by the meeting
+  assistant function LMA deploys. A stack with no Agent Assist function asks for
+  no candidates; one whose Agent Assist is another Lambda function gets back an
+  answer research does not recognise, and then asks for none for 15 minutes,
+  as a deployment with no source does.
 - **A check is not instant.** It waits for the run that finds the claim and
   then for its research, usually a minute or two in all.
 

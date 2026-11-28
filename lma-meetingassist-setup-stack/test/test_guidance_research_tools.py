@@ -172,6 +172,13 @@ def test_web_search_and_mcp_servers_turned_off_for_every_request_are_not_offered
     assert offered == ["documents", "pastMeetings"]
 
 
+def test_mcp_tools_are_not_listed_once_setup_has_used_its_time(world):
+    started = handler_module.time.monotonic() - handler_module.RESEARCH_MCP_SETUP_SECONDS - 1
+    tools, _labels, offered = handler_module.guidance_research_tools(_request(), started)
+    assert not [t for t in _names(tools) if t.startswith("tickets_")]
+    assert "mcpServers" not in offered
+
+
 def test_a_request_with_no_source_available_makes_no_model_call(world, monkeypatch):
     monkeypatch.setattr(
         handler_module,

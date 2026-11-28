@@ -43,8 +43,8 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 import pure
 
 KINDS = ("fact_check", "lookup")
-#: Verdicts that are published, by kind; ``supported`` only with Show
-#: consistent claims on.
+#: Verdicts that are published, by kind; ``supported`` only with the setting
+#: Fact checks: also show claims the sources support (factChecksShowSupported).
 PUBLISHED_VERDICTS = {
     "fact_check": ("contradicted", "qualified"),
     "lookup": ("answered",),

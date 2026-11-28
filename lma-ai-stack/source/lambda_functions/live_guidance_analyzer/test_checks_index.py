@@ -510,6 +510,19 @@ def test_nothing_is_queued_once_the_transcript_is_deleted(world, monkeypatch):
     assert research_row(state) == {} and state["requests"] == []
 
 
+def test_an_agent_assist_function_that_does_not_research_pauses_the_candidates(world):
+    state = world(
+        answers=[with_checks(PRICE), with_checks(LATE)],
+        research=[{"message": "Here is my answer to your question."}],
+    )
+    automatic()
+    assert research_row(state)["UnavailableAt"]
+    later(state)
+    automatic()
+    schema = state["bedrock"].calls[-1]["toolConfig"]["tools"][0]["toolSpec"]["inputSchema"]["json"]
+    assert "checks" not in schema["properties"] and len(state["requests"]) == 1
+
+
 def test_fact_checks_share_the_cap_on_guidance_per_ten_minutes(world):
     guidance = [
         {

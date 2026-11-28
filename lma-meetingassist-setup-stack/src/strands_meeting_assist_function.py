@@ -10,6 +10,7 @@ Supports dynamic MCP server loading from Public Registry
 """
 
 import itertools
+import time
 import json
 import os
 import boto3
@@ -3271,9 +3272,12 @@ RESEARCH_TOOL_LABELS = {
 RESEARCH_MCP_TOOL_TIMEOUT_SECONDS = 20
 #: Pages of an MCP server's tool list read, at most.
 RESEARCH_MCP_TOOL_PAGES = 5
+#: Seconds from the request's arrival after which no more MCP tool lists are
+#: read: the research deadline counts from the arrival.
+RESEARCH_MCP_SETUP_SECONDS = 15
 
 
-def _mcp_research_tools(request, selection) -> Tuple[List[Any], Dict[str, str]]:
+def _mcp_research_tools(request, selection, started: float) -> Tuple[List[Any], Dict[str, str]]:
     """The installed MCP servers' tools a research request may call, and their labels.
 
     A server the profile turns off (its Owner use) offers none; of the others,
@@ -3289,6 +3293,12 @@ def _mcp_research_tools(request, selection) -> Tuple[List[Any], Dict[str, str]]:
     for server_id, client in sorted(clients_by_id.items()):
         if not selection.enabled(KIND_MCP_SERVERS, server_id):
             continue
+        if time.monotonic() - started > RESEARCH_MCP_SETUP_SECONDS:
+            logger.warning(
+                "Guidance research: MCP tool listing stopped after %ss; later servers left out",
+                RESEARCH_MCP_SETUP_SECONDS,
+            )
+            break
         server_name = names.get(server_id, server_id)
         token = None
         for _page in range(RESEARCH_MCP_TOOL_PAGES):
@@ -3319,7 +3329,7 @@ def _mcp_research_tools(request, selection) -> Tuple[List[Any], Dict[str, str]]:
     return tools, labels
 
 
-def guidance_research_tools(request) -> Tuple[List[Any], Dict[str, str], List[str]]:
+def guidance_research_tools(request, started: Optional[float] = None) -> Tuple[List[Any], Dict[str, str], List[str]]:
     """The read-only tools one research request is offered, their labels, and the sources offered.
 
     The meeting assistant's own tool implementations, acting for the meeting's
@@ -3373,7 +3383,11 @@ def guidance_research_tools(request) -> Tuple[List[Any], Dict[str, str], List[st
         and TOOL_GROUP_MCP_SERVERS not in turned_off
     ):
         try:
-            mcp_tools, mcp_labels = _mcp_research_tools(request, configured_tool_selection())
+            mcp_tools, mcp_labels = _mcp_research_tools(
+                request,
+                configured_tool_selection(),
+                started if started is not None else time.monotonic(),
+            )
         except Exception as error:  # noqa: BLE001 -- researched without them
             logger.warning("Guidance research: MCP tools not offered: %s", type(error).__name__)
             mcp_tools, mcp_labels = [], {}
@@ -3426,11 +3440,12 @@ def handle_guidance_research(event: Dict[str, Any]) -> Dict[str, Any]:
     deployment can offer makes no model call. The run is billed to the meeting
     under its own context, GuidanceResearch.
     """
+    started = time.monotonic()
     try:
         request = guidance_research.ResearchRequest.parse(event)
     except ValueError as error:
         return guidance_research.response(None, [], reason=str(error))
-    tools, labels, offered = guidance_research_tools(request)
+    tools, labels, offered = guidance_research_tools(request, started)
     logger.info(
         "Guidance research for %s: %d candidates, sources offered=%s, tools=%d",
         request.call_id, len(request.candidates), ','.join(offered) or 'none', len(tools),
@@ -3438,7 +3453,7 @@ def handle_guidance_research(event: Dict[str, Any]) -> Dict[str, Any]:
     if not tools:
         return guidance_research.response(None, offered, reason='no sources')
     outcome = guidance_research.run(
-        request, tools, labels, research_agent_factory(request.model_id)
+        request, tools, labels, research_agent_factory(request.model_id), started=started
     )
     call_metering.record(
         request.call_id,

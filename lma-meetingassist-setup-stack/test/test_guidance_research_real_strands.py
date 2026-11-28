@@ -254,6 +254,21 @@ def test_the_deadline_ends_a_run_that_is_still_searching():
     assert len(model.seen) <= 3 and outcome.tool_calls <= 2
 
 
+def test_the_deadline_counts_from_the_requests_arrival():
+    # Setting up the tools took the whole budget: no model call starts.
+    model = ScriptedModel([[REPORT]])
+
+    def make_agent(*, system_prompt, tools, hooks):
+        return Agent(model=model, system_prompt=system_prompt, tools=tools, hooks=hooks, callback_handler=None)
+
+    request = gr.ResearchRequest.parse(
+        {"callId": "c", "modelId": "m", "deadlineSeconds": 30, "candidates": [{"kind": "lookup", "claim": "SOC 2"}]}
+    )
+    clock = SteppingClock(0.0)
+    outcome = gr.run(request, [], {}, make_agent, clock=clock, started=clock.now - 31)
+    assert outcome.stopped == "deadline" and model.seen == []
+
+
 def test_a_model_that_never_reports_leaves_no_findings():
     outcome, _ran, _model = _run(["Everything is fine."])
     assert outcome.findings == []

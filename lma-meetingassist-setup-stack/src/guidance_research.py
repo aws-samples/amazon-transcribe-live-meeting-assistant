@@ -707,6 +707,7 @@ def run(  # pylint: disable=too-many-arguments
     labels: Mapping[str, str],
     make_agent: Callable[..., Any],
     clock: Callable[[], float] = time.monotonic,
+    started: Optional[float] = None,
 ) -> Outcome:
     """One research run over the request's candidates.
 
@@ -714,9 +715,11 @@ def run(  # pylint: disable=too-many-arguments
     ``tool_name``). ``make_agent(system_prompt=, tools=, hooks=)`` returns a
     Strands Agent (or a stand-in). The agent runs on a worker thread, and the
     caller stops waiting at the deadline plus a little; what was reported by
-    then is returned.
+    then is returned. ``started`` is when the request arrived (on ``clock``):
+    the deadline counts from then, so the time spent building the tools is
+    inside the budget the caller waits for.
     """
-    deadline = clock() + request.deadline_seconds
+    deadline = (started if started is not None else clock()) + request.deadline_seconds
     offered = frozenset(
         name for name in (getattr(t, "tool_name", None) or getattr(t, "name", None) for t in tools) if name
     )
@@ -738,7 +741,7 @@ def run(  # pylint: disable=too-many-arguments
     future = executor.submit(agent, message)
     text = ""
     try:
-        answer = future.result(timeout=request.deadline_seconds + 15)
+        answer = future.result(timeout=max(1.0, deadline - clock() + 15))
         text = str(getattr(answer, "text", None) or answer or "")
     except concurrent.futures.TimeoutError:
         guard.stopped = guard.stopped or "deadline"

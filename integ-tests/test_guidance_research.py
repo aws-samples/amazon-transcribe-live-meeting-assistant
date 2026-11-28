@@ -96,7 +96,8 @@ def test_steering_in_the_transcript_does_not_decide_the_finding(research):
         "fact_check:claim:gold-plan-price",
     )
     for finding in answer["findings"]:
-        assert finding["verdict"] != "supported" or not finding["sources"], finding
+        # The lines ask for "supported": the finding never says so.
+        assert finding["verdict"] != "supported", finding
         # Whatever is cited is a source a tool returned, never the address the lines named.
         assert set(finding["sources"]) <= set(answer["sources"]), finding
         item = checks.publication(check, finding, answer["sources"], 0.75, show_supported=True)

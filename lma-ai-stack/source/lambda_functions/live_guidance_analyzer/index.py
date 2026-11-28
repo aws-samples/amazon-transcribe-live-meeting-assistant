@@ -757,7 +757,9 @@ def _analyse(  # pylint: disable=too-many-arguments,too-many-locals
     }
     if research.pending and research.can_research():
         try:
-            result["research"] = drain(call_id, settings, segments, until=until)
+            result["research"] = drain(
+                call_id, settings, segments, until=until, expires=_expiry(meeting)
+            )
         except Exception:  # pylint: disable=broad-except
             # The run itself is done and its lease given back; only the
             # research after it failed, and the queue waits for the next.
@@ -895,6 +897,7 @@ def drain(  # pylint: disable=too-many-arguments
     *,
     until: float,
     at_end: bool = False,
+    expires: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Research the queue in batches while this invocation has time, and the meeting runs left.
 
@@ -903,7 +906,9 @@ def drain(  # pylint: disable=too-many-arguments
     invocation do not. A batch starts only when its research can finish before
     ``until``; what is left waits for the next run, or for the run at the
     meeting's end (``at_end``), which may still publish. When the meeting has
-    used its research runs, what waits is dropped and logged.
+    used its research runs, what waits is dropped and logged. Each claim gives
+    the research row the meeting's expiry (``expires``) if it has none, so a row
+    a claim creates again after the transcript's deletion still expires.
     """
     totals = {"runs": 0, "researched": 0, "findings": 0, "published": 0}
     continuing = False
@@ -914,7 +919,7 @@ def drain(  # pylint: disable=too-many-arguments
             now=now,
             interval_seconds=RESEARCH_INTERVAL_SECONDS,
             max_runs=settings.research_runs_per_meeting,
-            expires=None,
+            expires=expires,
             ignore_interval=continuing,
         )
         if row is None:
@@ -1120,7 +1125,11 @@ def _research_batch(  # pylint: disable=too-many-arguments,too-many-locals
         LOGGER.warning("Guidance research for %s failed: %s", call_id, type(error).__name__)
         answer = {"ok": False, "reason": "failed"}
     reason = str(answer.get("reason") or "")
-    if reason == "no sources":
+    if reason != "failed" and not isinstance(answer.get("findings"), list):
+        # Not a research answer at all: the Agent Assist function is another
+        # one. Treated as a deployment with nowhere to look.
+        reason = "not a research function"
+    if reason in ("no sources", "not a research function"):
         fields["UnavailableAt"] = now
     findings = {str(f.get("id")): f for f in answer.get("findings") or [] if isinstance(f, Mapping)}
     sources = _sources(answer.get("sources"))
@@ -1379,7 +1388,9 @@ def end_run(call_id: str, until: float) -> Dict[str, Any]:
     found = final_candidates(call_id, meeting, settings, segments)
     if not pending_checks(_research_lease().read(call_id)):
         return {"ran": False, "reason": "nothing waits for research", "found": found}
-    research = drain(call_id, settings, segments, until=until, at_end=True)
+    research = drain(
+        call_id, settings, segments, until=until, at_end=True, expires=_expiry(meeting)
+    )
     return {"ran": True, "found": found, "research": research}
 
 
