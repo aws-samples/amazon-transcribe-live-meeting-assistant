@@ -22,6 +22,7 @@ import os
 
 import cognito_test_user
 import pytest
+from assistant_whiteboards_probe import TEST_USER
 from whiteboard_links_probe import GUIDANCE_TEXT, GUIDANCE_TITLE
 
 ENABLED = os.environ.get("LMA_TEST_WHITEBOARD_LINKS", "") not in ("", "0", "false")
@@ -67,7 +68,7 @@ def test_add_to_whiteboard_makes_a_whiteboard_holding_the_card_as_the_users(obse
     assert observed["ui"]["notice"].startswith("Added to")
     boards = observed["boards"]
     assert len(boards) == 1, boards
-    assert boards[0]["CreatedBy"] == observed["owner"]
+    assert boards[0]["CreatedBy"] == TEST_USER
     panel = next(p for p in boards[0]["Panels"] if p["Title"] == "From guidance")
     assert GUIDANCE_TITLE in panel["Content"] and GUIDANCE_TEXT in panel["Content"]
     assert panel["Source"] == "user"
