@@ -922,13 +922,22 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
         Version: 2012-10-17
-      ManagedPolicyArns:
-        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
       PermissionsBoundary: !If
         - HasPermissionsBoundary
         - !Ref PermissionsBoundaryArn
         - !Ref AWS::NoValue
       Policies:
+        # Writes to its own declared log group only. No logs:CreateLogGroup:
+        # see the custom resource section of lma-ai-stack/test/test_log_destinations.py.
+        - PolicyName: FunctionLogGroup
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt SetupFunctionLogGroup.Arn
         - PolicyName: InlinePolicy
           PolicyDocument:
             Version: "2012-10-17"
@@ -982,7 +991,7 @@ Resources:
           - id: W92
             reason: Customer can choose reserved concurrency based on their requirement.
           - id: W58
-            reason: Managed policy already provides access to CloudWatch logs.
+            reason: "Log write permissions are granted inline on the execution role"
     # checkov:skip=CKV_AWS_116: "DLQ not required for setup/configuration function"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"

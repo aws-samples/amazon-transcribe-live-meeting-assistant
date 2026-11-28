@@ -244,11 +244,6 @@ Resources:
 
   LambdaExecutionRole:
     Type: AWS::IAM::Role
-    Metadata:
-      cdk_nag:
-        rules_to_suppress:
-          - id: AwsSolutions-IAM5
-            reason: 'Wildcards scoped by service/resource or PassedToService condition; standard CFN least-privilege pattern'
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -276,11 +271,9 @@ Resources:
             Resource: !GetAtt BrowserExtensionCodeBuildProject.Arn
           - Effect: Allow
             Action:
-            - logs:CreateLogGroup
             - logs:CreateLogStream
             - logs:PutLogEvents
-            Resource:
-            - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*"
+            Resource: !GetAtt CodeBuildTriggerFunctionLogGroup.Arn
 
   CodeBuildTriggerFunction:
     Type: AWS::Lambda::Function

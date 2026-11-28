@@ -677,13 +677,22 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       PermissionsBoundary: !If
         - HasPermissionsBoundary
         - !Ref PermissionsBoundaryArn
         - !Ref AWS::NoValue
       Policies:
+        # Writes to its own declared log group only. No logs:CreateLogGroup:
+        # see the custom resource section of lma-ai-stack/test/test_log_destinations.py.
+        - PolicyName: FunctionLogGroup
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt EcrImagesDeleteLambdaLogGroup.Arn
         - PolicyName: deleteEcrImages
           PolicyDocument:
             Version: 2012-10-17
@@ -978,11 +987,9 @@ Resources:
                 Resource: !GetAtt WebsocketTranscriberCodeBuildProject.Arn
               - Effect: Allow
                 Action:
-                  - logs:CreateLogGroup
                   - logs:CreateLogStream
                   - logs:PutLogEvents
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*"
+                Resource: !GetAtt LambdaCodeBuildStartBuildLogGroup.Arn
           # Used by custom resource helper poller
           # https://github.com/aws-cloudformation/custom-resource-helper
         - PolicyName: CustomResourcePoller
