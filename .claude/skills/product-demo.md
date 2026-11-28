@@ -103,6 +103,21 @@ stacks with LMA in their name that it can see.
 Have the user open that URL in the debug Chrome and sign in as themselves. After
 the first time the profile remembers it.
 
+### A stack of its own for recordings
+
+Record on a stack created for the purpose, not one people work in. An Admin's
+lists (Meetings, Virtual Participants, User Management) show every account's
+meetings and email addresses, and a clean stack has nothing in them but your
+throwaway accounts and fixtures. Deploy one from the published template of the
+build you want to show (`lma deploy --stack-name <STACK> --template-url <url>
+--admin-email <address>`), or with `--from-code` for an unreleased change.
+`AdminEmail` must match `^[\w.+-]+@([\w-]+\.)+[\w-]{2,6}$`, so
+`example.invalid` is refused; `<name>@example.com` (also reserved, never
+delivered) works and keeps a real address out of User Management. On such a
+stack, step 3's sign-in as the user is not needed: record as `ux_test_session.py`
+users, so only throwaway addresses are in frame, and delete the stack when the
+videos are done.
+
 ### 4. Recording tools
 
 `make ux-record-deps` — ffmpeg and ffprobe (from the system: `brew install ffmpeg`
@@ -154,6 +169,10 @@ it (or shared to it from the Admin account).
   stops with it; `./scripts/ux_recorder.py status` says `tab visible False` when
   that happens. Do not resize the window mid-recording, and keep DevTools closed
   in that tab.
+- **A locked screen records nothing.** Check
+  `ioreg -l | grep CGSSessionScreenIsLocked` before every take; `Yes` means no
+  frames. `caffeinate -dimsu` keeps an unlocked display awake but cannot unlock
+  one, so ask the user to unlock it, or record from a headless Chrome.
 - If `list_pages` reports it cannot connect, re-check step 2 rather than trying
   other flags.
 
@@ -309,6 +328,22 @@ summary. Ways to make one, from simplest:
   time. Call its `run_probe()` (the script's own `__main__` deletes the meeting
   afterwards, which a fixture does not want). It needs a Cognito user's
   credentials and `integ-tests/requirements.txt`; see `.claude/skills/integ-tests.md`.
+- **A named business meeting, synthesized.** The shipped call is a car
+  dealership phone call, which does not fit a meeting titled "Mobile app
+  planning". For a meeting with a topic, write the conversation, synthesize each
+  turn with a Polly neural voice (`meeting_guest.synthesize_conversation` does
+  this for mono), and upload it with **Diarize speakers** checked. Speakers are
+  named from their introductions only for live meetings; name an upload's voices
+  in the Speakers panel. Read the summary before narrating it.
+- **A live meeting without Google Meet**, for anything that only happens while a
+  meeting is in progress (live guidance, whiteboard updates, the live
+  transcript): stream a stereo WAV (channel 0 the LMA user, channel 1 everyone
+  else) over the Stream Audio WebSocket at real-time pace, as the throwaway
+  user, under a readable CallId. `integ-tests/ws_stream_probe.py` has the token
+  minting and the START/END frames, but its `_stream_wav` paces at twice real
+  time and names the meeting `ws-probe-…`; reuse the pieces with your own loop.
+  A scripted stream has no consent step, so either the deployment's consent mode
+  is Off for the take, or the meeting shows the no-consent-step warning.
 - **A meeting with shared-screen key frames**: `integ-tests/desktop_video_probe.py`
   streams Polly-narrated synthetic slides with video and leaves the meeting in
   place, so the Shared Screen panel has frames to show.
@@ -377,6 +412,17 @@ Meet with nobody watching. Each of these cost at least one wasted take.
   `guest-keep.json`), or a second `start` overwrites the first one's state and
   you can no longer send it chat or stop it.
 
+- **A guest's commands stop after four hours.** Its presigned URLs expire, and a
+  guest still in the call silently ignores `chat`. Start guests with
+  `--max-minutes 230`, and restart any guest a take needs to type before its
+  four hours are up; a keepalive loop that only restarts stopped tasks will not
+  notice.
+- **A speaking guest's audio plays once, from the moment its microphone opens.**
+  Give it 20 minutes or more of speech (repeat the conversation), so whatever
+  window capture is allowed in always has speech. A meeting whose transcript is
+  empty gets no summary, and everything after the summary (retention, shared
+  views, downloads) has nothing to show.
+
 **Getting into the meeting**
 
 - **Meet refuses joins often.** Both the scripted guest and the VP get "You can't
@@ -400,6 +446,16 @@ Meet with nobody watching. Each of these cost at least one wasted take.
 - **Two VPs in one meeting:** `lma vp create --stack-name <stack> --name "<meeting name>" --as-user <email> --platform google_meet --id <code> --no-wait`
   for each user, then poll `lma vp get --id <id> --json` for `ACTIVE`. Chat
   commands address one by its user's name (`LMA jordan leave`).
+
+- **A refused Virtual Participant is replaced, not retried.** On the Lambda
+  MicroVM launch type Meet often shows the VP its sign-in wall
+  (`MANUAL_ACTION_REQUIRED` with `LOGIN_REQUIRED`, then `FAILED`). Launch a new
+  Virtual Participant for the same meeting, 30 seconds apart, up to five or six
+  times. A consent given in advance for the organizer's meetings covers every
+  replacement; one for a single Virtual Participant (`?vp=`) does not.
+- **Under Opt-in a joined VP is `JOINED`, not `ACTIVE`,** until consent is
+  granted. A wait that accepts only `ACTIVE` launches a second VP into the same
+  meeting.
 
 **Driving the meeting from the script**
 
@@ -431,6 +487,18 @@ Meet with nobody watching. Each of these cost at least one wasted take.
   granted live, use the owner-attests rule (the owner's **Attest that everyone
   agreed** in the Consent section) or have every guest type its consent.
 
+- **On Google Meet, an attendee counts once seen.** The VP knows how many people
+  are present, and their names only from who speaks or chats. Have every guest
+  that has a consent given in advance type a greeting, or it stays an
+  unidentified participant. When the count goes up, everyone must be seen again
+  (a second greeting) before an each-participant Opt-in grants. The "Consent
+  given in advance is on record for …" line names only the attendees matched
+  when it is posted; one matched later is recorded but not named, so say so in
+  the narration.
+- **Your API helpers' token expires after about an hour.** A helper that reads
+  the signed-in page's token gets `Token has expired`; reload the page and
+  retry.
+
 **Keeping the frame clean**
 
 - **The side navigation's Deployment Info section re-opens** on every reload and
@@ -449,6 +517,13 @@ Meet with nobody watching. Each of these cost at least one wasted take.
   French" after the first use, not "Choose a language".
 - **The Troubleshooting page's description contains "root cause"**; wait for the
   answer's **Root Cause** heading with an exact match.
+
+- **Whiteboard diagrams need room.** A panel is half the page wide and a
+  left-to-right flowchart shrinks to a sliver; ask for `flowchart TD` in the
+  whiteboard's instructions, and close the meeting assistant panel before
+  recording. For several live updates in a short meeting, set **Meeting
+  Assistant › Whiteboards › Seconds between runs** to 60 for the take and say so
+  in the docs entry.
 
 **Before each re-take**
 
