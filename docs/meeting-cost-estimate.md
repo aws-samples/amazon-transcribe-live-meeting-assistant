@@ -114,6 +114,7 @@ key the price table is looked up by.
 | Summary | `bedrock/<model id>` | `inputTokens`, `outputTokens`, cache units | Meeting summary Lambda | The `usage` block of each Converse call — one per summary section. On a Claude model, when two or more sections share the transcript prefix and it reaches the model's minimum cacheable length, the first section that quotes it records it as `cacheWriteInputTokens` and the sections after it that quote it the same way as `cacheReadInputTokens`; see [Prompt Caching](transcript-summarization.md#prompt-caching). A regeneration runs every section again and is recorded again. |
 | SpeakerNaming | `bedrock/<model id>` | as above | Speaker name resolver | Each naming pass's model call. |
 | LiveGuidance | `bedrock/<model id>` | as above | Live guidance analyzer | The model call of each live guidance run on a meeting that has it on, and of each digest asked for with **Digest so far** or `request_meeting_digest`. See [Live Guidance](live-guidance.md#cost). |
+| GuidanceResearch | `bedrock/<model id>` | as above | Strands meeting assistant | The tokens the Strands SDK accumulated over every model call of one research run of live guidance's [fact checks and lookups](live-guidance.md#fact-checks-and-lookups), shown as **Live guidance fact checks and lookups**. Finding the candidates is part of the run's own LiveGuidance call. See [Live Guidance](live-guidance.md#the-cost-of-fact-checks-and-lookups). |
 | MeetingWhiteboards | `bedrock/<model id>` | as above | Meeting whiteboards function | The model call of each run of the whiteboards' assistant on a meeting that has it on, including **Update now** and the run at the meeting's end. Whiteboards made by hand make none. See [Meeting Whiteboards](meeting-whiteboards.md#cost). |
 | AgendaDerivation | `bedrock/<model id>` | as above | Agenda deriver | The model call of each pass that read the transcript for a stated agenda: the automatic one, at most once per meeting, and each press of **Derive agenda**. See [Meeting Agenda](meeting-agenda.md#deriving-an-agenda-from-the-transcript). |
 | MeetingAssistant | `bedrock/<model id>` | as above | Strands meeting assistant | The tokens the Strands SDK accumulated over every model call one answer took (an answer that uses tools is several calls), whether asked from the chat panel, by wake phrase or by the voice assistant. When the answer looked at the shared screen, a second record counts the `images` sent; they are billed as the input tokens already counted, so the count is shown and not priced. See [Meeting Video and Key Frames](meeting-video.md#asking-the-assistant-about-the-shared-screen). |
@@ -393,8 +394,9 @@ include:
   Data Streams, LMA's own Lambda functions, S3 storage of recordings, and CloudWatch
   Logs.
 - Amazon Bedrock Knowledge Base queries made by the meeting assistant's document and
-  meeting-history tools (RetrieveAndGenerate does not report token usage), and the
-  vector store behind them.
+  meeting-history tools (RetrieveAndGenerate does not report token usage), whether for
+  an answer or for a live guidance fact check or lookup, and the vector store behind
+  them.
 - Amazon Bedrock Guardrails and Amazon Translate (live translation in the browser).
 - The short Nova Sonic clip the voice assistant renders once at start-up to
   acknowledge tool calls.

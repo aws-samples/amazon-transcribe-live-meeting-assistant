@@ -32,6 +32,7 @@ from bedrock_compat import (
 import tavily_secret
 from configuration_settings import base_model_id, model_arn, read_setting, resolve_model_id
 import call_metering
+import guidance_research
 import meeting_agenda
 import meeting_preparation
 import meeting_attachments
@@ -642,9 +643,90 @@ class ThinkingStepHookProvider:
             logger.error(f"   Traceback: {traceback.format_exc()}")
 
 
+#: The location members of a knowledge base reference that carry a link, and
+#: the key each keeps it under. An S3 document has a URI, not a link a reader
+#: can open, so it is named by its file name only.
+_KB_LOCATION_URL_KEYS = (
+    ('webLocation', 'url'),
+    ('confluenceLocation', 'url'),
+    ('salesforceLocation', 'url'),
+    ('sharePointLocation', 'url'),
+)
+MAX_KB_SOURCES = 5
+
+
+def kb_citation_sources(response: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The documents a RetrieveAndGenerate answer cites: ``{title, url, citable}``, at most MAX_KB_SOURCES.
+
+    ``url`` is an http(s) link where the reference has one, else empty. The
+    title is the document's own title metadata where it has one, else the last
+    part of its location. ``citable`` is False for a document any of whose
+    retrieved passages addresses the model reading it
+    (guidance_research.addressed_to_a_model), so that a document written to
+    steer a model is never named as a source, while the others an answer cites
+    still are.
+    """
+    sources: List[Dict[str, Any]] = []
+    by_key: Dict[str, Dict[str, Any]] = {}
+    for citation in response.get('citations') or []:
+        for reference in (citation or {}).get('retrievedReferences') or []:
+            location = (reference or {}).get('location') or {}
+            metadata = (reference or {}).get('metadata') or {}
+            passage = str(((reference or {}).get('content') or {}).get('text') or '')
+            url = ''
+            for member, key in _KB_LOCATION_URL_KEYS:
+                value = str((location.get(member) or {}).get(key) or '')
+                if value.startswith(('https://', 'http://')):
+                    url = value
+                    break
+            uri = str((location.get('s3Location') or {}).get('uri') or url or '')
+            title = next(
+                (
+                    str(metadata[key]).strip()
+                    for key in ('title', 'Title', 'x-amz-bedrock-kb-title')
+                    if isinstance(metadata.get(key), str) and metadata[key].strip()
+                ),
+                uri.rstrip('/').rsplit('/', 1)[-1] if uri else '',
+            )
+            key = url or uri or title
+            if not key:
+                continue
+            citable = not guidance_research.addressed_to_a_model(passage)
+            if key in by_key:
+                by_key[key]['citable'] = by_key[key]['citable'] and citable
+                continue
+            if len(sources) >= MAX_KB_SOURCES:
+                continue
+            source = {'title': ' '.join(title.split())[:200] or 'Document', 'url': url, 'citable': citable}
+            by_key[key] = source
+            sources.append(source)
+    return sources
+
+
+def with_cited_sources(result: str, response: Dict[str, Any]) -> str:
+    """``result`` followed by one ``Source: <title> <url>`` line per cited document.
+
+    A document that may not be cited (kb_citation_sources) is named on a line
+    of its own that is not a ``Source:`` line, so it is never given a source id.
+    """
+    lines = [
+        (
+            f"Source: {source['title']}" + (f" {source['url']}" if source['url'] else '')
+            if source['citable']
+            else f"Not a source (addressed to an AI model): {source['title']}"
+        )
+        for source in kb_citation_sources(response)
+    ]
+    return result + ('\n\n' + '\n'.join(lines) if lines else '')
+
+
 def create_document_search_tool(kb_id: str, kb_region: str, kb_account_id: str, kb_model_id: str,
-                                call_id: str = None, message_id: str = None):
+                                call_id: str = None, message_id: str = None,
+                                with_sources: bool = False):
     """Factory function to create document search tool with closure.
+
+    With ``with_sources``, the answer is followed by the documents it cites
+    (with_cited_sources), for guidance research, which names its sources.
 
     Returns None when ``kb_model_id`` cannot drive RetrieveAndGenerate, so the
     caller offers the agent no document_search tool at all. A tool that is offered
@@ -717,6 +799,8 @@ def create_document_search_tool(kb_id: str, kb_region: str, kb_account_id: str, 
 
             response = bedrock_agent_runtime.retrieve_and_generate(**kb_input)
             result = response.get("output", {}).get("text", "No results found in knowledge base")
+            if with_sources:
+                result = with_cited_sources(result, response)
             
             # Send tool result thinking step
             if call_id and message_id and APPSYNC_GRAPHQL_URL:
@@ -753,6 +837,113 @@ def create_document_search_tool(kb_id: str, kb_region: str, kb_account_id: str, 
 
     return document_search
 
+
+def create_web_search_tool(call_id: str, message_id: Optional[str] = None):
+    """The web_search tool (Tavily), for one request.
+
+    ``message_id`` names the chat answer its thinking steps are published to;
+    with None, it publishes none (guidance research, whose answer no chat panel
+    shows). The Tavily API key is read on the first search, not here.
+    """
+    from tavily import TavilyClient
+    from strands import tool
+
+    # Capture call_id and message_id in closure for thinking steps
+    _call_id = call_id
+    _message_id = message_id
+    publish_steps = bool(THINKING_WRAPPER_AVAILABLE and APPSYNC_GRAPHQL_URL and message_id)
+
+    @tool
+    def web_search(query: str) -> str:
+        """Search the web for current information, news, facts, or data.
+        
+        Use this when:
+        - User asks about current events, prices, or statistics
+        - Information is not in knowledge bases
+        - Need real-time or recent information
+        
+        Args:
+            query: The search query string
+            
+        Returns:
+            Search results with titles, content, and source URLs
+        """
+        try:
+            # Send tool_use thinking step
+            if publish_steps:
+                from datetime import datetime
+                sequence = get_next_sequence(_message_id)
+                thinking_step = {
+                    'type': 'tool_use',
+                    'tool_name': 'web_search',
+                    'tool_input': {'query': query},
+                    'timestamp': datetime.utcnow().isoformat()
+                }
+                logger.info(f"🔧 Sending tool_use thinking step: web_search")
+                send_thinking_step_to_appsync(_call_id, _message_id, thinking_step, sequence)
+            
+            logger.info(f"Web search tool executing: query of {len(query or '')} characters")
+            logger.debug(f"Web search query: {query}")
+
+            # Fetched from Secrets Manager on the first search and
+            # cached for the life of this execution environment.
+            api_key = tavily_secret.get_api_key()
+            if not api_key:
+                return (
+                    "Web search is unavailable: the configured Tavily API key "
+                    "could not be read. Answer from the other available tools."
+                )
+            tavily_client = TavilyClient(api_key=api_key)
+            response = tavily_client.search(query, max_results=3)
+            
+            # Format results
+            results = []
+            for result in response.get('results', []):
+                title = result.get('title', '')
+                content = result.get('content', '')
+                url = result.get('url', '')
+                results.append(f"{title}\n{content}\nSource: {url}")
+            
+            if not results:
+                formatted_results = "No web search results found"
+            else:
+                formatted_results = "\n\n".join(results)
+            
+            # Send tool_result thinking step
+            if publish_steps:
+                from datetime import datetime
+                sequence = get_next_sequence(_message_id)
+                thinking_step = {
+                    'type': 'tool_result',
+                    'tool_name': 'web_search',
+                    'result': formatted_results[:500],  # Truncate
+                    'success': True,
+                    'timestamp': datetime.utcnow().isoformat()
+                }
+                logger.info(f"✓ Sending tool_result thinking step: web_search")
+                send_thinking_step_to_appsync(_call_id, _message_id, thinking_step, sequence)
+            
+            logger.info(f"Web search returned {len(results)} results")
+            return formatted_results
+            
+        except Exception as e:
+            # Send error thinking step
+            if publish_steps:
+                from datetime import datetime
+                sequence = get_next_sequence(_message_id)
+                thinking_step = {
+                    'type': 'tool_result',
+                    'tool_name': 'web_search',
+                    'result': f"Error: {str(e)}",
+                    'success': False,
+                    'timestamp': datetime.utcnow().isoformat()
+                }
+                send_thinking_step_to_appsync(_call_id, _message_id, thinking_step, sequence)
+            
+            logger.error(f"Error in web search: {str(e)}")
+            return f"Error performing web search: {str(e)}"
+
+    return web_search
 
 def create_recent_meetings_tool(dynamodb_table_name: str, user_email: str, call_id: str = None, message_id: str = None):
     """Factory function to create recent meetings list tool with closure"""
@@ -896,8 +1087,10 @@ def create_recent_meetings_tool(dynamodb_table_name: str, user_email: str, call_
 
 def create_meeting_history_tool(transcript_kb_id: str, kb_region: str, kb_account_id: str,
                                 kb_model_id: str, user_email: str, call_id: str = None,
-                                message_id: str = None):
+                                message_id: str = None, with_sources: bool = False):
     """Factory function to create meeting history tool with closure.
+
+    ``with_sources`` as for create_document_search_tool.
 
     Returns None when ``kb_model_id`` cannot drive RetrieveAndGenerate, so the
     agent is offered no meeting_history tool. The transcript knowledge base is
@@ -999,6 +1192,8 @@ def create_meeting_history_tool(transcript_kb_id: str, kb_region: str, kb_accoun
             logger.debug(f"🔍 DEBUG: KB Response (full): {json.dumps(response, indent=2, default=str)}")
             
             result = response.get("output", {}).get("text", "No past meetings found matching your query")
+            if with_sources:
+                result = with_cited_sources(result, response)
             
             # Check if this is a guardrail response
             if "Sorry, I am unable to assist you with this request" in result:
@@ -3062,6 +3257,205 @@ def skills_not_offered_note(names: List[str]) -> str:
     )
 
 
+# ── guidance research ────────────────────────────────────────────────────────
+# Live guidance's fact checks and lookups (guidance_research.py): one read-only
+# agent run over a batch of claims and terms the live guidance analyzer found.
+
+#: A reader's name for each research tool's results, shown with a source.
+RESEARCH_TOOL_LABELS = {
+    'document_search': 'Documents',
+    'meeting_history': 'Past meetings',
+    'web_search': 'Web',
+}
+#: How long one MCP tool call of a research run may take.
+RESEARCH_MCP_TOOL_TIMEOUT_SECONDS = 20
+#: Pages of an MCP server's tool list read, at most.
+RESEARCH_MCP_TOOL_PAGES = 5
+
+
+def _mcp_research_tools(request, selection) -> Tuple[List[Any], Dict[str, str]]:
+    """The installed MCP servers' tools a research request may call, and their labels.
+
+    A server the profile turns off (its Owner use) offers none; of the others,
+    only the tools guidance_research.mcp_tool_allowed lets through: named in
+    the Live guidance allowlist, and not annotated as changing anything.
+    """
+    from datetime import timedelta
+
+    tools: List[Any] = []
+    labels: Dict[str, str] = {}
+    clients_by_id, _from_cache = load_account_mcp_servers_by_id()
+    names = installed_mcp_server_names()
+    for server_id, client in sorted(clients_by_id.items()):
+        if not selection.enabled(KIND_MCP_SERVERS, server_id):
+            continue
+        server_name = names.get(server_id, server_id)
+        token = None
+        for _page in range(RESEARCH_MCP_TOOL_PAGES):
+            try:
+                page = client.list_tools_sync(pagination_token=token)
+            except Exception as error:  # noqa: BLE001 -- the server is left out
+                logger.warning(
+                    "Guidance research: tools of MCP server %s not listed: %s",
+                    server_id, type(error).__name__,
+                )
+                break
+            for agent_tool in page:
+                mcp_tool = getattr(agent_tool, 'mcp_tool', None)
+                if mcp_tool is None or not guidance_research.mcp_tool_allowed(
+                    server_id,
+                    server_name,
+                    str(getattr(mcp_tool, 'name', '') or ''),
+                    getattr(mcp_tool, 'annotations', None),
+                    request.mcp_tools,
+                ):
+                    continue
+                agent_tool.timeout = timedelta(seconds=RESEARCH_MCP_TOOL_TIMEOUT_SECONDS)
+                tools.append(agent_tool)
+                labels[agent_tool.tool_name] = server_name
+            token = getattr(page, 'pagination_token', None)
+            if not token:
+                break
+    return tools, labels
+
+
+def guidance_research_tools(request) -> Tuple[List[Any], Dict[str, str], List[str]]:
+    """The read-only tools one research request is offered, their labels, and the sources offered.
+
+    The meeting assistant's own tool implementations, acting for the meeting's
+    owner, for the sources the request names and this deployment has: the
+    document knowledge base, the owner's past meetings, web search (unless
+    Web search is turned off for every request) and the allowed MCP tools
+    (unless MCP servers are turned off). No tool reaches the current meeting,
+    which the analyzer has already read, and none publishes thinking steps, as
+    no chat answer shows them.
+    """
+    tools: List[Any] = []
+    labels = dict(RESEARCH_TOOL_LABELS)
+    offered: List[str] = []
+    turned_off = configured_turned_off_tool_groups()
+    kb_id = os.environ.get('KB_ID', '')
+    transcript_kb_id = os.environ.get('TRANSCRIPT_KB_ID', '')
+    kb_region = os.environ.get('KB_REGION', os.environ.get('AWS_REGION'))
+    kb_account_id = os.environ.get('KB_ACCOUNT_ID', '')
+    kb_model_id = configured_kb_model_id()
+    if 'documents' in request.sources and kb_id:
+        tool = create_document_search_tool(
+            kb_id=kb_id, kb_region=kb_region, kb_account_id=kb_account_id,
+            kb_model_id=kb_model_id, call_id=request.call_id, message_id=None, with_sources=True,
+        )
+        if tool is not None:
+            tools.append(tool)
+            offered.append('documents')
+    if 'pastMeetings' in request.sources and transcript_kb_id and request.owner:
+        tool = create_meeting_history_tool(
+            transcript_kb_id=transcript_kb_id, kb_region=kb_region, kb_account_id=kb_account_id,
+            kb_model_id=kb_model_id, user_email=request.owner, call_id=request.call_id,
+            message_id=None, with_sources=True,
+        )
+        if tool is not None:
+            tools.append(tool)
+            offered.append('pastMeetings')
+    if (
+        'webSearch' in request.sources
+        and TOOL_GROUP_WEB_SEARCH not in turned_off
+        and tavily_secret.is_configured()
+    ):
+        try:
+            tools.append(create_web_search_tool(request.call_id, None))
+            offered.append('webSearch')
+        except Exception as error:  # noqa: BLE001 -- researched without it
+            logger.warning("Guidance research: web search not offered: %s", type(error).__name__)
+    if (
+        'mcpServers' in request.sources
+        and request.mcp_tools
+        and MCP_LOADER_AVAILABLE
+        and TOOL_GROUP_MCP_SERVERS not in turned_off
+    ):
+        try:
+            mcp_tools, mcp_labels = _mcp_research_tools(request, configured_tool_selection())
+        except Exception as error:  # noqa: BLE001 -- researched without them
+            logger.warning("Guidance research: MCP tools not offered: %s", type(error).__name__)
+            mcp_tools, mcp_labels = [], {}
+        if mcp_tools:
+            tools.extend(mcp_tools)
+            labels.update(mcp_labels)
+            offered.append('mcpServers')
+    return tools, labels, offered
+
+
+def research_agent_factory(model_id: str):
+    """make_agent for guidance_research.run: a Strands Agent on ``model_id``, printing nothing.
+
+    The assistant's guardrail applies, as to every answer, and the model is
+    asked for a low reasoning effort where it takes one: each run is a few
+    short calls. Prompt caching follows the Meeting Assistant switch, so a run's
+    later calls read its instructions and earlier results from the cache.
+    """
+    from strands import Agent
+    from strands.models import BedrockModel, CacheConfig
+
+    def make_agent(*, system_prompt, tools, hooks):
+        model_kwargs = {'model_id': model_id, 'streaming': False, **get_guardrail_config()}
+        if accepts_temperature(model_id):
+            model_kwargs['temperature'] = 0.0
+        request_fields = additional_request_fields(model_id, 'low')
+        if request_fields:
+            model_kwargs['additional_request_fields'] = request_fields
+        cache_kwargs, system = prompt_cache_plan(
+            model_id, system_prompt, enabled=prompt_caching_enabled()
+        )
+        if cache_kwargs is not None:
+            model_kwargs['cache_config'] = CacheConfig(**cache_kwargs)
+        return Agent(
+            model=BedrockModel(**model_kwargs),
+            system_prompt=system,
+            tools=tools,
+            hooks=hooks,
+            callback_handler=None,
+        )
+
+    return make_agent
+
+
+def handle_guidance_research(event: Dict[str, Any]) -> Dict[str, Any]:
+    """The answer to a live guidance research request; see guidance_research.py.
+
+    Only the live guidance analyzer invokes it, directly (no AppSync field
+    reaches this function with an action). A request with no source this
+    deployment can offer makes no model call. The run is billed to the meeting
+    under its own context, GuidanceResearch.
+    """
+    try:
+        request = guidance_research.ResearchRequest.parse(event)
+    except ValueError as error:
+        return guidance_research.response(None, [], reason=str(error))
+    tools, labels, offered = guidance_research_tools(request)
+    logger.info(
+        "Guidance research for %s: %d candidates, sources offered=%s, tools=%d",
+        request.call_id, len(request.candidates), ','.join(offered) or 'none', len(tools),
+    )
+    if not tools:
+        return guidance_research.response(None, offered, reason='no sources')
+    outcome = guidance_research.run(
+        request, tools, labels, research_agent_factory(request.model_id)
+    )
+    call_metering.record(
+        request.call_id,
+        'GuidanceResearch',
+        f'bedrock/{request.model_id}',
+        call_metering.bedrock_usage(outcome.usage, requests=max(1, outcome.cycles)),
+        source='strands-meeting-assist',
+    )
+    # Counts only, never content: the claims and the findings are meeting content.
+    logger.info(
+        "Guidance research for %s: findings=%d toolCalls=%d modelCalls=%d stopped=%s",
+        request.call_id, len(outcome.findings), outcome.tool_calls, outcome.model_calls,
+        outcome.stopped or 'no',
+    )
+    return guidance_research.response(outcome, offered)
+
+
 def handler(event, context):
     """
     Lambda handler for Strands-based meeting assistance with tools
@@ -3127,6 +3521,10 @@ def handler(event, context):
                 'from_cache': from_cache,
                 'warmup_time_ms': int(warmup_elapsed * 1000)
             }
+
+        # Live guidance's fact checks and lookups, from the live guidance analyzer.
+        if event.get('action') == guidance_research.ACTION:
+            return handle_guidance_research(event)
 
         logger.debug(f"Strands Meeting Assist - Processing event: {json.dumps(event)}")
 
@@ -3292,104 +3690,7 @@ def handler(event, context):
         # request allowed to search the web.
         if web_search_configured and request_scope.allows(TOOL_GROUP_WEB_SEARCH):
             try:
-                from tavily import TavilyClient
-                from strands import tool
-
-                # Capture call_id and message_id in closure for thinking steps
-                _call_id = call_id
-                _message_id = message_id
-                
-                @tool
-                def web_search(query: str) -> str:
-                    """Search the web for current information, news, facts, or data.
-                    
-                    Use this when:
-                    - User asks about current events, prices, or statistics
-                    - Information is not in knowledge bases
-                    - Need real-time or recent information
-                    
-                    Args:
-                        query: The search query string
-                        
-                    Returns:
-                        Search results with titles, content, and source URLs
-                    """
-                    try:
-                        # Send tool_use thinking step
-                        if THINKING_WRAPPER_AVAILABLE and APPSYNC_GRAPHQL_URL:
-                            from datetime import datetime
-                            sequence = get_next_sequence(_message_id)
-                            thinking_step = {
-                                'type': 'tool_use',
-                                'tool_name': 'web_search',
-                                'tool_input': {'query': query},
-                                'timestamp': datetime.utcnow().isoformat()
-                            }
-                            logger.info(f"🔧 Sending tool_use thinking step: web_search")
-                            send_thinking_step_to_appsync(_call_id, _message_id, thinking_step, sequence)
-                        
-                        logger.info(f"Web search tool executing: query of {len(query or '')} characters")
-                        logger.debug(f"Web search query: {query}")
-
-                        # Fetched from Secrets Manager on the first search and
-                        # cached for the life of this execution environment.
-                        api_key = tavily_secret.get_api_key()
-                        if not api_key:
-                            return (
-                                "Web search is unavailable: the configured Tavily API key "
-                                "could not be read. Answer from the other available tools."
-                            )
-                        tavily_client = TavilyClient(api_key=api_key)
-                        response = tavily_client.search(query, max_results=3)
-                        
-                        # Format results
-                        results = []
-                        for result in response.get('results', []):
-                            title = result.get('title', '')
-                            content = result.get('content', '')
-                            url = result.get('url', '')
-                            results.append(f"{title}\n{content}\nSource: {url}")
-                        
-                        if not results:
-                            formatted_results = "No web search results found"
-                        else:
-                            formatted_results = "\n\n".join(results)
-                        
-                        # Send tool_result thinking step
-                        if THINKING_WRAPPER_AVAILABLE and APPSYNC_GRAPHQL_URL:
-                            from datetime import datetime
-                            sequence = get_next_sequence(_message_id)
-                            thinking_step = {
-                                'type': 'tool_result',
-                                'tool_name': 'web_search',
-                                'result': formatted_results[:500],  # Truncate
-                                'success': True,
-                                'timestamp': datetime.utcnow().isoformat()
-                            }
-                            logger.info(f"✓ Sending tool_result thinking step: web_search")
-                            send_thinking_step_to_appsync(_call_id, _message_id, thinking_step, sequence)
-                        
-                        logger.info(f"Web search returned {len(results)} results")
-                        return formatted_results
-                        
-                    except Exception as e:
-                        # Send error thinking step
-                        if THINKING_WRAPPER_AVAILABLE and APPSYNC_GRAPHQL_URL:
-                            from datetime import datetime
-                            sequence = get_next_sequence(_message_id)
-                            thinking_step = {
-                                'type': 'tool_result',
-                                'tool_name': 'web_search',
-                                'result': f"Error: {str(e)}",
-                                'success': False,
-                                'timestamp': datetime.utcnow().isoformat()
-                            }
-                            send_thinking_step_to_appsync(_call_id, _message_id, thinking_step, sequence)
-                        
-                        logger.error(f"Error in web search: {str(e)}")
-                        return f"Error performing web search: {str(e)}"
-                
-                tools.append(web_search)
+                tools.append(create_web_search_tool(call_id, message_id))
                 offered_groups.add(TOOL_GROUP_WEB_SEARCH)
                 logger.info("Web search tool enabled")
             except Exception as e:

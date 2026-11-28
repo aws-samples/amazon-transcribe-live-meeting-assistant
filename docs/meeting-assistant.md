@@ -69,6 +69,8 @@ Pre-configured suggestion buttons appear in the chat panel, allowing users to tr
 
 The assistant can also offer guidance without being asked. With [live guidance](live-guidance.md) on for a meeting, it reads the meeting as it goes, marks checklist items covered with evidence from the transcript, and offers the people running the meeting short guidance (a question to ask, a topic not yet covered, something to clarify, a risk to probe, an action with no owner or date, a time check) in the meeting page's Notifications drawer. It is off unless it is turned on, and is never posted to the meeting chat or spoken.
 
+Live guidance's [fact checks and lookups](live-guidance.md#fact-checks-and-lookups), each off until an administrator turns it on, use this assistant's own read-only tools: `document_search`, `meeting_history` (for the meeting's owner), `web_search`, and the MCP server tools the Live guidance setting names that declare themselves read-only. The live guidance analyzer invokes the meeting assistant function with a batch of claims and terms (`action: guidance_research`); the function runs one agent over the batch with only those tools, fixed instructions and a budget of tool calls and time, and returns what the sources say. The run is billed as **Live guidance fact checks and lookups**, not as **Meeting assistant**.
+
 ## Built-in Tools
 
 The Meeting Assistant has access to the following tools. A request made in the meeting — the meeting chat, the voice assistant or the wake phrase — is offered only `current_meeting_transcript`, `get_meeting_agenda`, `get_meeting_frames`, `get_chat_attachments` and `read_chat_attachment` unless **Meeting Assistant › Participant use** offers more; see [Participant use](#participant-use).

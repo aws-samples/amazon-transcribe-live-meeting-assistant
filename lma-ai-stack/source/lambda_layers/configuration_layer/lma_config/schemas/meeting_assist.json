@@ -258,6 +258,94 @@
           "rows": 14,
           "minLength": 1,
           "maxLength": 10000
+        },
+        "factChecksEnabled": {
+          "order": 8,
+          "type": "boolean",
+          "title": "Fact checks",
+          "description": "Check factual claims made in the meeting against the sources below; publish only those they contradict or qualify. Billed."
+        },
+        "lookupsEnabled": {
+          "order": 9,
+          "type": "boolean",
+          "title": "Lookups",
+          "description": "Explain products, acronyms, tickets and terms the meeting seems not to know, from the sources below. Billed."
+        },
+        "factChecksShowSupported": {
+          "order": 10,
+          "type": "boolean",
+          "title": "Fact checks: also show claims the sources support",
+          "description": "Off, a claim the sources agree with is checked but not shown."
+        },
+        "researchDocuments": {
+          "order": 11,
+          "type": "boolean",
+          "title": "Fact checks and lookups: document knowledge base",
+          "description": "Search the deployment's document knowledge base, where there is one."
+        },
+        "researchPastMeetings": {
+          "order": 12,
+          "type": "boolean",
+          "title": "Fact checks and lookups: the owner's past meetings",
+          "description": "Search the past meetings the meeting's owner can see."
+        },
+        "researchWebSearch": {
+          "order": 13,
+          "type": "boolean",
+          "title": "Fact checks and lookups: web search",
+          "description": "Search the web (Tavily), where web search is configured and turned on."
+        },
+        "researchMcpTools": {
+          "order": 14,
+          "type": "array",
+          "title": "Fact checks and lookups: MCP tools",
+          "description": "Read-only MCP tools to search, as server/tool or server/* (only tools annotated read-only). Empty: none.",
+          "itemLabel": "MCP tool",
+          "maxItems": 50,
+          "items": {
+            "type": "string",
+            "pattern": "^[^/ ][^/]{0,127}/[^/ ]{1,128}$"
+          }
+        },
+        "researchConfidenceThreshold": {
+          "order": 15,
+          "type": "number",
+          "title": "Fact checks and lookups: confidence threshold",
+          "description": "Findings below this confidence (0 to 1) are not shown; higher is quieter.",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "researchChecksPerMeeting": {
+          "order": 16,
+          "type": "integer",
+          "title": "Fact checks and lookups: claims and terms per meeting at most",
+          "description": "Most claims and terms researched in one meeting; 0 turns fact checks and lookups off.",
+          "minimum": 0,
+          "maximum": 200
+        },
+        "researchRunsPerMeeting": {
+          "order": 17,
+          "type": "integer",
+          "title": "Fact checks and lookups: research runs per meeting at most",
+          "description": "Most research runs (each up to three claims or terms) per meeting; 0 turns them off.",
+          "minimum": 0,
+          "maximum": 200
+        },
+        "researchToolCallsPerRun": {
+          "order": 18,
+          "type": "integer",
+          "title": "Fact checks and lookups: searches per run at most",
+          "description": "Most tool calls (searches) one research run makes.",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "researchSecondsPerRun": {
+          "order": 19,
+          "type": "integer",
+          "title": "Fact checks and lookups: seconds per run at most",
+          "description": "How long one research run may take; it reports what it found by then.",
+          "minimum": 20,
+          "maximum": 120
         }
       },
       "additionalProperties": false

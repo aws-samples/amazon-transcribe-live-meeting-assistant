@@ -91,6 +91,16 @@ def test_guidance_is_published_and_cites_a_checklist_item(observed) -> None:
         assert len(item["Title"] or "") <= 80 and len(item["Body"] or "") <= 1500, item
 
 
+def test_fact_checks_and_lookups_are_off_by_default(observed) -> None:
+    # With the shipped settings a run asks for no candidates, so nothing waits,
+    # nothing is researched or billed for research, and no such item appears.
+    guided = observed["guided"]
+    assert guided["has_research"] is False, guided
+    assert guided["pending_checks"] is None, guided
+    assert "GuidanceResearch" not in guided["metering_contexts"], guided["metering_contexts"]
+    assert not [g for g in guided["guidance"] if g["Type"] in ("fact_check", "lookup")], guided["guidance"]
+
+
 def test_a_digest_is_published_for_the_owner(observed) -> None:
     digest = observed["digest"]
     assert digest["Success"] is True, digest

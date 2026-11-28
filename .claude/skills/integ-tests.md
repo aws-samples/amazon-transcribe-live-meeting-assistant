@@ -82,6 +82,12 @@ LMA_TEST_USER_SECRET_ID=lma/integ-tests/cognito-user \
 LMA_TEST_USER_SECRET_ID=lma/integ-tests/cognito-user \
     AWS_PROFILE=default make integ-tests STACK=lma-integtest1 LMA_TEST_CONSENT=1
 
+# Live guidance fact checks and lookups end to end (~10 min; turns them on in the
+# active profile for the run and puts it back). A planted false claim is published
+# only on a stack with web search; elsewhere the item shape and caps are checked:
+LMA_TEST_USER_SECRET_ID=lma/integ-tests/cognito-user \
+    AWS_PROFILE=default make integ-tests STACK=lma-integtest1 LMA_TEST_GUIDANCE_CHECKS=1
+
 # Real Virtual Participant join into a live meeting:
 make integ-tests-live STACK=lma-integtest1 PLATFORM=ZOOM \
     MEETING_ID=1234567890 MEETING_PASSWORD=secret

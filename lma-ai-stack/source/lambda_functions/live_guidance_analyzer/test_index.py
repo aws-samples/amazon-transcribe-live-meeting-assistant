@@ -122,7 +122,7 @@ class FakeDynamo:
             runs = self.state.get("RunCount", 0)
             if (
                 (lease is not None and lease >= values[":now"])
-                or (last is not None and last > values[":due"])
+                or (last is not None and ":due" in values and last > values[":due"])
                 or runs >= values[":max"]
             ):
                 raise _conditional_failure()

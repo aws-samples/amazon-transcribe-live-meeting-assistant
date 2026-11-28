@@ -23,6 +23,7 @@ export const CONTEXT_LABELS = {
   SpeakerNaming: 'Speaker naming',
   AgendaDerivation: 'Agenda derivation',
   LiveGuidance: 'Live guidance',
+  GuidanceResearch: 'Live guidance fact checks and lookups',
   MeetingWhiteboards: 'Meeting whiteboards',
   SlideText: 'Slide text',
   ChatAttachments: 'Chat attachments',

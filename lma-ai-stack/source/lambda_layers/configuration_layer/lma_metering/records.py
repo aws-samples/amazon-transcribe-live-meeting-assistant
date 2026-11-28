@@ -91,6 +91,7 @@ CONTEXTS = (
     "SpeakerNaming",
     "AgendaDerivation",
     "LiveGuidance",
+    "GuidanceResearch",
     "MeetingWhiteboards",
     "SlideText",
     "ChatAttachments",

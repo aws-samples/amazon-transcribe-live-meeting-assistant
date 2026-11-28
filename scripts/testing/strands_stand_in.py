@@ -31,7 +31,7 @@ from typing import Any
 IMPORTED_NAMES: dict[str, tuple[str, ...]] = {
     "strands": ("Agent", "tool"),
     "strands.models": ("BedrockModel", "CacheConfig"),
-    "strands.hooks.events": ("AfterToolCallEvent", "BeforeToolCallEvent"),
+    "strands.hooks.events": ("AfterToolCallEvent", "BeforeModelCallEvent", "BeforeToolCallEvent"),
     "strands._async": ("run_async",),
     "strands.tools.mcp": ("MCPClient",),
     "strands.types.exceptions": ("MaxTokensReachedException",),
@@ -92,6 +92,10 @@ class BeforeToolCallEvent:
 
 
 class AfterToolCallEvent:
+    """The hook event type; only ever passed to ``add_callback``."""
+
+
+class BeforeModelCallEvent:
     """The hook event type; only ever passed to ``add_callback``."""
 
 

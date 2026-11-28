@@ -201,6 +201,11 @@ class Meeting:
         rows = [_plain(r) for r in self.partition(f"gd#{self.call_id}") if r["SK"]["S"] == "analyzer"]
         return rows[0] if rows else None
 
+    def research_state(self) -> dict | None:
+        """The fact checks' and lookups' research row, which exists only once one has run."""
+        rows = [_plain(r) for r in self.partition(f"gd#{self.call_id}") if r["SK"]["S"] == "research"]
+        return rows[0] if rows else None
+
     def guidance(self) -> list[dict]:
         rows = [_plain(r) for r in self.partition(f"nt#{self.call_id}") if r["SK"]["S"].startswith("n#")]
         return [r for r in rows if r.get("Category") == "guidance"]
@@ -233,6 +238,8 @@ def _summarise(meeting: Meeting) -> dict[str, Any]:
         "run_count": int(state.get("RunCount") or 0),
         "has_state": bool(state),
         "has_summary": bool(state.get("RollingSummary")),
+        "has_research": meeting.research_state() is not None,
+        "pending_checks": (meeting.research_state() or {}).get("Pending"),
         "guidance": [
             {
                 "Type": g.get("Type"),

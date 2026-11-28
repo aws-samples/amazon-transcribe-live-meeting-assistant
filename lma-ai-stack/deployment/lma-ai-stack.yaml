@@ -6890,6 +6890,10 @@ Resources:
         EventSourcingTable: !Ref EventSourcingTable
         EventSourcingTableArn: !GetAtt EventSourcingTable.Arn
         LogLevel: !Ref LogLevel
+        MeetingAssistFunctionArn: !If
+          - ShouldEnableLambdaAgentAssist
+          - !Ref AgentAssistExistingLambdaFunctionArn
+          - ""
         MeetingConsentResolverFunctionArn: !GetAtt MeetingConsentResolverFunction.Arn
         MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn

@@ -1537,6 +1537,15 @@ def test_the_meeting_consent_tests_are_opt_in_optional_features() -> None:
     assert "skipif" in names, names
 
 
+def test_the_guidance_checks_tests_are_opt_in_optional_features() -> None:
+    """They need LMA_TEST_GUIDANCE_CHECKS=1, and change a deployment-wide setting."""
+    import test_guidance_checks
+
+    names = [m.name for m in test_guidance_checks.pytestmark]
+    assert "optional_feature" in names, names
+    assert "skipif" in names, names
+
+
 def test_the_transcript_deletion_tests_are_opt_in_optional_features() -> None:
     """They need LMA_TEST_TRANSCRIPT_DELETION=1, and change a deployment-wide setting."""
     import test_transcript_deletion

@@ -635,6 +635,33 @@ The selection names skills by id, and the skills themselves move between
 deployments with the Skills page's library export and import; see
 [Meeting Assistant Skills](meeting-assistant-skills.md).
 
+### Live guidance fact checks and lookups
+
+**Meeting Assistant › Live guidance** has two types of guidance that search the
+deployment's sources: **Fact checks**, which flag a claim made in the meeting
+that the sources contradict or qualify, and **Lookups**, which explain a term the
+meeting seems not to know. Both are off by default, and both run only on a meeting
+with live guidance on. To try them:
+
+1. Turn on **Fact checks**, **Lookups** or both.
+2. Leave on the sources you want them to search: **document knowledge base** (a
+   stack deployed with a `STRANDS_BEDROCK_WITH_KB` mode), **the owner's past
+   meetings**, and **web search** (a stack with a Tavily API key, and **Meeting
+   Assistant › Web search** on).
+3. To let them use an MCP server, add its read-only tools to **Fact checks and
+   lookups: MCP tools**, as `<server>/<tool>` for one tool or `<server>/*` for all
+   the server's tools that declare themselves read-only. The server is named by
+   its name on the MCP Servers page or its id. A tool that declares it changes
+   anything is never used, and nothing is used from a server whose **Owner use**
+   is off in **Tool selection**.
+4. Leave the caps at their defaults to start with: 30 claims and terms, and 20
+   research runs, per meeting; 6 searches and 60 seconds per research run; and a
+   confidence threshold of 0.75. Raise the threshold if the items are too many.
+
+Each research run is a billed model call, shown in the meeting's cost estimate
+as **Live guidance fact checks and lookups**. See
+[Fact checks and lookups](live-guidance.md#fact-checks-and-lookups).
+
 ### Teams meeting-end detection
 
 The Virtual Participant section's three **Teams** settings (milliseconds between meeting checks, and the two counts of checks before leaving) apply to the
