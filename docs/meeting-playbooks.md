@@ -96,7 +96,8 @@ chat and not to requests made in the meeting.
   **Choose a playbook** (or **Change**), which lists every playbook, marks the
   suggested ones with the reason, and shows what the selected one makes, turns on
   and may cost before **Apply**. **Remove** takes it off. A playbook can be applied
-  only while the meeting is in progress; it can be removed at any time.
+  only while the meeting is in progress; it can be removed at any time until the
+  meeting's transcript is deleted.
 - **For a meeting a Virtual Participant records.** The Virtual Participant form
   (start, schedule, edit a scheduled one, and Join again) has a **Meeting
   playbook** choice: *The profile's default*, *No playbook*, or a playbook. It

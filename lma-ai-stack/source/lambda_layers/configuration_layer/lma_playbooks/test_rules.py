@@ -276,3 +276,11 @@ def test_a_guidance_part_naming_no_known_check_is_no_guidance_part():
         DEPLOYMENT, meeting_with(Checks=["unknown"])
     )
     assert types is None and settings == DEPLOYMENT
+
+
+def test_research_only_checks_off_in_the_deployment_are_no_guidance_part():
+    deployment = {**DEPLOYMENT, "factChecksEnabled": False}
+    settings, types = rules.effective_guidance_settings(
+        deployment, meeting_with(Checks=["fact_check", "lookup"])
+    )
+    assert types is None and settings == deployment

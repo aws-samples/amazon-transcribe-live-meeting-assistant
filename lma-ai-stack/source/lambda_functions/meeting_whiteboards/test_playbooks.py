@@ -501,3 +501,24 @@ def test_a_playbook_whose_only_checks_are_off_here_leaves_live_guidance_alone(wo
     applied = apply(SkillId="research")
     assert applied["GuidanceEnabled"] is False
     assert any("None of its checks can run" in n for n in applied["Playbook"]["Notes"])
+
+
+def test_research_only_checks_off_here_record_no_guidance_part_and_leave_it_on(world) -> None:
+    meeting(world)["GuidanceEnabled"] = True
+    world["table"].skills["research"] = skill(
+        "research",
+        {"guidance": {"checks": ["fact_check"]}, "quickActions": [{"label": "a", "prompt": "b"}]},
+    )
+    applied = apply(SkillId="research")
+    assert applied["GuidanceEnabled"] is True
+    assert "Guidance" not in applied["Playbook"]
+
+
+def test_a_start_apply_never_replaces_a_playbook_chosen_meanwhile(world) -> None:
+    apply(SkillId="retrospective")
+    backend = index.caller_of({"identity": BACKEND})
+    result = playbooks.apply(
+        backend, {"CallId": CALL, "SkillId": "sprint-planning", "Origin": "profile-default"}
+    )
+    assert result["Playbook"]["SkillId"] == "retrospective"
+    assert [b["Title"] for b in boards()] == ["Retrospective"]

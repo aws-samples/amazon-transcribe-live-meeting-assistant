@@ -75,3 +75,12 @@ def test_a_removed_playbook_record_without_a_skill_changes_nothing(world):  # no
     state = world(meeting=meeting, answers=[answer(guidance=[ask(), clarify()])])
     assert automatic()["published"] == 2
     assert "<playbook>" not in prepared_text(state)
+
+
+def test_research_only_checks_off_here_leave_every_type_as_before(world):  # noqa: F811
+    state = world(
+        meeting=playbook_meeting(["fact_check", "lookup"]),
+        answers=[answer(guidance=[ask(), clarify()])],
+    )
+    assert automatic()["published"] == 2
+    assert "<playbook>" not in prepared_text(state)

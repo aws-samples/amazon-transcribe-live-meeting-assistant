@@ -375,6 +375,9 @@ EXTRA_RULES: tuple[Rule, ...] = _rules(
     # The UI's whiteboard model tests hold its templates and diagram types to the
     # whiteboard rules (whiteboard-model.test.js).
     (f"{LAYERS}/configuration_layer/lma_whiteboards/rules.py", "ui"),
+    # ...and its playbook model tests hold the playbook limits and names to the
+    # playbook rules (playbook-rules-parity.test.js).
+    (f"{LAYERS}/configuration_layer/lma_playbooks/rules.py", "ui"),
     # The UI's chat bridge tests hold the Participant chat buttons to the shipped
     # button prompts (use-strands-chat-bridge-participant.test.jsx).
     ("lma-chat-button-config-stack/source/lambda_functions/ChatButtonConfig.json", "ui"),

@@ -450,6 +450,9 @@ def effective_guidance_settings(
         elif out.get(switch) is not True:
             checks.remove(check)
             out[switch] = False
+    if not checks:
+        # Every check it names is off in this deployment: as without a guidance part.
+        return dict(settings), None
     threshold = ASSERTIVENESS.get(str(guidance.get("Assertiveness") or ""))
     if threshold is not None:
         out["confidenceThreshold"] = threshold

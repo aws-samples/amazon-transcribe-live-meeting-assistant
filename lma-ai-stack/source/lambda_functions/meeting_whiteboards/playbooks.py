@@ -451,8 +451,9 @@ def _record(
     boards: List[Dict[str, Any]],
     notes: List[str],
     previous: Mapping[str, Any],
+    checks_run: bool = True,
 ) -> Dict[str, Any]:
-    guidance = playbook.get("guidance")
+    guidance = playbook.get("guidance") if checks_run else None
     if guidance and not guidance.get("checks"):
         # Every check it names was left out: no guidance part, so live guidance is left as it was.
         guidance = None
@@ -491,10 +492,19 @@ def _write(
     meeting: Mapping[str, Any],
     record: Optional[Dict[str, Any]],
     switches: Mapping[str, Optional[bool]],
+    *,
+    only_if_none: bool = False,
 ) -> Dict[str, Any]:
-    """Store the meeting's playbook and switches, as one write conditional on the access read."""
+    """Store the meeting's playbook and switches, as one write conditional on the access read.
+
+    ``only_if_none``: a playbook applied at a meeting's start, which never
+    replaces one the owner chose in the meantime.
+    """
     _meeting, check = wb.load_for_write(caller, call_id)
     condition = check["ConditionCheck"]
+    expression_condition = condition["ConditionExpression"]
+    if only_if_none:
+        expression_condition += " AND attribute_not_exists(#p.SkillId)"
     names = {**condition["ExpressionAttributeNames"], "#p": "Playbook", "#pu": "PlaybookUpdatedAt"}
     values = {**condition.get("ExpressionAttributeValues", {}), ":pu": {"S": wb.now_iso()}}
     sets = ["#pu = :pu"]
@@ -517,13 +527,22 @@ def _write(
             TableName=wb.EVENT_SOURCING_TABLE,
             Key=wb._meeting_key(call_id),
             UpdateExpression=expression,
-            ConditionExpression=condition["ConditionExpression"],
+            ConditionExpression=expression_condition,
             ExpressionAttributeNames=names,
             ExpressionAttributeValues=values,
             ReturnValues="ALL_NEW",
         )
     except ClientError as error:
         if wb._conflict(error):
+            if only_if_none:
+                current = wb.read_meeting(call_id, full=True) or {}
+                if isinstance(current.get("Playbook"), Mapping) and current["Playbook"].get(
+                    "SkillId"
+                ):
+                    LOGGER.info(
+                        "Playbook for %s chosen meanwhile; the start's is not applied", call_id
+                    )
+                    return current
             raise wb._meeting_refusal(caller, call_id) from error
         raise
     return wb._from_item(result["Attributes"]) or {}
@@ -564,6 +583,10 @@ def apply(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict[str, Any]:
 
     current = meeting.get("Playbook") if isinstance(meeting.get("Playbook"), Mapping) else None
     applied = current if current and current.get("SkillId") else None
+    at_start = origin in BACKEND_ORIGINS
+    if at_start and applied:
+        # Chosen on the meeting page before the start's could be applied: it stands.
+        return meeting
     # What was on before any playbook: kept across a switch, so removing the last
     # one puts the meeting back as it was before the first.
     previous = (applied or {}).get("Previous") or {
@@ -577,6 +600,8 @@ def apply(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict[str, Any]:
         # Refused before anything changes, the current playbook's whiteboards included.
         raise wb.refuse("BadRequest", f"There is no playbook {skill_id}")
     if applied and data.get("DeleteWhiteboards") is True:
+        # The write's own condition, checked before anything is deleted.
+        wb.load_for_write(caller, call_id)
         _remove_boards(call_id, applied, notes)
 
     if not skill_id:
@@ -606,7 +631,7 @@ def apply(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict[str, Any]:
                 "playbook was applied."
             ],
         }
-        return _write(caller, call_id, meeting, record, {})
+        return _write(caller, call_id, meeting, record, {}, only_if_none=at_start)
 
     playbook, problems = playbook_rules.lenient_playbook(playbook_rules.playbook_of(skill))
     notes.extend(f"Left out: {problem}." for problem in problems)
@@ -628,6 +653,7 @@ def apply(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict[str, Any]:
         "WhiteboardsEnabled": previous.get("WhiteboardsEnabled") is True,
     }
     checks = (playbook.get("guidance") or {}).get("checks") or []
+    checks_run = True
     if checks:
         running = [
             c
@@ -646,6 +672,7 @@ def apply(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict[str, Any]:
             switches["GuidanceEnabled"] = True
         else:
             # Every check it names is off here: live guidance would only bill runs.
+            checks_run = False
             notes.append(
                 "None of its checks can run in this deployment, so live guidance is left as it was."
             )
@@ -665,6 +692,7 @@ def apply(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict[str, Any]:
         boards=boards,
         notes=notes,
         previous=previous,
+        checks_run=checks_run,
     )
     LOGGER.info(
         "Playbook %s applied to %s by %s (%s): whiteboards=%d checks=%s notes=%d",
@@ -676,7 +704,7 @@ def apply(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict[str, Any]:
         ",".join(checks) or "-",
         len(notes),
     )
-    return _write(caller, call_id, meeting, record, switches)
+    return _write(caller, call_id, meeting, record, switches, only_if_none=at_start)
 
 
 # ── at a meeting's start ─────────────────────────────────────────────────────
