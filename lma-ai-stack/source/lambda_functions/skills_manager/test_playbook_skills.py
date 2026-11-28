@@ -111,3 +111,10 @@ def test_the_editor_saves_a_playbook_through_the_same_check():
 
 def test_a_skill_without_a_playbook_section_is_unchanged():
     assert "playbook" not in sf.check_metadata({"license": "MIT-0"})
+
+
+@pytest.mark.parametrize("name", ["default", "none"])
+def test_a_playbook_may_not_take_a_name_the_vp_form_uses_for_its_own_choices(name):
+    text = PLAYBOOK_MD.replace("name: launch-review", f"name: {name}")
+    with pytest.raises(sf.SkillError, match="cannot be named"):
+        sf.parse_skill_file("SKILL.md", text.encode())

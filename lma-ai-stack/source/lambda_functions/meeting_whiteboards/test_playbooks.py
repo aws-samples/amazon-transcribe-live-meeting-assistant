@@ -450,3 +450,33 @@ def test_a_run_over_several_whiteboards_may_write_more_before_it_is_cut_short() 
     assert index.run_max_tokens(1) == 2500
     assert index.run_max_tokens(3) == 5500  # a playbook's three whiteboards
     assert index.run_max_tokens(10) == 8000
+
+
+def test_switching_to_a_playbook_that_is_gone_deletes_nothing(world) -> None:
+    apply(SkillId="sprint-planning")
+    with base.refused("BadRequest"):
+        apply(SkillId="nope", DeleteWhiteboards=True)
+    assert len(boards()) == 3
+    assert meeting(world)["Playbook"]["SkillId"] == "sprint-planning"
+
+
+def test_a_whiteboard_the_meeting_already_had_is_kept_when_the_playbook_goes(world) -> None:
+    base.create(Title="Retrospective", Template="retrospective")
+    applied = apply(SkillId="retrospective")
+    assert applied["Playbook"]["Whiteboards"][0]["Reused"] is True
+    apply(SkillId=None, DeleteWhiteboards=True)
+    assert [b["Title"] for b in boards()] == ["Retrospective"]
+
+
+def test_a_guidance_part_whose_checks_are_all_unknown_leaves_live_guidance_alone(world) -> None:
+    meeting(world)["GuidanceEnabled"] = True
+    world["table"].skills["odd"] = skill(
+        "odd",
+        {
+            "guidance": {"checks": ["sentiment_alarm"]},
+            "quickActions": [{"label": "a", "prompt": "b"}],
+        },
+    )
+    applied = apply(SkillId="odd")
+    assert "Guidance" not in applied["Playbook"]
+    assert applied["GuidanceEnabled"] is True

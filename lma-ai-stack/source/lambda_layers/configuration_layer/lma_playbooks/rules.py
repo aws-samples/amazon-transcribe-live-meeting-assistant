@@ -441,6 +441,9 @@ def effective_guidance_settings(
     if guidance is None:
         return out, None
     checks = [c for c in guidance.get("Checks") or [] if c in GUIDANCE_CHECKS]
+    if not checks:
+        # A guidance part that names no check this release knows is no guidance part.
+        return out, None
     for check, switch in RESEARCH_CHECKS.items():
         if check not in checks:
             out[switch] = False

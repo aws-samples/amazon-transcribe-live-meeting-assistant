@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Any, Dict, List, Mapping, Optional
 
 import index as wb
@@ -69,6 +70,8 @@ ORIGIN_PROFILE_DEFAULT = "profile-default"
 BACKEND_ORIGINS = (ORIGIN_VIRTUAL_PARTICIPANT, ORIGIN_PROFILE_DEFAULT)
 #: The value a Virtual Participant stores for "no playbook", whatever the profile's default.
 NO_PLAYBOOK = "none"
+#: A skill id, as the Skills Manager makes one.
+SKILL_ID = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
 #: Who a whiteboard a playbook makes is recorded as made by.
 BOARD_AUTHOR_PREFIX = "Playbook"
 
@@ -163,7 +166,9 @@ def default_playbook() -> str:
         LOGGER.warning("Could not read the Playbooks settings; no default playbook")
         return ""
     value = (raw or {}).get("defaultPlaybook") if isinstance(raw, Mapping) else ""
-    return value.strip() if isinstance(value, str) else ""
+    # The call event processor's rule (default_playbook there): a skill id or nothing.
+    value = value.strip() if isinstance(value, str) else ""
+    return value if SKILL_ID.fullmatch(value) else ""
 
 
 def _model(setting: Any) -> str:
@@ -285,7 +290,8 @@ def options(caller: Mapping[str, Any], arguments: Mapping[str, Any]) -> Dict[str
         title = title or meeting.get("CallId") or ""
         agenda = agenda or meeting.get("Agenda") or ""
     guidance = guidance_settings()
-    boards = board_rules.Settings.from_raw(whiteboard_settings_raw())
+    boards_raw = whiteboard_settings_raw()
+    boards = board_rules.Settings.from_raw(boards_raw)
     limits = deployment_limits(guidance, boards)
     price_of = _price_lookup()
     guidance_model = _model(guidance.get("modelId"))
@@ -295,7 +301,7 @@ def options(caller: Mapping[str, Any], arguments: Mapping[str, Any]) -> Dict[str
         return playbook_rules.estimate_cost(
             playbook,
             guidance,
-            whiteboard_settings_raw(),
+            boards_raw,
             price_of,
             guidance_model=guidance_model,
             whiteboard_model=board_model,
@@ -337,7 +343,10 @@ def _untouched(board: Mapping[str, Any]) -> bool:
 
 
 def _remove_boards(call_id: str, record: Mapping[str, Any], notes: List[str]) -> None:
-    made = {str(b.get("WhiteboardId")) for b in record.get("Whiteboards") or []}
+    # Only those the playbook made: one it found on the meeting and kept is not its own.
+    made = {
+        str(b.get("WhiteboardId")) for b in record.get("Whiteboards") or [] if not b.get("Reused")
+    }
     if not made:
         return
     kept = 0
@@ -442,6 +451,9 @@ def _record(
     previous: Mapping[str, Any],
 ) -> Dict[str, Any]:
     guidance = playbook.get("guidance")
+    if guidance and not guidance.get("checks"):
+        # Every check it names was left out: no guidance part, so live guidance is left as it was.
+        guidance = None
     return {
         "SkillId": skill.get("SkillId"),
         "Name": skill.get("Name"),
@@ -557,6 +569,11 @@ def apply(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict[str, Any]:
         "WhiteboardsEnabled": meeting.get("WhiteboardsEnabled") is True,
     }
     notes: List[str] = []
+    skill = stored_skill(skill_id) if skill_id else None
+    target_missing = bool(skill_id) and (skill is None or not playbook_rules.is_playbook(skill))
+    if target_missing and not caller["is_backend"]:
+        # Refused before anything changes, the current playbook's whiteboards included.
+        raise wb.refuse("BadRequest", f"There is no playbook {skill_id}")
     if applied and data.get("DeleteWhiteboards") is True:
         _remove_boards(call_id, applied, notes)
 
@@ -573,10 +590,7 @@ def apply(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict[str, Any]:
             },
         )
 
-    skill = stored_skill(skill_id)
-    if skill is None or not playbook_rules.is_playbook(skill):
-        if not caller["is_backend"]:
-            raise wb.refuse("BadRequest", f"There is no playbook {skill_id}")
+    if target_missing or skill is None:
         # A Virtual Participant scheduled with a playbook deleted since, or a
         # profile default that no longer exists: the meeting says so and runs
         # without one.

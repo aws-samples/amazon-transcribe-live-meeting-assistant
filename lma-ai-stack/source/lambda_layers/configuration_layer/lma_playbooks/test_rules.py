@@ -269,3 +269,10 @@ def test_an_unpriced_model_is_said_to_be_unpriced_not_guessed():
     )
     assert result["unpriced"] == ["Live guidance", "Meeting whiteboards"]
     assert result["perHourAtMost"] == 0.0
+
+
+def test_a_guidance_part_naming_no_known_check_is_no_guidance_part():
+    settings, types = rules.effective_guidance_settings(
+        DEPLOYMENT, meeting_with(Checks=["unknown"])
+    )
+    assert types is None and settings == DEPLOYMENT

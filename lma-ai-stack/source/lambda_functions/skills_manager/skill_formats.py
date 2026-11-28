@@ -96,6 +96,9 @@ METADATA_LIST_FIELDS = {"inputs": (20, 128)}
 METADATA_MAP_FIELD = "metadata"
 #: A meeting playbook's own section (docs/meeting-playbooks.md), kept as a map.
 METADATA_PLAYBOOK_FIELD = playbook_rules.PLAYBOOK_KEY
+#: Names a playbook may not have: what a Virtual Participant stores for "no
+#: playbook", and what its form calls the profile's default.
+RESERVED_PLAYBOOK_NAMES = ("default", "none")
 MAX_METADATA_MAP = 20
 MAX_METADATA_VALUE = 512
 
@@ -355,13 +358,20 @@ def check_skill(
             f"The skill's instructions and reference files are {total} bytes together; at most "
             f"{MAX_SKILL_BYTES} are accepted."
         )
+    kept = check_metadata(metadata)
+    if METADATA_PLAYBOOK_FIELD in kept and name in RESERVED_PLAYBOOK_NAMES:
+        # The Virtual Participant form's own choices are named so.
+        raise SkillError(
+            f"A meeting playbook cannot be named {name!r}: "
+            f"{' and '.join(RESERVED_PLAYBOOK_NAMES)} are choices of their own."
+        )
     return Skill(
         name=name,
         description=description,
         instructions=instructions,
         display_name=_plain_text(display_name, "display name", MAX_DISPLAY_NAME),
         files=sorted(checked_files, key=lambda f: f.path),
-        metadata=check_metadata(metadata),
+        metadata=kept,
         source_format=source_format,
     )
 

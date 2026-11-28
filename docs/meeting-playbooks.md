@@ -130,7 +130,9 @@ words, not a model call.
 **Switching** to another playbook takes the first one off and applies the second.
 The whiteboards the first one made are kept, unless **Delete the whiteboards …
 made that nobody has written on** is ticked, which deletes those whose panels are
-all still the assistant's; a whiteboard someone wrote on is always kept.
+all still the assistant's; a whiteboard someone wrote on is always kept, and so is
+one the meeting already had that the playbook found and kept rather than made.
+Switching to a playbook that no longer exists is refused before anything changes.
 
 **Removing** a playbook puts live guidance and the whiteboard updates back to what
 they were before the first playbook was applied to the meeting, takes its quick
@@ -195,7 +197,9 @@ Instructions for the assistant in a launch review ...
 | `quickActions` | Buttons in the meeting's assistant chat: `label` and the `prompt` it sends as the user's question. | Up to 6; a label up to 40 characters, a prompt up to 1,000. |
 
 The digest (**Digest so far**) is made on request, and is not a check: a playbook
-never turns it off. The skill's instructions, description and reference files
+never turns it off. A guidance part that names no check is treated as no guidance part.
+A playbook cannot be named `default` or `none`, which the Virtual Participant form
+uses for its own choices. The skill's instructions, description and reference files
 follow the [skill rules](meeting-assistant-skills.md#what-a-skill-holds).
 
 A playbook is checked when it is saved or imported: a field the section does not
