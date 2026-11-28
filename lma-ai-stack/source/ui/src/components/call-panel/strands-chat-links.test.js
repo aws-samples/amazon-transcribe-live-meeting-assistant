@@ -115,7 +115,10 @@ describe('a question about something on the page', () => {
     frame.window.document.getElementById('sendButton').click();
     await tick();
     const [request] = frame.sent('STRANDS_CHAT_REQUEST');
-    expect(request.message.match(/<\s*\/?\s*quoted\b[^>]*>/gi)).toEqual(['<quoted>', '</quoted>']);
+    // The only angle brackets left are the block's own.
+    expect(request.message.match(/[<>]/g)).toEqual(['<', '>', '<', '>']);
+    expect(request.message).toMatch(/^Why\?\n\n[^<]*<quoted>\n[^<>]*\n<\/quoted>$/);
+    expect(request.message).toContain('‹/quoted›');
     frame.dom.window.close();
   });
 

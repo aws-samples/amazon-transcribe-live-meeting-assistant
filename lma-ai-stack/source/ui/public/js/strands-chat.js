@@ -96,21 +96,13 @@ document.getElementById('askContextRemove')?.addEventListener('click', () => set
 /** The message sent for a question asked about something on the page. */
 function withContext(question, context) {
     // The label and the text come from the meeting (a card's title, a panel's),
-    // so both go inside the quoting, which they cannot close: the assistant's
-    // fixed instructions treat a <quoted> block of the request as quoted data.
-    // Repeated until nothing changes, so a tag split by another one does not survive.
-    const unquoted = (value) => {
-        let text = value;
-        let previous;
-        do {
-            previous = text;
-            // Any spelling a reader could take for the tag: < / quoted attr="x" >.
-            text = text.replace(/<\s*\/?\s*quoted\b[^>]*>/gi, '');
-        } while (text !== previous);
-        return text;
-    };
+    // so both go inside the quoting. Every < and > in them is replaced with a
+    // look-alike (‹ ›), so they hold no tag at all and cannot close the block:
+    // the assistant's fixed instructions treat a <quoted> block of the request
+    // as quoted data.
+    const inert = (value) => value.replace(/</g, '‹').replace(/>/g, '›');
     return `${question}\n\nMy question is about this, from the meeting page:\n`
-        + `<quoted>\n${unquoted(context.label)}\n\n${unquoted(context.text)}\n</quoted>`;
+        + `<quoted>\n${inert(context.label)}\n\n${inert(context.text)}\n</quoted>`;
 }
 
 // The whiteboards an answer made or changed, from its tool results.
