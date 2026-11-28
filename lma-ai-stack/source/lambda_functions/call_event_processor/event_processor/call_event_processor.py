@@ -253,8 +253,12 @@ def live_guidance_settings() -> "tuple[bool, float, bool]":
     return guidance_settings(raw)
 
 
-def queue_guidance_run(call_id: str) -> None:
+def queue_guidance_run(call_id: str, trigger: str = "auto") -> None:
     """Queue a live guidance run for a meeting, fire-and-forget.
+
+    ``trigger`` is ``auto`` for a run from the transcript, or ``meeting-ended``
+    for the run at the meeting's end, which researches the fact checks and
+    lookups still waiting.
 
     Asynchronous for the reason queue_agenda_derivation gives. The analyzer
     decides for itself whether a run is due -- another environment may have
@@ -266,7 +270,7 @@ def queue_guidance_run(call_id: str) -> None:
         LAMBDA_HOOK_CLIENT.invoke(
             FunctionName=LIVE_GUIDANCE_ANALYZER_ARN,
             InvocationType="Event",
-            Payload=json.dumps({"CallId": call_id, "Trigger": "auto"}),
+            Payload=json.dumps({"CallId": call_id, "Trigger": trigger}),
         )
     except Exception:  # pylint: disable=broad-except
         LOGGER.exception(
@@ -2448,6 +2452,13 @@ async def execute_process_event_api_mutation(
         # assistant's updates are off.
         if MEETING_WHITEBOARDS_ARN and not was_already_ended:
             queue_whiteboard_run(message.get("CallId"), "final")
+
+        # Live guidance's run at the end: the fact checks and lookups still
+        # waiting are researched. The analyzer returns at once, with no model
+        # call, for a meeting with live guidance or both types off, or nothing
+        # waiting.
+        if LIVE_GUIDANCE_ANALYZER_ARN and not was_already_ended:
+            queue_guidance_run(message.get("CallId"), "meeting-ended")
 
         if TRANSCRIPT_DELETION_FUNCTION_ARN and not was_already_ended:
             LAMBDA_HOOK_CLIENT.invoke(

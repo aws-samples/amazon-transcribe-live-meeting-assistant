@@ -72,6 +72,12 @@ Parameters:
       - WARN
       - ERROR
     Description: Logging level for Lambda functions.
+  MeetingAssistFunctionArn:
+    Type: String
+    Default: ""
+    Description: >-
+      The meeting assistant function, which researches live guidance's fact
+      checks and lookups. Empty when the stack has none, and then none are made.
   MeetingConsentResolverFunctionArn:
     Type: String
     Description: >-
@@ -115,6 +121,7 @@ Parameters:
 
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+  HasMeetingAssistFunction: !Not [!Equals [!Ref MeetingAssistFunctionArn, ""]]
 
 Globals:
   Function:
@@ -1122,7 +1129,9 @@ Resources:
   # guidance notifications to the people running it. Invoked asynchronously by
   # the call event processor, at most every intervalSeconds per meeting, for a
   # meeting whose GuidanceEnabled is true; and through requestMeetingDigest for
-  # a digest on request. See docs/live-guidance.md.
+  # a digest on request. With fact checks or lookups on, a run also has the
+  # meeting assistant function research the claims and terms it found, with
+  # that function's read-only tools. See docs/live-guidance.md.
   # ----------------------------------------------------------------------------
   LiveGuidanceAnalyzerFunction:
     Type: AWS::Serverless::Function
@@ -1133,10 +1142,13 @@ Resources:
       CodeUri: ../source/lambda_functions/live_guidance_analyzer
       Description: Offers live guidance on a meeting in progress from its checklist and transcript
       MemorySize: 512
-      # One model call per run over a bounded transcript, plus the paged reads.
-      # Below the run lease (LEASE_SECONDS), so a run that is stopped at its
-      # timeout cannot keep its meeting locked longer than the lease.
-      Timeout: 120
+      # One model call per run over a bounded transcript, plus the paged reads,
+      # then research batches while the invocation has time for another (each
+      # researchSecondsPerRun, at most 120, plus BATCH_SLACK_SECONDS in
+      # live_guidance_analyzer/index.py). Below the leases (LEASE_SECONDS),
+      # so a run that is stopped at its timeout cannot keep its meeting locked
+      # longer than a lease.
+      Timeout: 300
       Environment:
         Variables:
           EVENT_SOURCING_TABLE: !Ref EventSourcingTable
@@ -1144,7 +1156,9 @@ Resources:
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           BEDROCK_REGION_OVERRIDE: !Ref AWS::Region
           TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS: !Ref TranscriptionExpirationInDays
-          LEASE_SECONDS: "180"
+          LEASE_SECONDS: "360"
+          # Fact checks and lookups are researched by this function; empty, none are.
+          MEETING_ASSIST_FUNCTION_ARN: !Ref MeetingAssistFunctionArn
           # Token usage per run, for the meeting cost estimate.
           METERING_TABLE_NAME: !Ref EventSourcingTable
           METERING_EXPIRATION_DAYS: !Ref MeetingRecordExpirationInDays
@@ -1262,6 +1276,15 @@ Resources:
                 Condition:
                   StringEquals:
                     "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
+              # Fact checks and lookups: the meeting assistant function's
+              # guidance research.
+              - !If
+                - HasMeetingAssistFunction
+                - Effect: Allow
+                  Action:
+                    - lambda:InvokeFunction
+                  Resource: !Ref MeetingAssistFunctionArn
+                - !Ref AWS::NoValue
 
   AppSyncLiveGuidanceAnalyzerLambdaRole:
     Type: AWS::IAM::Role

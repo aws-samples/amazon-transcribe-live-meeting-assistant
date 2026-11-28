@@ -3027,6 +3027,22 @@ def test_whiteboards_turned_off_for_the_deployment_queue_no_run(
     assert _whiteboard_runs(whiteboards_hook) == []
 
 
+def test_a_meeting_that_ends_queues_live_guidances_run_at_the_end_once(
+    schema, emitted, guidance_hook, monkeypatch
+):
+    for status in ("STARTED", "ENDED"):
+        session = QueuedSession(
+            schema,
+            [
+                {"getCall": {"CallId": "call-1", "Status": status}},
+                {"updateCallStatus": {"CallId": "call-1", "Status": "ENDED"}},
+            ],
+        )
+        process_event(session, {"EventType": "END", "CallId": "call-1"}, monkeypatch)
+    assert _guidance_runs(guidance_hook) == [{"CallId": "call-1", "Trigger": "meeting-ended"}]
+    assert all(i["InvocationType"] == "Event" for i in guidance_hook.invocations)
+
+
 def test_a_meeting_that_ends_queues_the_last_whiteboard_run_once(
     schema, emitted, whiteboards_hook, monkeypatch
 ):
