@@ -61,6 +61,16 @@ describe('tables', () => {
   });
 });
 
+describe('line breaks', () => {
+  it('start a new line within a block, as in a transcript segment holding one', async () => {
+    const doc = await buildPdf([{ kind: 'paragraph', runs: [{ text: 'Answer, first line\nSources: the guide' }] }], {
+      jsPDF,
+      compress: false,
+    });
+    expect(pdfStrings(doc)).toEqual(expect.arrayContaining(['Answer, first line', 'Sources: the guide']));
+  });
+});
+
 describe('other blocks', () => {
   it('keeps the spaces of code, and wraps a long line inside the block', async () => {
     const doc = await buildPdf([{ kind: 'code', text: `def f():\n    return 1  # ${'x'.repeat(200)}` }], {

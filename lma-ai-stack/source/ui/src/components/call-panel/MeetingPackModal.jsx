@@ -74,13 +74,20 @@ const MeetingPackModal = ({
   whiteboardCount = 0,
   whiteboardsDeleted = false,
   keyframeCount = 0,
+  contentKey = '',
   save = saveBlob,
   openMail = (url) => window.open(url),
 }) => {
   const hasSummary = Boolean(item.callSummaryText);
-  const states = useMemo(
+  const { ensure, parts } = pack;
+  const meetingStates = useMemo(
     () => packPartStates({ hasSummary, keyframeCount, whiteboardCount, whiteboardsDeleted }),
     [hasSummary, keyframeCount, whiteboardCount, whiteboardsDeleted],
+  );
+  // A part found to have nothing in it once built (key frames all of the
+  // camera, say) is left out as one the meeting does not have, with the reason.
+  const states = meetingStates.map((part) =>
+    parts[part.id]?.status === 'unavailable' ? { ...part, available: false, reason: parts[part.id].message } : part,
   );
   const [selected, setSelected] = useState(() => defaultSelection(states));
   const [asZip, setAsZip] = useState('zip');
@@ -92,24 +99,24 @@ const MeetingPackModal = ({
   // recipients are the meeting's participants, and nothing has been saved yet.
   useEffect(() => {
     if (!visible) return;
-    setSelected(defaultSelection(states));
+    setSelected(defaultSelection(meetingStates));
     setRecipients(emailRecipients(item.participants));
     setOutcome(null);
   }, [visible]);
 
-  // A ticked part that is not built, or no longer current, is built.
-  const { ensure, parts } = pack;
+  // A ticked part that is not built, or no longer current (the summary, the
+  // key frames or a whiteboard changed while the dialog is open), is built.
   useEffect(() => {
     if (!visible) return;
-    states.forEach((part) => {
+    meetingStates.forEach((part) => {
       if (part.available && selected[part.id]) ensure(part.id);
     });
-  }, [visible, states, selected, ensure, item.callSummaryText]);
+  }, [visible, meetingStates, selected, ensure, item.callSummaryText, contentKey]);
 
   const chosen = states.filter((part) => part.available && selected[part.id]);
   const chosenStates = chosen.map((part) => parts[part.id]);
   const ready = chosenStates.every((state) => state?.status === 'ready');
-  const failed = chosen.filter((part) => ['failed', 'unavailable'].includes(parts[part.id]?.status));
+  const failed = chosen.filter((part) => parts[part.id]?.status === 'failed');
   const files = ready ? chosenStates.map((state) => ({ filename: state.filename, blob: state.blob })) : [];
   const total = chosenStates.reduce((sum, state) => sum + (state?.status === 'ready' ? state.size : 0), 0);
   const tooLarge = mode === 'email' && emailTooLarge(total);
@@ -331,6 +338,8 @@ MeetingPackModal.propTypes = {
   whiteboardCount: PropTypes.number,
   whiteboardsDeleted: PropTypes.bool,
   keyframeCount: PropTypes.number,
+  /** Changes when a whiteboard changes, so an open dialog builds the Whiteboards PDF again. */
+  contentKey: PropTypes.string,
   save: PropTypes.func,
   openMail: PropTypes.func,
 };

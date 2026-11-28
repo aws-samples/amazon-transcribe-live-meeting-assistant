@@ -333,6 +333,7 @@ const MeetingDownloadMenu = ({
           whiteboardCount={whiteboards.length}
           whiteboardsDeleted={!whiteboardsWritable}
           keyframeCount={keyframeCount}
+          contentKey={whiteboards.map((board) => `${board.WhiteboardId}:${board.Version}`).join(',')}
           save={saveFile}
         />
       )}

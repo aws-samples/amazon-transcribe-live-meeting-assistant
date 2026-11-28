@@ -15,6 +15,7 @@ import { afterEach, describe, it, expect, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 import MeetingDownloadMenu from './MeetingDownloadMenu';
+import { NO_DECK_FRAMES, PartUnavailable } from './meeting-pack';
 import { DONE_STATUS, IN_PROGRESS_STATUS } from '../common/get-recording-status';
 
 const ITEM = {
@@ -131,6 +132,43 @@ describe('Meeting pack', () => {
     fireEvent.click(within(part('slides')).getByRole('button', { name: 'Try again' }));
     await waitFor(() => expect(within(part('slides')).getByText('2 KB')).toBeTruthy());
     expect(failing.slides).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('a part found empty, and a part that changes', () => {
+  it('leaves out, with the reason, slides found to be all camera frames, and does not hold the download', async () => {
+    const cameraOnly = builders();
+    cameraOnly.slides.mockRejectedValueOnce(new PartUnavailable(NO_DECK_FRAMES));
+    renderMenu({ packBuilders: cameraOnly });
+    openMenu();
+    choose('Meeting pack (PDF files)…');
+    await waitFor(() => expect(within(part('slides')).getByText(NO_DECK_FRAMES)).toBeTruthy());
+    expect(checkbox('slides').checked).toBe(false);
+    expect(checkbox('slides').disabled).toBe(true);
+    const download = within(dialog()).getByRole('button', { name: 'Download' });
+    await waitFor(() => expect(download.disabled).toBe(false));
+    expect(within(dialog()).queryByText(/or try again/)).toBeNull();
+  });
+
+  it('builds the whiteboards again when one changes while the dialog is open', async () => {
+    const live = builders();
+    const { rerender } = renderMenu({ packBuilders: live });
+    openMenu();
+    choose('Meeting pack (PDF files)…');
+    await waitFor(() => expect(within(part('whiteboards')).getByText('3 KB')).toBeTruthy());
+    expect(live.whiteboards).toHaveBeenCalledTimes(1);
+    rerender(
+      <MeetingDownloadMenu
+        item={ITEM}
+        callTranscriptPerCallId={{}}
+        keyframeCount={2}
+        whiteboards={[{ ...BOARDS[0], Version: 2 }]}
+        loadAttachments={vi.fn(async () => [])}
+        packBuilders={live}
+        saveFile={vi.fn()}
+      />,
+    );
+    await waitFor(() => expect(live.whiteboards).toHaveBeenCalledTimes(2));
   });
 });
 

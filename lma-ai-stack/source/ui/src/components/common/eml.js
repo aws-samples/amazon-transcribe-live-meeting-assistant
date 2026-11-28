@@ -6,7 +6,7 @@
 
 /**
  * An email draft as a `.eml` file (an Internet Message Format message, RFC
- * 5322, in MIME), for Email participants (EmailParticipantsModal.jsx):
+ * 5322, in MIME), for Email participants (MeetingPackModal.jsx, mode 'email'):
  *
  *   multipart/mixed
  *     multipart/alternative
