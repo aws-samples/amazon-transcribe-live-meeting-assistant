@@ -226,6 +226,9 @@ def test_an_unknown_kind_or_source_is_refused() -> None:
             "  end\n  db[(Orders DB)]\n  user -->|HTTPS| web --> api -->|SQL| db\n"
             "  style db fill:#eef,stroke:#336"
         ),
+        # A label may name a URL or an import; only a style statement may not fetch one.
+        'flowchart LR\n  api["Orders URL (v2)"] --> imp["@import job"]',
+        "gantt\n  dateFormat YYYY-MM-DD\n  Update URL (staging) :t1, 2026-12-01, 2d",
     ],
 )
 def test_diagrams_in_the_subset_are_accepted(text: str) -> None:
@@ -257,6 +260,7 @@ def test_diagrams_in_the_subset_are_accepted(text: str) -> None:
         ("flowchart TD\n  a-->b\n  style a fill:url(https://example.com/x.svg)", "fetch"),
         ("flowchart TD\n  a-->b\n  classDef c fill:URL ( x )", "fetch"),
         ("flowchart TD\n  a-->b\n  classDef c @import 'x'", "fetch"),
+        ("flowchart TD\n  a-->b\n  linkStyle 0 stroke:url(#g)", "fetch"),
         ("gantt\n  Task <b>bold</b> :t1, 2026-12-01, 1d", "HTML"),
     ],
 )

@@ -3,6 +3,8 @@
  * This file is licensed under the MIT-0 License.
  * See the LICENSE file in the project root for full license information.
  */
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, it, expect } from 'vitest';
 
 import {
@@ -13,6 +15,7 @@ import {
   lineDiff,
   mergeWhiteboard,
   mermaidProblem,
+  MERMAID_TYPES,
   TEMPLATES,
   panelInputs,
   panelProblem,
@@ -97,21 +100,31 @@ describe('checks before sending', () => {
     expect(mermaidProblem('flowchart TD\n a-->b\n style a fill:url(https://example.com/x.svg)')).toMatch(/fetch/);
   });
 
+  it('lets a label name a URL or an import; only a style statement may not fetch one', () => {
+    expect(mermaidProblem('flowchart LR\n  api["Orders URL (v2)"] --> imp["@import job"]')).toBeNull();
+    expect(mermaidProblem('gantt\n  Update URL (staging) :t1, 2026-12-01, 2d')).toBeNull();
+    expect(mermaidProblem('flowchart TD\n a-->b\n linkStyle 0 stroke:url(#g)')).toMatch(/linkStyle 0/);
+  });
+
+  // The server's rules (lma_whiteboards/rules.py) are the source of these lists.
+  const RULES = readFileSync(
+    resolve(__dirname, '../../../../lambda_layers/configuration_layer/lma_whiteboards/rules.py'),
+    'utf8',
+  );
+
   it('offers the templates the server has, in its order', () => {
-    expect(TEMPLATES.map((t) => t.name)).toEqual([
-      'decisions',
-      'process',
-      'architecture',
-      'comparison',
-      'timeline',
-      'gantt',
-      'user_stories',
-      'raci',
-      'risks',
-      'decision_log',
-      'retrospective',
-      'blank',
-    ]);
+    const block = RULES.slice(RULES.indexOf('TEMPLATES: Dict'), RULES.indexOf('DEFAULT_TEMPLATE ='));
+    const names = [...block.matchAll(/^ {4}"([a-z_]+)": \{$/gm)].map((match) => match[1]);
+    expect(names.length).toBeGreaterThan(10);
+    expect(TEMPLATES.map((t) => t.name)).toEqual(names);
+  });
+
+  it('accepts the diagram types the server does', () => {
+    const types = RULES.match(/^MERMAID_TYPES = \(([^)]*)\)/m)[1]
+      .match(/"([A-Za-z]+)"/g)
+      .map((t) => t.slice(1, -1));
+    expect(MERMAID_TYPES).toEqual(types);
+    types.forEach((type) => expect(mermaidProblem(`${type}\n  a`)).toBeNull());
   });
 
   it('checks titles and lengths', () => {

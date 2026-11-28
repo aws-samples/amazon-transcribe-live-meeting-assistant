@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 # pylint: disable=import-error
@@ -70,7 +70,8 @@ FIXED_INSTRUCTIONS = (
     "or HTML.\n"
     f"- A diagram panel is at most {rules.MAX_MERMAID_CHARS} characters of Mermaid, starting "
     "with one of: " + ", ".join(rules.MERMAID_TYPES) + ". No directives (%%{...}%%), no click, "
-    "link or callback lines, no HTML, and no style that fetches anything (url( or @import).\n"
+    "link or callback lines, no HTML, and no style, classDef or linkStyle line that fetches "
+    "anything (url( or @import).\n"
     f"- Your notes to yourself are at most {MAX_NOTES_CHARS} characters: what the next run "
     "needs to know about the meeting so far.\n"
     f"- Answer by calling the {TOOL_NAME} tool once."
@@ -262,12 +263,16 @@ def whiteboards_block(boards: Sequence[Mapping[str, Any]]) -> str:
 
 
 def meeting_date(meeting: Mapping[str, Any]) -> str:
-    """The weekday and date the meeting started (``Friday 2026-11-27``), or empty when unknown."""
+    """The weekday and date the meeting started, in UTC (``Friday 2026-11-27 (UTC)``), or
+    empty when unknown. No time zone of the meeting's own is stored, so it is said to be UTC."""
     created = str(meeting.get("CreatedAt") or "")
     try:
-        return datetime.fromisoformat(created.replace("Z", "+00:00")).strftime("%A %Y-%m-%d")
+        started = datetime.fromisoformat(created.replace("Z", "+00:00"))
     except ValueError:
         return ""
+    if started.tzinfo is not None:
+        started = started.astimezone(timezone.utc)
+    return started.strftime("%A %Y-%m-%d (UTC)")
 
 
 def build_request(  # pylint: disable=too-many-arguments

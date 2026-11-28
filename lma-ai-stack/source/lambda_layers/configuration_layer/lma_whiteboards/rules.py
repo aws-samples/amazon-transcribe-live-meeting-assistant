@@ -64,6 +64,8 @@ ASSISTANT_LABEL = "LMA assistant"
 
 #: The Mermaid diagram types a panel may hold, by the keyword that starts them.
 MERMAID_TYPES = ("flowchart", "graph", "sequenceDiagram", "timeline", "mindmap", "gantt")
+#: The statements that carry CSS in the subset, by their first word, lowered.
+STYLE_STATEMENTS = ("style", "classdef", "linkstyle")
 
 
 class WhiteboardError(ValueError):
@@ -309,7 +311,8 @@ def check_mermaid(text: str) -> None:
     The subset: a diagram whose first line names one of MERMAID_TYPES, with no
     directives or front matter (which change how it is rendered), no click
     handlers, callbacks or links (which make it interactive), no HTML tags, and
-    no style that fetches anything (``url(`` or ``@import``). The page renders
+    no style statement (``style``, ``classDef``, ``linkStyle``) that fetches
+    anything (``url(`` or ``@import``); a label may say either. The page renders
     it in Mermaid's strict mode as well.
     """
     lines = [line.strip() for line in text.splitlines()]
@@ -330,8 +333,13 @@ def check_mermaid(text: str) -> None:
             raise _invalid("A diagram may not hold click handlers, callbacks or links")
     if re.search(r"javascript\s*:", lowered) or re.search(r"<\s*/?\s*[a-z!]", lowered):
         raise _invalid("A diagram may not hold HTML")
-    if re.search(r"url\s*\(", lowered) or "@import" in lowered:
-        raise _invalid("A diagram's styles may not fetch anything (url( or @import)")
+    for line in meaningful:
+        word = line.split(None, 1)[0].lower()
+        styled = line.lower()
+        if word in STYLE_STATEMENTS and (re.search(r"url\s*\(", styled) or "@import" in styled):
+            raise _invalid(
+                "A diagram's styles may not fetch anything (url( or @import): " + line[:80]
+            )
 
 
 def check_content(kind: str, value: Any) -> str:

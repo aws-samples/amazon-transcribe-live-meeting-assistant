@@ -84,6 +84,8 @@ export const TEMPLATES = [
 export const DEFAULT_TEMPLATE = 'decisions';
 
 export const MERMAID_TYPES = ['flowchart', 'graph', 'sequenceDiagram', 'timeline', 'mindmap', 'gantt'];
+/** The statements that carry CSS in the subset, by their first word, lowered (rules.STYLE_STATEMENTS). */
+const STYLE_STATEMENTS = ['style', 'classdef', 'linkstyle'];
 
 const byCreation = (a, b) =>
   String(a.CreatedAt || '').localeCompare(String(b.CreatedAt || '')) ||
@@ -168,9 +170,11 @@ export const mermaidProblem = (text) => {
   }
   const lowered = String(text).toLowerCase();
   if (/javascript\s*:/.test(lowered) || /<\s*\/?\s*[a-z!]/.test(lowered)) return 'A diagram may not hold HTML.';
-  if (/url\s*\(/.test(lowered) || lowered.includes('@import')) {
-    return "A diagram's styles may not fetch anything (url( or @import).";
-  }
+  const fetching = meaningful.find((line) => {
+    const styled = line.toLowerCase();
+    return STYLE_STATEMENTS.includes(styled.split(/\s+/)[0]) && (/url\s*\(/.test(styled) || styled.includes('@import'));
+  });
+  if (fetching) return `A diagram's styles may not fetch anything (url( or @import): ${fetching.slice(0, 80)}`;
   return null;
 };
 

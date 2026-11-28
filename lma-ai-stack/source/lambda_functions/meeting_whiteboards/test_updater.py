@@ -204,3 +204,31 @@ def test_a_gantt_chart_from_the_model_is_written_to_the_plan_panel() -> None:
     panels, dropped = updater.plan_panels(_gantt_board(), [{"panelId": "plan", "content": chart}])
     assert dropped == 0
     assert panels[0]["Content"] == chart
+
+
+def test_the_request_gives_the_meetings_date_for_relative_dates() -> None:
+    _system, messages = updater.build_request(
+        prompt="",
+        meeting={"CreatedAt": "2026-11-27T15:04:05.000Z"},
+        boards=[_gantt_board()],
+        notes="",
+        transcript="[0:10] Priya: the API ships next Friday",
+        screen="",
+        elapsed_seconds=10,
+    )
+    first = messages[0]["content"][0]["text"]
+    assert "<meeting_date>Friday 2026-11-27 (UTC)</meeting_date>" in first
+
+
+def test_the_meetings_date_is_given_in_utc_and_left_out_when_unknown() -> None:
+    # An evening start in the Americas is the next day in UTC, and says so.
+    assert updater.meeting_date({"CreatedAt": "2026-11-27T20:00:00-05:00"}) == (
+        "Saturday 2026-11-28 (UTC)"
+    )
+    assert updater.meeting_date({"CreatedAt": "not a date"}) == ""
+    assert updater.meeting_date({}) == ""
+
+
+def test_the_model_is_told_every_rule_of_the_diagram_subset() -> None:
+    assert "gantt" in updater.FIXED_INSTRUCTIONS
+    assert "url( or @import" in updater.FIXED_INSTRUCTIONS
