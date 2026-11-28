@@ -277,6 +277,15 @@ def test_a_default_skill_whose_id_is_taken_gets_a_numbered_id():
     assert table.skills()["alpha"]["Name"] == "renamed-by-an-admin"
 
 
+@pytest.mark.parametrize(
+    "taken", [set(), {"alpha"}, {"alpha", "alpha-2"}, {"alpha-2"}, {"alpha", "alpha-3"}]
+)
+def test_a_new_default_skill_gets_the_id_the_skills_manager_would_give_it(taken):
+    assert skill_seeder._new_skill_id("alpha", set(taken)) == _skill_formats().new_skill_id(
+        "alpha", set(taken)
+    )
+
+
 def test_no_default_skill_is_seeded_past_the_skills_limit():
     table = FakeSkillsTable()
     for number in range(skill_seeder.MAX_SKILLS):
