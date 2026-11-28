@@ -129,7 +129,7 @@ words, not a model call.
 
 **Switching** to another playbook takes the first one off and applies the second.
 The whiteboards the first one made are kept, unless **Delete the whiteboards …
-made that nobody has written on** is ticked, which deletes those whose panels are
+made that only the assistant has written on** is ticked, which deletes those whose panels are
 all still the assistant's; a whiteboard someone wrote on is always kept, and so is
 one the meeting already had that the playbook found and kept rather than made.
 Switching to a playbook that no longer exists is refused before anything changes.

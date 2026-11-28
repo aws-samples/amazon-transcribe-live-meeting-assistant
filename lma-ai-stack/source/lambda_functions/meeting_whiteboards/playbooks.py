@@ -22,7 +22,7 @@ switches):
     whiteboard updates when it names checks and kept whiteboards, and records
     on the meeting the checks, the quick actions and what was on before it.
     Removing it puts that back; the whiteboards it made are kept unless
-    ``DeleteWhiteboards`` is set, and then only those nobody has changed.
+    ``DeleteWhiteboards`` is set, and then only those only the assistant has written on.
 
 A playbook applies what it can: a part a release does not know (a template or
 a check) is left out and noted on the meeting rather than refusing the rest.

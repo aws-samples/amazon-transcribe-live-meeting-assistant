@@ -6,7 +6,7 @@
 /**
  * Choosing a meeting playbook: every playbook, the suggested ones marked with
  * why, what the selected one does and costs, and, when the meeting already runs
- * one, whether to delete the whiteboards it made that nobody has written on.
+ * one, whether to delete the whiteboards it made that only the assistant has written on.
  * Nothing is applied until Apply. See docs/meeting-playbooks.md.
  */
 import React, { useEffect, useMemo, useState } from 'react';
@@ -160,7 +160,7 @@ const ChoosePlaybookModal = ({
         )}
         {switching && (
           <Checkbox checked={deleteBoards} onChange={({ detail }) => setDeleteBoards(detail.checked)}>
-            Delete the whiteboards {current?.DisplayName || 'the current playbook'} made that nobody has written on
+            Delete the whiteboards {current?.DisplayName || 'the current playbook'} made that only the assistant has written on (what it wrote on them is lost)
           </Checkbox>
         )}
         {failure && <Alert type="error">{failure}</Alert>}

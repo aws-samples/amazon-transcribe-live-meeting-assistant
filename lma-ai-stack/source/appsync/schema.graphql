@@ -3719,7 +3719,7 @@ input ApplyMeetingPlaybookInput {
 	# The playbook's skill id. Null or empty removes the meeting's playbook.
 	SkillId: ID
 	# When the meeting's playbook is removed or switched: also delete the
-	# whiteboards it made that nobody has changed. Left out, they are kept.
+	# whiteboards it made that only the assistant has written on. Left out, they are kept.
 	DeleteWhiteboards: Boolean
 	# For a backend caller only: why the playbook is applied
 	# ("virtual-participant" or "profile-default") and whom to record.

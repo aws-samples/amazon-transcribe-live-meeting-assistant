@@ -7,7 +7,7 @@
  * The meeting page's playbook panel: a suggestion is shown and never applied by
  * itself; choosing one sends the playbook change (applyMeetingPlaybook) with its
  * skill id; the applied playbook says what it turned on; removing it can delete
- * the whiteboards nobody wrote on; and someone who may not choose sees which
+ * the whiteboards only the assistant wrote on; and someone who may not choose sees which
  * one runs, without the controls. See docs/meeting-playbooks.md.
  */
 import React from 'react';
