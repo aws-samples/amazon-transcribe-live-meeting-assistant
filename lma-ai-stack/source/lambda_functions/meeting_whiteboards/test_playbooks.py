@@ -522,3 +522,11 @@ def test_a_start_apply_never_replaces_a_playbook_chosen_meanwhile(world) -> None
     )
     assert result["Playbook"]["SkillId"] == "retrospective"
     assert [b["Title"] for b in boards()] == ["Retrospective"]
+
+
+def test_only_the_checks_that_run_here_are_recorded(world) -> None:
+    world["table"].skills["arch"] = skill(
+        "arch", {"guidance": {"checks": ["fact_check", "risk_probe"]}}
+    )
+    applied = apply(SkillId="arch")
+    assert applied["Playbook"]["Guidance"]["Checks"] == ["risk_probe"]

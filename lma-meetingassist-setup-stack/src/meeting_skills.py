@@ -227,7 +227,7 @@ def playbook_prompt(skill: Optional[SkillSummary], record: Optional[Dict[str, An
         return ""
     title = f"{skill.display_name} ({skill.name})" if skill.display_name else skill.name
     return (
-        f"\n\n**This meeting's playbook.** The people running this meeting chose the playbook "
+        f"\n\n**This meeting's playbook.** This meeting runs the playbook "
         f"{title}. Its instructions are below, as {LOAD_SKILL} would return them, so you need "
         "not load it: follow them for requests about this meeting, as for any skill you load.\n"
         f"<{PLAYBOOK_TAG}>\n{describe_skill(skill, record)}\n</{PLAYBOOK_TAG}>"

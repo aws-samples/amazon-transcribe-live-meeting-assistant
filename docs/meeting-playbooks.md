@@ -104,7 +104,9 @@ chat and not to requests made in the meeting.
   shows the suggestion for the meeting name and agenda with **Use it**, and what
   the chosen playbook does. The playbook is applied when the meeting starts. A
   playbook deleted after the Virtual Participant was scheduled is not applied, and
-  the meeting page says so.
+  the meeting page says so. A playbook that names live guidance checks turns live
+  guidance on even when the form's **Live guidance** choice is *Off*; removing the
+  playbook puts it back off.
 - **For every new meeting.** An Admin sets **Meeting Assistant › Meeting
   playbooks › Default playbook** on the Configuration page. It is applied to each
   new meeting that is not given one, from any capture source except an uploaded

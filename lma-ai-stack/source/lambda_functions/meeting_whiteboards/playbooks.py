@@ -451,9 +451,14 @@ def _record(
     boards: List[Dict[str, Any]],
     notes: List[str],
     previous: Mapping[str, Any],
-    checks_run: bool = True,
+    running: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    guidance = playbook.get("guidance") if checks_run else None
+    # Only the checks that run here are recorded, so the meeting shows what it gets.
+    guidance = dict(playbook.get("guidance") or {}) or None
+    if guidance is not None and running is not None:
+        guidance["checks"] = [c for c in guidance.get("checks") or [] if c in running]
+    if guidance is not None and not guidance.get("checks"):
+        guidance = None
     if guidance and not guidance.get("checks"):
         # Every check it names was left out: no guidance part, so live guidance is left as it was.
         guidance = None
@@ -653,7 +658,7 @@ def apply(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict[str, Any]:
         "WhiteboardsEnabled": previous.get("WhiteboardsEnabled") is True,
     }
     checks = (playbook.get("guidance") or {}).get("checks") or []
-    checks_run = True
+    running: List[str] = []
     if checks:
         running = [
             c
@@ -667,12 +672,12 @@ def apply(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict[str, Any]:
                     "deployment, so they do not run."
                 )
         if not limits["guidanceAvailable"]:
+            running = []
             notes.append("Live guidance is turned off for this deployment, so no check runs.")
         elif running:
             switches["GuidanceEnabled"] = True
         else:
             # Every check it names is off here: live guidance would only bill runs.
-            checks_run = False
             notes.append(
                 "None of its checks can run in this deployment, so live guidance is left as it was."
             )
@@ -692,7 +697,7 @@ def apply(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict[str, Any]:
         boards=boards,
         notes=notes,
         previous=previous,
-        checks_run=checks_run,
+        running=running,
     )
     LOGGER.info(
         "Playbook %s applied to %s by %s (%s): whiteboards=%d checks=%s notes=%d",
