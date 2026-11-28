@@ -201,6 +201,20 @@ $util.qr( $conditions.add("#conditionMeetingTime = :conditionMeetingTimeAsRead")
   #end
 #end
 
+## The meeting playbook for the meeting it creates, checked as
+## createVirtualParticipant checks it; sent as null or empty, it is removed, so
+## the profile's default playbook applies.
+#if( $ctx.args.input.containsKey("playbook") )
+  #if( $util.isNullOrBlank($ctx.args.input.playbook) )
+    $util.qr( $removeNames.add("playbook") )
+  #else
+    #if( !$util.matches("^[a-z0-9]+(-[a-z0-9]+)*$", $ctx.args.input.playbook) || $ctx.args.input.playbook.length() > 80 )
+      $util.error("playbook must be a skill id, or none", "BadRequest")
+    #end
+    $util.qr( $setValues.put("playbook", $ctx.args.input.playbook) )
+  #end
+#end
+
 ## Meeting consent, with createVirtualParticipant's names and rule.
 #if( $ctx.args.input.containsKey("consentMode") )
   #if( $util.isNullOrBlank($ctx.args.input.consentMode) )

@@ -111,6 +111,8 @@
         "Mutation.deleteMeetingWhiteboard",
         "Mutation.updateCallWhiteboards",
         "Mutation.requestWhiteboardUpdate",
+        "Query.meetingPlaybookOptions",
+        "Mutation.applyMeetingPlaybook",
         "Mutation.shareMeetings",
         "Mutation.deleteMeetings",
         "Mutation.reopenMeeting"
@@ -468,6 +470,8 @@
       "Mutation.deleteMeetingWhiteboard",
       "Mutation.updateCallWhiteboards",
       "Mutation.requestWhiteboardUpdate",
+      "Query.meetingPlaybookOptions",
+      "Mutation.applyMeetingPlaybook",
       "Mutation.prepareMeetingArchive",
       "Mutation.createVirtualParticipant",
       "Mutation.updateVirtualParticipant",

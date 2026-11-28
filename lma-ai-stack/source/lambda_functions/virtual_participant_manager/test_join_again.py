@@ -489,3 +489,23 @@ def test_meeting_preparation_over_a_limit_is_refused_before_anything_is_written(
             w.manager, form(labels=[{"Key": "Project", "Value": "x"}]), OWNER
         )
     assert not w.table.puts
+
+
+@pytest.mark.parametrize("playbook", ["sprint-planning", "none"])
+def test_a_new_meeting_carries_the_playbook_the_form_gives(world, playbook):
+    w = world()
+    join_again.join_again_virtual_participant(w.manager, form(playbook=playbook), OWNER)
+    assert _new_row(w)["playbook"] == playbook
+
+
+def test_without_a_playbook_the_profiles_default_applies_and_none_is_stored(world):
+    w = world()
+    join_again.join_again_virtual_participant(w.manager, form(playbook=""), OWNER)
+    assert "playbook" not in _new_row(w)
+
+
+def test_a_malformed_playbook_is_refused_before_anything_is_written(world):
+    w = world()
+    with pytest.raises(join_again.JoinAgainRefused, match="playbook"):
+        join_again.join_again_virtual_participant(w.manager, form(playbook="../x"), OWNER)
+    assert not w.table.puts

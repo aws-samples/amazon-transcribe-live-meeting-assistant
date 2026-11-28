@@ -69,6 +69,7 @@ export default defineConfig({
             { label: "Meeting Notifications", slug: "meeting-notifications" },
             { label: "Live Guidance", slug: "live-guidance" },
             { label: "Meeting Whiteboards", slug: "meeting-whiteboards" },
+            { label: "Meeting Playbooks", slug: "meeting-playbooks" },
             { label: "Meeting Consent", slug: "meeting-consent" },
             {
               label: "Transcript and Recording Deletion After the Summary",

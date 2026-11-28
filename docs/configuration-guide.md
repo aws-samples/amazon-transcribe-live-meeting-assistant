@@ -635,6 +635,15 @@ The selection names skills by id, and the skills themselves move between
 deployments with the Skills page's library export and import; see
 [Meeting Assistant Skills](meeting-assistant-skills.md).
 
+**Meeting Assistant › Meeting playbooks › Default playbook** names a
+[meeting playbook](meeting-playbooks.md) (a skill with a playbook section) to
+apply to each new meeting that is not given one, other than an uploaded
+recording. It lists the playbooks the Skills page holds, and is empty
+(no playbook) unless an Admin chooses one; no preset sets it. A Virtual
+Participant can choose another playbook, or none, for its meeting, and the
+meeting's owner can change it on the meeting page. A saved change applies to
+meetings that start about five minutes later.
+
 ### Teams meeting-end detection
 
 The Virtual Participant section's three **Teams** settings (milliseconds between meeting checks, and the two counts of checks before leaving) apply to the

@@ -247,6 +247,8 @@ A skill is guidance an administrator writes on the **Skills** page for one kind 
 
 LMA ships five example skills, which are stored when the stack is deployed: `follow-up-email`, `decisions-and-actions`, `catch-me-up`, `next-meeting-prep` and `customer-call-notes`. An Admin can edit or delete them like any other skill, and a stack update neither replaces one an Admin edited nor re-creates one an Admin deleted. They are offered for Owner use, but not for Participant use until an Admin sets their **Participant use** to Allowed in **Tool selection**. See [Default Skills](meeting-assistant-skills.md#default-skills).
 
+A skill can also be a [meeting playbook](meeting-playbooks.md), which sets a meeting up with whiteboards, live guidance checks and chat quick actions. In a meeting that runs one, the playbook skill's instructions are in the prompt from the start, after the list of skills and before the fixed part, as if `load_skill` had returned them, with a fixed rule that holds them to the same terms; a request that may not use the skill is not given them. Five playbooks ship with LMA, seeded like the default skills.
+
 ## Assistant Instructions
 
 The assistant's system prompt has two parts, with the list of [skills](#skills) between them when a request may use skills.

@@ -307,6 +307,74 @@ def queue_whiteboard_run(call_id: str, trigger: str = "auto") -> None:
         )
 
 
+#: A Virtual Participant's "no playbook", whatever the profile's default.
+NO_PLAYBOOK = "none"
+_PLAYBOOK_ID = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
+
+
+def default_playbook() -> str:
+    """Meeting Assistant › Meeting playbooks › Default playbook (a skill id), or ''.
+
+    Read as the other Meeting Assistant settings are; a read that fails is no
+    default, which is also what the store holds until an administrator sets one.
+    """
+    try:
+        raw = read_setting(MEETING_ASSIST.name, "playbooks", default={})
+    except Exception:  # pylint: disable=broad-except
+        LOGGER.warning("Could not read the Meeting playbooks settings; no default playbook")
+        return ""
+    value = raw.get("defaultPlaybook") if isinstance(raw, dict) else ""
+    return value if isinstance(value, str) and _PLAYBOOK_ID.fullmatch(value) else ""
+
+
+def playbook_for_start(message: Dict[str, Any]) -> "tuple[str, str] | None":
+    """The playbook a new meeting is to run, and why: ``(skill id, origin)`` or None.
+
+    Takes ``PlaybookId`` off the START event (it is not a CreateCallInput field):
+    a Virtual Participant's choice, a skill id or "none". Without one, the
+    profile's default playbook, except for an uploaded recording, which is not
+    live and so has nothing for live guidance or whiteboard runs to follow. See
+    docs/meeting-playbooks.md.
+    """
+    chosen = message.pop("PlaybookId", None)
+    if isinstance(chosen, str) and chosen.strip():
+        chosen = chosen.strip()
+        if chosen == NO_PLAYBOOK or not _PLAYBOOK_ID.fullmatch(chosen):
+            return None
+        return chosen, "virtual-participant"
+    if str(message.get("CaptureSource") or "").upper() == "UPLOAD":
+        return None
+    fallback = default_playbook()
+    return (fallback, "profile-default") if fallback else None
+
+
+def queue_playbook_apply(call_id: str, skill_id: str, origin: str, owner: str) -> None:
+    """Have the meeting whiteboards function apply a playbook to a new meeting, fire-and-forget.
+
+    That function applies it through AppSync, so the meeting's open pages see it;
+    a failure here is logged and the meeting runs without one.
+    """
+    try:
+        LAMBDA_HOOK_CLIENT.invoke(
+            FunctionName=MEETING_WHITEBOARDS_ARN,
+            InvocationType="Event",
+            Payload=json.dumps(
+                {
+                    "PlaybookApply": {
+                        "CallId": call_id,
+                        "SkillId": skill_id,
+                        "Origin": origin,
+                        "UpdatedBy": owner or "LMA",
+                    }
+                }
+            ),
+        )
+    except Exception:  # pylint: disable=broad-except
+        LOGGER.exception(
+            "Could not queue the meeting's playbook; continuing", extra=dict(call_id=call_id)
+        )
+
+
 @lru_cache(maxsize=8)
 def _compiled_wake_phrase(pattern: str) -> Optional[Pattern[str]]:
     """``pattern`` compiled, or None when it is not a regular expression."""
@@ -2243,6 +2311,8 @@ async def execute_process_event_api_mutation(
         ):
             default_on, _interval, available = meeting_whiteboards_settings()
             message["WhiteboardsEnabled"] = default_on and available
+        # The meeting playbook, applied once the meeting exists.
+        playbook = playbook_for_start(message)
         response = await execute_create_call_mutation(
             message=message, appsync_session=appsync_session
         )
@@ -2271,6 +2341,12 @@ async def execute_process_event_api_mutation(
                 await participant_list_requests.publish_vp_requests(
                     message, appsync_session, LOGGER
                 )
+                if playbook and MEETING_WHITEBOARDS_ARN:
+                    queue_playbook_apply(
+                        str(message.get("CallId")),
+                        *playbook,
+                        str(message.get("Owner") or message.get("AgentId") or ""),
+                    )
 
         # A later capture session of a meeting that already exists: its owner or
         # an Admin rejoined it (docs/virtual-participant.md#rejoin), which allowed

@@ -82,6 +82,7 @@ const getVirtualParticipant = `
       meetingContext
       summaryProfile
       guidanceEnabled
+      playbook
       checklist {
         ItemId
         Text

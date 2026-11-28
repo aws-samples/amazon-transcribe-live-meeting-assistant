@@ -134,6 +134,14 @@ meeting does.
   See the [MCP Tools Reference](mcp-tools-reference.md).
 - **For every new meeting.** An administrator sets **Meeting Assistant › Live
   guidance › On for new meetings** on the Configuration page.
+- **With a meeting playbook.** A [meeting playbook](meeting-playbooks.md) that
+  names live guidance checks turns live guidance on for the meeting, and the
+  meeting is then given only those checks, with the playbook's assertiveness
+  (its confidence threshold in place of **Confidence threshold**) and at most its
+  item rate, never more than **Guidance items per 10 minutes**. Fact checks and
+  lookups still need the deployment's own switches. The model is told which
+  types the meeting asks for. Removing the playbook puts live guidance back as it
+  was, with every type.
 
 The stored value is the meeting's `GuidanceEnabled`. A new meeting gets the
 Virtual Participant's or MCP client's choice; without one, the deployment's
@@ -274,6 +282,7 @@ when the meeting is deleted.
 
 - [Meeting Notifications](meeting-notifications.md)
 - [Meeting Context, Labels, Audience and Checklist](meeting-context-and-checklist.md)
+- [Meeting Playbooks](meeting-playbooks.md)
 - [Meeting Assistant](meeting-assistant.md)
 - [Meeting Cost Estimate](meeting-cost-estimate.md)
 - [MCP Tools Reference](mcp-tools-reference.md)

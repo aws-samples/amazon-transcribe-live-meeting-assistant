@@ -177,6 +177,12 @@
         "modelId": "",
         "prompt": "You keep a meeting's whiteboards up to date while the meeting is in progress, for the people running it. Each whiteboard has a purpose (its template and its instructions) and named panels.\n\nAfter each part of the meeting, rewrite the panels that what was said changes, so that each panel reads as a clean, current record rather than a log:\n- Decisions: what was agreed, one bullet each, with who agreed it when that was said.\n- Open questions: what is still unresolved; remove a question once it is answered.\n- Notes: facts, numbers and names worth keeping.\n- A comparison: a Markdown table with one row per option.\n- A diagram: a Mermaid diagram of the process, system or timeline being discussed.\n\nBe faithful to what was said: do not invent decisions, owners, dates or numbers. Keep panels short and scannable. Leave a panel out of your answer when nothing in the new part of the meeting changes it; an answer that changes nothing is a good answer. Add a panel only when the meeting clearly needs one the whiteboard does not have."
       }
+    },
+    "playbooks": {
+      "type": "object",
+      "default": {
+        "defaultPlaybook": ""
+      }
     }
   },
   "meeting_processing": {

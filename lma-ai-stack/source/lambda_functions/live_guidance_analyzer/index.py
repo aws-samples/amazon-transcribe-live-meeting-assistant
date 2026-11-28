@@ -33,6 +33,7 @@ docs/live-guidance.md.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import os
@@ -69,6 +70,7 @@ from lma_notifications import (
     publish_meeting_notification,
     transcript_expires_after,
 )
+from lma_playbooks import rules as playbook_rules
 
 # pylint: enable=import-error
 
@@ -147,6 +149,15 @@ _CALL_FIELDS = """
       SummaryProfile
       GuidanceEnabled
       WhiteboardsEnabled
+      Playbook {
+        SkillId Name DisplayName Requested AppliedAt AppliedBy Origin
+        Guidance { Checks Assertiveness MaxItemsPer10Min }
+        QuickActions { Label Prompt }
+        Whiteboards { WhiteboardId Title Template Reused }
+        Notes
+        Previous { GuidanceEnabled WhiteboardsEnabled }
+      }
+      PlaybookUpdatedAt
       ActionItems {
         Text
         Owner
@@ -304,6 +315,20 @@ def model_for(settings: pure.Settings) -> str:
         read_setting(LANGUAGE_MODELS.name, "meetingAssistModelId", default=FALLBACK_MODEL_ID),
         region=BEDROCK_REGION,
     )
+
+
+def meeting_settings(meeting: Mapping[str, Any]) -> pure.Settings:
+    """The Live guidance settings for one meeting, as its playbook changes them.
+
+    A meeting running a playbook publishes only the checks it names, with its
+    assertiveness and at most the deployment's item rate (lma_playbooks.rules;
+    docs/meeting-playbooks.md). Without one, the deployment's settings.
+    """
+    raw = read_setting(MEETING_ASSIST.name, "guidance", default={})
+    raw, types = playbook_rules.effective_guidance_settings(
+        raw if isinstance(raw, Mapping) else {}, meeting
+    )
+    return dataclasses.replace(pure.Settings.from_raw(raw), playbook_types=tuple(types or ()))
 
 
 # ── the state row ────────────────────────────────────────────────────────────
@@ -535,6 +560,7 @@ def run(call_id: str) -> Dict[str, Any]:
     """One automatic run. Returns a small result for the log and the tests."""
     settings = load_settings()
     meeting = read_meeting(call_id)
+    settings = meeting_settings(meeting) if meeting else settings
     reason = why_not(meeting, settings)
     if reason or meeting is None:
         return {"ran": False, "reason": reason}
@@ -606,6 +632,7 @@ def _analyse(  # pylint: disable=too-many-arguments,too-many-locals
         for c in analysis.candidates
         if not (c.item_id and c.type in pure.ITEM_BOUND_TYPES and c.item_id not in still_open)
     ]
+    candidates = [c for c in candidates if settings.allows(c.type)]
     recent = pure.recent_publishes(_json_field(state, "PublishTimes", []), now)
     chosen = pure.select(candidates, published, recent, settings.max_items_per_10_min)
     published, count = _publish_chosen(call_id, chosen, published, recent, now)

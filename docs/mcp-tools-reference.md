@@ -116,7 +116,9 @@ optionally `priority` and `source`; each starts `open`), `summaryProfile` (the
 [summary profile](transcript-summarization.md#summary-profiles) the meeting is
 summarized with, from `list_summary_profiles`), `guidance` (true or false:
 [live guidance](live-guidance.md) for the meeting; omitted, the deployment's
-setting decides), `shareWith` (email addresses) and `participants` (the
+setting decides), `playbook` (a [meeting playbook](meeting-playbooks.md)'s
+skill id, or `none`; omitted, the configuration profile's default playbook),
+`shareWith` (email addresses) and `participants` (the
 [participant list](virtual-participant.md#participant-list): the people expected
 at the meeting, such as a calendar invite's attendees, each `{"name", "email"}`
 or an email address on its own; at most 100, an address listed once). The
@@ -181,7 +183,7 @@ joined; its answer then carries the LMA `meetingId` the meeting tools take.
 
 Changes a Virtual Participant that waits for its scheduled launch: any of
 `scheduledTime`, `meetingName`, `agenda`, `labels`, `audience`, `context`,
-`checklist`, `summaryProfile`, `guidance`, `shareWith` and `participants`. Each one given replaces that
+`checklist`, `summaryProfile`, `guidance`, `playbook`, `shareWith` and `participants`. Each one given replaces that
 setting, and an empty value removes it. It is refused within 5 minutes of the start ("starts in less
 than 5 minutes, so it can no longer be changed"), and a new time must be at least
 5 minutes away. Once the Virtual Participant has started, change the meeting

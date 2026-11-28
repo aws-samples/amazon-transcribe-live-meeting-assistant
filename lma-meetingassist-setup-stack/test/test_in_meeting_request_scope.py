@@ -180,6 +180,8 @@ def built(monkeypatch, configured):  # pylint: disable=unused-argument,redefined
 
     # Stand-ins for everything that would reach AWS.
     monkeypatch.setattr(handler_module, "fetch_meeting_transcript", lambda *_args, **_kw: "")
+    # The meeting runs no playbook unless a test says so (test_meeting_playbook_prompt.py).
+    monkeypatch.setattr(handler_module.meeting_skills, "meeting_playbook_id", lambda *_a, **_k: "")
     monkeypatch.setattr(handler_module, "send_thinking_step_async", lambda *_args, **_kw: None)
     monkeypatch.setattr(handler_module.call_metering, "record", lambda *_args, **_kw: False)
     for factory, name in (

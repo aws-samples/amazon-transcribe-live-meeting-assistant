@@ -349,6 +349,24 @@
         }
       },
       "additionalProperties": false
+    },
+    "playbooks": {
+      "order": 19,
+      "type": "object",
+      "title": "Meeting playbooks",
+      "description": "Playbooks are skills that set a meeting up: whiteboards, live guidance checks and chat quick actions. Chosen per meeting; written on the Skills page.",
+      "properties": {
+        "defaultPlaybook": {
+          "order": 0,
+          "type": "string",
+          "title": "Default playbook",
+          "description": "Applied to each new meeting that is not given one; a Virtual Participant can choose another or none. Empty: no playbook unless one is chosen.",
+          "widget": "playbookSelect",
+          "pattern": "^$|^[a-z0-9]+(-[a-z0-9]+)*$",
+          "maxLength": 80
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

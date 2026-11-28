@@ -6894,6 +6894,8 @@ Resources:
         MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         RecordingsBucketName: !Ref S3BucketName
+        SkillsTable: !Ref SkillsTable
+        SkillsTableArn: !GetAtt SkillsTable.Arn
         TranscriptionExpirationInDays: !Ref TranscriptionExpirationInDays
         UserManagementDataSourceName: !GetAtt UserManagementDataSource.Name
         UserPoolId: !Ref UserPoolId
@@ -9975,6 +9977,17 @@ Resources:
           $util.qr($input.put("guidanceEnabled", $ctx.args.input.guidanceEnabled))
         #end
 
+        ## The meeting playbook for the meeting it creates: a skill id, or
+        ## "none" for no playbook; absent, the profile's default playbook
+        ## applies when the meeting starts. The VP puts it in its START event;
+        ## the call event processor applies it (docs/meeting-playbooks.md).
+        #if(!$util.isNullOrBlank($ctx.args.input.playbook))
+          #if(!$util.matches("^[a-z0-9]+(-[a-z0-9]+)*$", $ctx.args.input.playbook) || $ctx.args.input.playbook.length() > 80)
+            $util.error("playbook must be a skill id, or none", "BadRequest")
+          #end
+          $util.qr($input.put("playbook", $ctx.args.input.playbook))
+        #end
+
         ## Optional meeting agenda, persisted for immediate and scheduled
         ## meetings alike. The VP container reads it from this row when it
         ## starts and puts it on the meeting record through its START event,
@@ -11164,6 +11177,10 @@ Resources:
       MemorySize: 256
       Timeout: 60
       Tracing: Active
+      # The meeting playbook rules (lma_playbooks), which check a skill's
+      # playbook section on every create, update and import.
+      Layers:
+        - !Ref ConfigurationPythonLayer
       LoggingConfig:
         LogGroup: !Ref SkillsManagerFunctionLogGroup
       Environment:

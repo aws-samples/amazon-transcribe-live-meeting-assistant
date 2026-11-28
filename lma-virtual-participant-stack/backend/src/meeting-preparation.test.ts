@@ -127,6 +127,21 @@ test("a VP without a live guidance choice leaves it to the deployment's setting"
   assert.equal('GuidanceEnabled' in preparationStartFields(preparationFromVpRow(ROW), 'alice@example.com'), false);
 });
 
+test('a VP with a playbook, or none, puts it in its START event for the processor', () => {
+  for (const playbook of ['sprint-planning', 'none']) {
+    const preparation = preparationFromVpRow({ playbook });
+    assert.equal(preparation?.playbook, playbook);
+    assert.deepEqual(preparationStartFields(preparation, 'alice@example.com'), { PlaybookId: playbook });
+  }
+});
+
+test("a VP without a playbook leaves it to the profile's default", () => {
+  for (const playbook of [undefined, null, '', 'Not A Name', '../x', 7, 'x'.repeat(81)]) {
+    assert.equal(preparationFromVpRow({ playbook }), null);
+  }
+  assert.equal('PlaybookId' in preparationStartFields(preparationFromVpRow(ROW), 'alice@example.com'), false);
+});
+
 test('the meeting platform is named as the meeting record names it', () => {
   assert.equal(meetingPlatformName('ZOOM'), 'Zoom');
   assert.equal(meetingPlatformName('Teams'), 'Teams');

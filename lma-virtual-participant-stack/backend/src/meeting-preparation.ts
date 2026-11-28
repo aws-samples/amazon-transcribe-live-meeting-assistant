@@ -6,9 +6,10 @@
 
 /**
  * The meeting preparation a Virtual Participant carries onto the meeting it
- * records: labels, audience, meeting context, checklist, summary profile and
- * whether live guidance is on (docs/live-guidance.md) -- and its participant
- * list, the people expected at the meeting (docs/virtual-participant.md).
+ * records: labels, audience, meeting context, checklist, summary profile,
+ * whether live guidance is on (docs/live-guidance.md) and its meeting playbook
+ * (docs/meeting-playbooks.md) -- and its participant list, the people expected
+ * at the meeting (docs/virtual-participant.md).
  *
  * Given when the VP is started or scheduled and stored on its own row, checked
  * there by the meeting preparation resolver. The VP reads them from that row
@@ -42,6 +43,11 @@ export interface VpPreparation {
   meetingSharedWith: string[];
   /** Live guidance on or off for the meeting; null for the deployment's setting. */
   guidanceEnabled?: boolean | null;
+  /**
+   * The meeting playbook: a skill id, or "none" for no playbook; null for the
+   * configuration profile's default playbook.
+   */
+  playbook?: string | null;
   /** The people expected at the meeting (the row's participants). */
   participants?: MeetingParticipant[];
 }
@@ -60,6 +66,9 @@ const isString = (value: unknown): value is string => typeof value === 'string';
 
 /** A summary profile name, as the meeting preparation resolver checked it. */
 const SUMMARY_PROFILE_NAME = /^[a-z0-9][a-z0-9-]{0,62}$/;
+
+/** A meeting playbook (a skill id, or "none"), as createVirtualParticipant checked it. */
+const PLAYBOOK_ID = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
 /** The meeting platforms by the names the meeting record gives them (Call.MeetingPlatform). */
 const PLATFORM_NAMES: Record<string, string> = {
@@ -131,6 +140,7 @@ export function preparationFromVpRow(
         summaryProfile?: unknown;
         meetingSharedWith?: unknown;
         guidanceEnabled?: unknown;
+        playbook?: unknown;
         participants?: unknown;
       }
     | null
@@ -157,6 +167,8 @@ export function preparationFromVpRow(
       ? row.summaryProfile
       : null;
   const guidanceEnabled = typeof row?.guidanceEnabled === 'boolean' ? row.guidanceEnabled : null;
+  const playbook =
+    isString(row?.playbook) && row.playbook.length <= 80 && PLAYBOOK_ID.test(row.playbook) ? row.playbook : null;
   const participants = participantsFromVpRow(row?.participants);
   if (
     !labels.length &&
@@ -166,6 +178,7 @@ export function preparationFromVpRow(
     !summaryProfile &&
     !meetingSharedWith.length &&
     guidanceEnabled === null &&
+    playbook === null &&
     !participants.length
   ) {
     return null;
@@ -178,6 +191,7 @@ export function preparationFromVpRow(
     summaryProfile,
     meetingSharedWith,
     guidanceEnabled,
+    playbook,
     participants,
   };
 }
@@ -199,6 +213,7 @@ export function withParticipants(
     summaryProfile: null,
     meetingSharedWith: [],
     guidanceEnabled: null,
+    playbook: null,
     ...(preparation ?? {}),
     participants,
   };
@@ -240,6 +255,10 @@ export function preparationStartFields(
   if (preparation.summaryProfile) fields.SummaryProfile = preparation.summaryProfile;
   // Left out for the deployment's setting, which the call event processor applies.
   if (typeof preparation.guidanceEnabled === 'boolean') fields.GuidanceEnabled = preparation.guidanceEnabled;
+  // Not a meeting field: the call event processor takes it off the event and
+  // applies the playbook once the meeting exists ("none": no playbook, whatever
+  // the profile's default). Left out for the profile's default.
+  if (preparation.playbook) fields.PlaybookId = preparation.playbook;
   // Only a VP started or scheduled with meetingSharedWith creates its meeting
   // shared; sharing the VP itself (its SharedWith) does not share the meeting.
   if (preparation.meetingSharedWith.length) fields.SharedWith = preparation.meetingSharedWith.join(',');

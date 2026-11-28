@@ -69,6 +69,8 @@ import TranscriptSpeakerChips from './TranscriptSpeakerChips';
 import AgendaPanel from './AgendaPanel';
 import ChecklistPanel from './ChecklistPanel';
 import LiveGuidancePanel from './LiveGuidancePanel';
+import MeetingPlaybookPanel from '../meeting-playbooks/MeetingPlaybookPanel';
+import { quickActionButtons } from '../meeting-playbooks/playbook-model';
 import WhiteboardsTab, { useMeetingWhiteboards } from '../meeting-whiteboards';
 import PinToWhiteboardModal from '../meeting-whiteboards/PinToWhiteboardModal';
 import { PINNED_ANSWERS } from '../meeting-whiteboards/pin-to-whiteboard';
@@ -2129,7 +2131,13 @@ export const CallPanel = ({
 
   // Answers the meeting assistant chat frame, and its requests for frames of
   // the shared screen; the embeddable chat panel uses the same two hooks.
-  useStrandsChatBridge(item.callId, { onAnswerComplete });
+  // The meeting playbook's quick actions come first among the chat buttons, for
+  // the people running the meeting (docs/meeting-playbooks.md).
+  const playbookButtons = useMemo(
+    () => (participantMode ? {} : quickActionButtons(item.playbook)),
+    [participantMode, item.playbook],
+  );
+  useStrandsChatBridge(item.callId, { onAnswerComplete, extraButtons: playbookButtons });
   useChatKeyframeLinks(item.callId, participantMode ? NO_KEYFRAMES : undefined);
 
   // Whether the Virtual Participant's live view is shown, at the top of the
@@ -2757,6 +2765,16 @@ export const CallPanel = ({
       onRequestDigest={sendRequestMeetingDigest ? () => sendRequestMeetingDigest(item.callId) : undefined}
     />
   );
+  // The meeting playbook, chosen by the meeting's owner or an Admin; others who
+  // can see the meeting see which one it runs. See docs/meeting-playbooks.md.
+  const playbookPanel = (
+    <MeetingPlaybookPanel
+      item={item}
+      isLive={isLive}
+      canChoose={Boolean(savePreparation) && (!!isAdminUser || (!!user?.username && item.owner === user.username))}
+      onApply={(input) => savePreparation('playbook', input)}
+    />
+  );
   // eslint-disable-next-line react/jsx-props-no-spreading
   const checklistPanel = <ChecklistPanel {...checklistProps} />;
   // The checklist again at the top of the Transcript tab, where a live meeting
@@ -2809,6 +2827,7 @@ export const CallPanel = ({
         )}
       </Grid>
       {ownerPanels && contextPanel}
+      {ownerPanels && playbookPanel}
       {ownerPanels && liveGuidancePanel}
       {ownerPanels && checklistPanel}
       {enableSentimentAnalysis && (
@@ -2842,6 +2861,7 @@ export const CallPanel = ({
         />
       )}
       {transcriptAgenda}
+      {ownerPanels && isLive && playbookPanel}
       {ownerPanels && isLive && liveGuidancePanel}
       {ownerPanels && transcriptChecklist}
       <CallTranscriptContainer

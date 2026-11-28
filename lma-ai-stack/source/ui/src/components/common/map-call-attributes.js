@@ -63,6 +63,9 @@ const mapCallsAttributes = (calls) => {
       ParticipantsUpdatedAt: participantsUpdatedAt,
       // Whether the assistant keeps the meeting's whiteboards updated.
       WhiteboardsEnabled: whiteboardsEnabled,
+      // The meeting playbook applied to the meeting (docs/meeting-playbooks.md).
+      Playbook: playbook,
+      PlaybookUpdatedAt: playbookUpdatedAt,
       TranscriptDeletionScheduledFor: transcriptDeletionScheduledFor,
       TranscriptDeletedAt: transcriptDeletedAt,
       TranscriptSegmentsDeleted: transcriptSegmentsDeleted,
@@ -161,6 +164,8 @@ const mapCallsAttributes = (calls) => {
       participantsUpdatedBy,
       participantsUpdatedAt,
       whiteboardsEnabled,
+      playbook: playbook ?? null,
+      playbookUpdatedAt,
       transcriptDeletionScheduledFor,
       transcriptDeletedAt,
       transcriptSegmentsDeleted,
@@ -296,6 +301,12 @@ export const adoptMeetingCopy = (current, incoming) => {
     // Selected by getCall, onUpdateCall and updateCallWhiteboards only; a write
     // that does not select it arrives with it null, which keeps the copy held.
     whiteboardsEnabled: keep('whiteboardsEnabled'),
+    // The playbook: a copy that names when it last changed is authoritative,
+    // a removed playbook (null) included; one that does not (a write that does
+    // not select it, or the list query) keeps the copy held.
+    ...(incoming.playbookUpdatedAt
+      ? {}
+      : { playbook: current.playbook ?? null, playbookUpdatedAt: current.playbookUpdatedAt }),
   });
 };
 
@@ -309,9 +320,13 @@ export const agendaChanged = (current, incoming) =>
  * screen. Those writes leave UpdatedAt alone, as an agenda write does.
  */
 export const preparationChanged = (current, incoming) =>
-  ['meetingMetadataUpdatedAt', 'meetingContextUpdatedAt', 'checklistUpdatedAt', 'participantsUpdatedAt'].some(
-    (field) => Boolean(incoming?.[field]) && incoming[field] !== current?.[field],
-  );
+  [
+    'meetingMetadataUpdatedAt',
+    'meetingContextUpdatedAt',
+    'checklistUpdatedAt',
+    'participantsUpdatedAt',
+    'playbookUpdatedAt',
+  ].some((field) => Boolean(incoming?.[field]) && incoming[field] !== current?.[field]);
 
 /**
  * Whether a newer copy of a meeting turns one of its switches (live guidance,

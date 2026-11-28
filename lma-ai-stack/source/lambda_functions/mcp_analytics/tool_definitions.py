@@ -154,6 +154,14 @@ SUMMARY_PROFILE = {
         "(list_summary_profiles lists them); default, or an empty string, for the default"
     ),
 }
+PLAYBOOK = {
+    "type": "string",
+    "description": (
+        "The meeting playbook for the meeting: a playbook's skill id, such as sprint-planning, "
+        "or none for no playbook; an empty string removes the choice, so the configuration "
+        "profile's default playbook applies when the meeting starts"
+    ),
+}
 GUIDANCE = {
     "type": "boolean",
     "description": (
@@ -579,6 +587,7 @@ MEETING_TOOLS: List[Dict[str, Any]] = [
                 "checklist": CHECKLIST,
                 "summaryProfile": SUMMARY_PROFILE,
                 "guidance": GUIDANCE,
+                "playbook": PLAYBOOK,
                 "shareWith": SHARE_WITH,
                 "participants": PARTICIPANTS,
             },

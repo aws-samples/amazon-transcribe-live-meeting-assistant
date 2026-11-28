@@ -3163,6 +3163,7 @@ def handler(event, context):
         # The skills this request may use, listed in its system prompt, and the
         # names of the others, told to the assistant as not available.
         skills_offered: List[meeting_skills.SkillSummary] = []
+        playbook_text = ''
         skills_unavailable: List[str] = []
         
         if not user_input:
@@ -3287,6 +3288,9 @@ def handler(event, context):
             if skills_offered:
                 tools.extend(meeting_skills.create_skill_tools(skills_offered))
                 offered_groups.add(TOOL_GROUP_SKILLS)
+                # The meeting's playbook, when this request may use its skill:
+                # its instructions in the prompt from the start.
+                playbook_text = meeting_playbook_text(call_id, dynamodb_table_name, skills_offered)
 
         # Add web search tool if an API key is configured (auto-enable), for a
         # request allowed to search the web.
@@ -3632,7 +3636,7 @@ def handler(event, context):
                 model_id,
                 (
                     get_meeting_assistant_prompt_with_tools(
-                        vp_browser=vp_browser_offered, skills=skills_offered
+                        vp_browser=vp_browser_offered, skills=skills_offered, playbook=playbook_text
                     )
                     if tools
                     else get_meeting_assistant_prompt()
@@ -4090,7 +4094,27 @@ def configured_sensitive_information_rule() -> str:
     return SENSITIVE_INFORMATION_RULE if value is True else ''
 
 
-def get_meeting_assistant_prompt_with_tools(vp_browser: bool = True, skills=()) -> str:
+def meeting_playbook_text(call_id: str, dynamodb_table_name: str, skills_offered) -> str:
+    """The prompt's part for the meeting's playbook, or '' (none, or not offered to this request).
+
+    See meeting_skills.playbook_prompt and docs/meeting-playbooks.md.
+    """
+    if not dynamodb_table_name:
+        return ''
+    skill_id = meeting_skills.meeting_playbook_id(dynamodb.Table(dynamodb_table_name), call_id)
+    skill = next((s for s in skills_offered if s.skill_id == skill_id), None) if skill_id else None
+    if skill is None:
+        return ''
+    try:
+        record = meeting_skills.load_body(skill)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f"Could not read the meeting's playbook {skill_id}: {e}")
+        return ''
+    logger.info(f"Playbook: {skill_id} in the prompt")
+    return meeting_skills.playbook_prompt(skill, record)
+
+
+def get_meeting_assistant_prompt_with_tools(vp_browser: bool = True, skills=(), playbook: str = '') -> str:
     """The system prompt for the agent with tools, before the notes for one request.
 
     The profile's editable instructions (configured_system_prompt); then, when
@@ -4102,14 +4126,18 @@ def get_meeting_assistant_prompt_with_tools(vp_browser: bool = True, skills=()) 
     when the Virtual Participant browser controls are offered, how to use them
     (VP_BROWSER_INSTRUCTIONS). The skills' list comes before the fixed part, so
     the fixed part's opening line ("whatever the instructions above say")
-    covers it too.
+    covers it too; so does the meeting's playbook (``playbook``, from
+    meeting_playbook_text), which follows the list, with its own rule after
+    SKILL_RULES.
     """
     return (
         configured_system_prompt()
         + meeting_skills.catalog_prompt(skills)
+        + (playbook if skills else '')
         + FIXED_INSTRUCTIONS
         + configured_sensitive_information_rule()
         + (meeting_skills.SKILL_RULES if skills else '')
+        + (meeting_skills.PLAYBOOK_RULE if skills and playbook else '')
         + (VP_BROWSER_INSTRUCTIONS if vp_browser else '')
     )
 

@@ -11,6 +11,7 @@
 import { vpPreparationChanges, vpPreparationForm } from '../common/meeting-preparation';
 import { meetingConsentInput } from './meeting-consent-options';
 import { guidanceChoiceOf, guidanceEditInput } from './guidance-options';
+import { playbookChoiceOf, playbookEditInput } from '../meeting-playbooks/playbook-choice';
 import {
   EDIT_MIN_LEAD_MINUTES,
   browserTimeZone,
@@ -52,6 +53,7 @@ export const editFormFrom = (vp) => ({
   },
   consentChoice: consentChoiceOf(vp),
   guidanceChoice: guidanceChoiceOf(vp),
+  playbookChoice: playbookChoiceOf(vp),
   // Absent on rows the form did not write: the launch default is on.
   enableVideoRecording: vp.enableVideoRecording !== false,
   useZoomLogin: vp.useStoredZoomAccount === true,
@@ -64,7 +66,7 @@ export const editFormFrom = (vp) => ({
  */
 export const scheduledEditInput = (
   vp,
-  { form, consentChoice, guidanceChoice = undefined, enableVideoRecording, useZoomLogin },
+  { form, consentChoice, guidanceChoice = undefined, playbookChoice = undefined, enableVideoRecording, useZoomLogin },
   { zoomChoiceOffered },
 ) => {
   const input = {};
@@ -106,6 +108,8 @@ export const scheduledEditInput = (
 
   // Live guidance: sent when changed, and null to go back to the deployment's setting.
   if (guidanceChoice !== undefined) Object.assign(input, guidanceEditInput(guidanceChoice, vp));
+  // The meeting playbook: sent when changed, and null to go back to the profile's default.
+  if (playbookChoice !== undefined) Object.assign(input, playbookEditInput(playbookChoice, vp));
 
   if (enableVideoRecording !== (vp.enableVideoRecording !== false)) {
     input.enableVideoRecording = enableVideoRecording;

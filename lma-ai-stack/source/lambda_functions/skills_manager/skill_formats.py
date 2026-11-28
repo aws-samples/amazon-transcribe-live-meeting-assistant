@@ -15,8 +15,11 @@ and reported, and a create or update that names one is refused.
 The formats read (``parse_skill_file``):
 
 - **Agent Skills** ``SKILL.md``: YAML front matter with ``name`` and
-  ``description`` (and optionally ``license``, ``compatibility`` and
-  ``metadata``), then the instructions in Markdown.
+  ``description`` (and optionally ``license``, ``compatibility``,
+  ``metadata`` and LMA's ``playbook``), then the instructions in Markdown.
+  A ``playbook`` section makes the skill a meeting playbook; it is checked by
+  the playbook rules (``lma_playbooks.rules``) and kept, normalised, in the
+  skill's metadata. See docs/meeting-playbooks.md.
 - **An Agent Skills folder as a zip**: ``SKILL.md`` at the root of the zip or of
   its one top-level folder, with reference files beside it.
 - **Amazon Quick** skill ``.md``: front matter with ``name``, ``display_name``,
@@ -44,6 +47,11 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import yaml
+
+# pylint: disable=import-error
+from lma_playbooks import rules as playbook_rules
+
+# pylint: enable=import-error
 
 LIBRARY_KIND = "lma-skill-library"
 LIBRARY_VERSION = 1
@@ -86,6 +94,11 @@ SKILL_FILE_NAME = "SKILL.md"
 METADATA_TEXT_FIELDS = {"trigger": 256, "icon": 16, "license": 256, "compatibility": 500}
 METADATA_LIST_FIELDS = {"inputs": (20, 128)}
 METADATA_MAP_FIELD = "metadata"
+#: A meeting playbook's own section (docs/meeting-playbooks.md), kept as a map.
+METADATA_PLAYBOOK_FIELD = playbook_rules.PLAYBOOK_KEY
+#: Names a playbook may not have: what a Virtual Participant stores for "no
+#: playbook", and what its form calls the profile's default.
+RESERVED_PLAYBOOK_NAMES = ("default", "none")
 MAX_METADATA_MAP = 20
 MAX_METADATA_VALUE = 512
 
@@ -273,7 +286,24 @@ def check_metadata(value: Any) -> Dict[str, Any]:
             )
             for k, v in extra.items()
         }
+    playbook = value.get(METADATA_PLAYBOOK_FIELD)
+    if playbook not in (None, "", {}):
+        try:
+            kept[METADATA_PLAYBOOK_FIELD] = playbook_rules.parse_playbook(
+                playbook_rules.plain(playbook)
+            )
+        except playbook_rules.PlaybookError as error:
+            raise SkillError(
+                "The playbook section is not accepted: " + "; ".join(error.problems) + "."
+            ) from None
     return kept
+
+
+def plain_item(item: Optional[Mapping[str, Any]]) -> Optional[Dict[str, Any]]:
+    """A stored skill with DynamoDB's numbers as ints and floats, as every reader wants it."""
+    if item is None:
+        return None
+    return playbook_rules.plain(dict(item))
 
 
 def _scalar_text(value: Any) -> Any:
@@ -328,13 +358,20 @@ def check_skill(
             f"The skill's instructions and reference files are {total} bytes together; at most "
             f"{MAX_SKILL_BYTES} are accepted."
         )
+    kept = check_metadata(metadata)
+    if METADATA_PLAYBOOK_FIELD in kept and name in RESERVED_PLAYBOOK_NAMES:
+        # The Virtual Participant form's own choices are named so.
+        raise SkillError(
+            f"A meeting playbook cannot be named {name!r}: "
+            f"{' and '.join(RESERVED_PLAYBOOK_NAMES)} are choices of their own."
+        )
     return Skill(
         name=name,
         description=description,
         instructions=instructions,
         display_name=_plain_text(display_name, "display name", MAX_DISPLAY_NAME),
         files=sorted(checked_files, key=lambda f: f.path),
-        metadata=check_metadata(metadata),
+        metadata=kept,
         source_format=source_format,
     )
 
@@ -409,7 +446,12 @@ def parse_markdown_skill(text: str, files: Sequence[SkillFile] = ()) -> ParsedSk
     display_name = front.get("display_name") or ""
     metadata = {
         key: front[key]
-        for key in (*METADATA_TEXT_FIELDS, *METADATA_LIST_FIELDS, METADATA_MAP_FIELD)
+        for key in (
+            *METADATA_TEXT_FIELDS,
+            *METADATA_LIST_FIELDS,
+            METADATA_MAP_FIELD,
+            METADATA_PLAYBOOK_FIELD,
+        )
         if key in front
     }
     if quick:
@@ -571,9 +613,14 @@ def front_matter(record: Mapping[str, Any]) -> Dict[str, Any]:
     metadata = record.get("Metadata") or {}
     if isinstance(metadata, str):
         metadata = json.loads(metadata or "{}")
-    for key in (*METADATA_TEXT_FIELDS, *METADATA_LIST_FIELDS, METADATA_MAP_FIELD):
+    for key in (
+        *METADATA_TEXT_FIELDS,
+        *METADATA_LIST_FIELDS,
+        METADATA_MAP_FIELD,
+        METADATA_PLAYBOOK_FIELD,
+    ):
         if metadata.get(key) not in (None, "", [], {}):
-            front[key] = metadata[key]
+            front[key] = playbook_rules.plain(metadata[key])
     return front
 
 

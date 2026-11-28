@@ -42,7 +42,7 @@ Skills are stored in their own table (`<stack>-Skills`), account-wide, as MCP se
 | Description | `Description` | Required, up to 1,024 characters. The assistant decides from it whether a request needs the skill, so say what the skill is for and when to use it. |
 | Instructions | `Instructions` | Required Markdown, up to 48 KB. |
 | Reference files | `Files` | Up to 20 text files, each up to 32 KB, with a relative path such as `reference/checklist.md`. The types are `.md`, `.markdown`, `.txt`, `.csv`, `.json`, `.yaml` and `.yml`. |
-| Metadata | `Metadata` | The front-matter fields kept from an imported file: `trigger`, `icon`, `inputs`, `license`, `compatibility` and the Agent Skills `metadata` map. Saved unchanged when the skill is edited, and written back on export. Not sent to the assistant. |
+| Metadata | `Metadata` | The front-matter fields kept from an imported file: `trigger`, `icon`, `inputs`, `license`, `compatibility` and the Agent Skills `metadata` map. Saved unchanged when the skill is edited, and written back on export. Not sent to the assistant. A skill whose front matter has a `playbook` section is a [meeting playbook](meeting-playbooks.md); the section is kept here too, checked on every save and import, and edited in the skill editor's **Meeting playbook** part. |
 | Source | `SourceFormat` | Where the skill came from: `manual`, `agent-skills`, `amazon-quick`, `library`, or `shipped` for a [default skill](#default-skills). An edit keeps the source; an import that replaces a skill gives it the import's. |
 | Audit | `CreatedAt`, `CreatedBy`, `UpdatedAt`, `UpdatedBy` | The user's email address, or the IAM principal's ARN for an SDK or CLI call. |
 
@@ -55,14 +55,14 @@ Every signed-in user can read the skills (see [Who Can Read and Change Skills](#
 **Configuration › Skills** in the navigation, beside **MCP Servers**, lists every skill with its description, its number of reference files, its trigger (for a skill imported from Amazon Quick), its source and who last changed it. Select a skill to act on it:
 
 - **Export skill**: download it as `SKILL.md`, or as a `.zip` of its folder with its reference files.
-- **Edit** (Admin): the editor has the name, display name and description, the instructions with a **Write** tab and a **Preview** tab that renders the Markdown, and the reference files, each with its path and its text. **Add file** adds an empty one and **Add from disk** reads a text file into a new one. Metadata kept from an import is shown and saved unchanged.
+- **Edit** (Admin): the editor has the name, display name and description, the instructions with a **Write** tab and a **Preview** tab that renders the Markdown, and the reference files, each with its path and its text. **Add file** adds an empty one and **Add from disk** reads a text file into a new one. Metadata kept from an import is shown and saved unchanged. **This skill is a meeting playbook** turns on the editor's playbook part, with a preview of what applying it does; see [Writing a playbook](meeting-playbooks.md#writing-a-playbook). The list's **Meeting playbook** column marks each playbook.
 - **Delete** (Admin). A profile that names the skill keeps its entry, which then has no effect; the Configuration page shows it as **No such skill** with **Remove**.
 
 **Create skill** opens the same editor for a new skill. **Import / export** offers importing one skill, importing a library, and exporting the library. **When importing a skill, replace a skill of the same name** decides what an import of a skill whose name is taken does: without it the import is refused and nothing changes; with it, the stored skill is replaced and keeps its id, so a profile that names it still does.
 
 ## Default Skills
 
-LMA ships five example skills, which the stack stores in the skills table when it is deployed. Each is an ordinary skill that an Admin can edit, export or delete. The Skills page shows its source as **Shipped with LMA** (`SourceFormat: shipped`).
+LMA ships five example skills, which the stack stores in the skills table when it is deployed. Each is an ordinary skill that an Admin can edit, export or delete. The Skills page shows its source as **Shipped with LMA** (`SourceFormat: shipped`). Five [meeting playbooks](meeting-playbooks.md#the-shipped-playbooks) (`sprint-planning`, `architecture-review`, `customer-discovery`, `incident-review` and `retrospective`) are seeded with them, by the same rules below.
 
 | Skill | What it does |
 |---|---|

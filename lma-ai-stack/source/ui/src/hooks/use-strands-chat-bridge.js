@@ -128,12 +128,15 @@ const userContextMessage = ({ user, userGroups, isAdmin }) => ({
 /**
  * @param {string} callId the meeting the chat is about; the frame's first
  *   push of the user context is repeated when it changes.
- * @param {{ client?: object, onAnswerComplete?: Function }} [options] the
- *   GraphQL client, for tests; and a function called each time an answer has
+ * @param {{ client?: object, onAnswerComplete?: Function, extraButtons?: object }} [options] the
+ *   GraphQL client, for tests; a function called each time an answer has
  *   finished streaming (its last token has been passed to the frame), which
- *   the meeting page uses to mark the Assistant button while the panel is closed.
+ *   the meeting page uses to mark the Assistant button while the panel is
+ *   closed; and buttons the meeting adds before the deployment's, in the stored
+ *   form ("N#LABEL": prompt) -- its playbook's quick actions
+ *   (docs/meeting-playbooks.md). They are not shown to a Participant.
  */
-const useStrandsChatBridge = (callId, { client, onAnswerComplete } = {}) => {
+const useStrandsChatBridge = (callId, { client, onAnswerComplete, extraButtons } = {}) => {
   const { user } = useAppContext();
   const { userGroups, isAdmin, role } = useUserGroups();
 
@@ -145,6 +148,23 @@ const useStrandsChatBridge = (callId, { client, onAnswerComplete } = {}) => {
   if (!clientRef.current) clientRef.current = generateClient();
   const onAnswerCompleteRef = useRef(onAnswerComplete);
   onAnswerCompleteRef.current = onAnswerComplete;
+  const extraButtonsRef = useRef(extraButtons || {});
+  extraButtonsRef.current = extraButtons || {};
+  const extraButtonsKey = JSON.stringify(extraButtons || {});
+
+  // The meeting's own buttons changed (a playbook applied, switched or removed):
+  // the frame reads its buttons again, so the change shows at once.
+  const firstButtons = useRef(true);
+  useEffect(() => {
+    if (firstButtons.current) {
+      firstButtons.current = false;
+      return;
+    }
+    const iframe = document.querySelector(CHAT_FRAME_SELECTOR);
+    if (iframe && iframe.contentWindow && iframe.src) {
+      iframe.contentWindow.postMessage({ type: 'STRANDS_RELOAD_BUTTONS' }, new URL(iframe.src).origin);
+    }
+  }, [extraButtonsKey]);
 
   // Send the user context to the frame once it has had time to load.
   useEffect(() => {
@@ -188,7 +208,7 @@ const useStrandsChatBridge = (callId, { client, onAnswerComplete } = {}) => {
             type: 'STRANDS_BUTTON_CONFIG_RESPONSE',
             requestId: data.requestId,
             success: true,
-            config: mergeChatButtons(result),
+            config: { ...extraButtonsRef.current, ...mergeChatButtons(result) },
           });
         } catch (error) {
           logger.error('getChatButtonConfig call failed', error);

@@ -11,6 +11,8 @@
 // which leaves out what a skill does not hold and says so; the library is a
 // JSON document of kind lma-skill-library, version 1, imported by name.
 
+import { PLAYBOOK_KEY, playbookForm, playbookProblems, playbookSection } from '../meeting-playbooks/playbook-model';
+
 export const LIBRARY_KIND = 'lma-skill-library';
 export const LIBRARY_VERSION = 1;
 // The largest library document sent in one import request; a larger one is sent
@@ -157,6 +159,16 @@ export const skillMetadata = (raw) => {
   }
 };
 
+/**
+ * The skill's metadata as saved: what the import kept, with the playbook
+ * section the editor holds (`form.playbook`, playbook-model's playbookForm) in
+ * place of the stored one, or none when the skill is not a playbook.
+ */
+export const savedMetadata = (form) => {
+  const { [PLAYBOOK_KEY]: _stored, ...kept } = form.metadata || {};
+  return form.playbook ? { ...kept, [PLAYBOOK_KEY]: playbookSection(form.playbook) } : kept;
+};
+
 /** The editor's form as the SkillInput the stack takes. */
 export const skillInput = (form) => ({
   Name: (form.name || '').trim(),
@@ -164,7 +176,7 @@ export const skillInput = (form) => ({
   Description: (form.description || '').trim(),
   Instructions: form.instructions || '',
   Files: (form.files || []).map((file) => ({ Path: (file.path || '').trim(), Content: file.content || '' })),
-  Metadata: JSON.stringify(form.metadata || {}),
+  Metadata: JSON.stringify(savedMetadata(form)),
 });
 
 /** A stored skill as the editor's form. */
@@ -175,6 +187,10 @@ export const skillForm = (skill) => ({
   instructions: skill?.Instructions || '',
   files: (skill?.Files || []).map((file) => ({ path: file.Path, content: file.Content || '' })),
   metadata: skillMetadata(skill?.Metadata),
+  // A meeting playbook's section, as the editor holds it; null for a skill that is not one.
+  playbook: skillMetadata(skill?.Metadata)[PLAYBOOK_KEY]
+    ? playbookForm(skillMetadata(skill?.Metadata)[PLAYBOOK_KEY])
+    : null,
 });
 
 /** What is wrong with the editor's form before it is sent, or [] when nothing is. */
@@ -193,6 +209,7 @@ export const formProblems = (form) => {
       problems.push(`${file.path || 'A reference file'} is larger than ${MAX_FILE_BYTES / 1024} KB.`);
     }
   });
+  if (form.playbook) problems.push(...playbookProblems(playbookSection(form.playbook)).map((p) => `Playbook: ${p}`));
   return problems;
 };
 

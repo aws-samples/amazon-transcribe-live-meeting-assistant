@@ -17,6 +17,10 @@ Reached two ways:
   caller may change it, restated as a condition), checks the whiteboard's
   version as read, and stores the new version beside the whiteboard, so access
   and concurrency are judged at the moment of the write.
+* **A meeting playbook** applied to a meeting, or the playbooks to choose from
+  (``applyMeetingPlaybook``, ``meetingPlaybookOptions``, and an asynchronous
+  ``{PlaybookApply}`` from the call event processor for a new meeting); see
+  playbooks.py and docs/meeting-playbooks.md.
 * **A run** of the assistant -- invoked asynchronously by the call event
   processor for a finished speech segment of a meeting whose
   ``WhiteboardsEnabled`` is true, once more when the meeting ends, and on
@@ -86,7 +90,21 @@ FALLBACK_MODEL_ID = "global.anthropic.claude-haiku-5-5"
 METERING_CONTEXT = "MeetingWhiteboards"
 #: Longer than the function's timeout, so a stopped run cannot hold its meeting longer.
 LEASE_SECONDS = int(os.environ.get("LEASE_SECONDS", "180"))
+#: The answer's output tokens for one whiteboard, and for each further one the
+#: run updates (a meeting playbook makes several), up to RUN_MAX_TOKENS_CAP: a run
+#: rewrites every panel it changes, so a fixed cap truncated runs over three
+#: whiteboards, and a truncated answer is dropped whole.
 RUN_MAX_TOKENS = 2500
+RUN_TOKENS_PER_EXTRA_BOARD = 1500
+RUN_MAX_TOKENS_CAP = 8000
+
+
+def run_max_tokens(boards: int) -> int:
+    """The output cap of a run that updates ``boards`` whiteboards."""
+    extra = max(0, int(boards) - 1) * RUN_TOKENS_PER_EXTRA_BOARD
+    return min(RUN_MAX_TOKENS_CAP, RUN_MAX_TOKENS + extra)
+
+
 #: Write attempts on one meeting's whiteboards in a UTC minute, people and assistant
 #: together, counted before the write whether or not it is stored.
 WRITES_PER_MINUTE = 60
@@ -978,6 +996,103 @@ CREATE_MUTATION = (
     "  createMeetingWhiteboard(input: $input) {" + _BOARD_FIELDS + "}\n}"
 )
 
+# The full Call field set onUpdateCall selects (the live guidance analyzer's
+# copy), for applyMeetingPlaybook sent as the backend: AppSync publishes a
+# mutation's own response to that subscription, and a field the subscription
+# selects that the mutation did not arrives as null in every open page.
+SUBSCRIBED_CALL_FIELDS = """
+      PK
+      SK
+      CallId
+      AgentId
+      CallSummaryText
+      CallSummaryState
+      DetectedLanguages
+      TranscriptionPause
+      SpeakerIdentities
+      Agenda
+      AgendaSource
+      AgendaUpdatedBy
+      AgendaUpdatedAt
+      Labels {
+        Key
+        Value
+      }
+      Audience
+      MeetingMetadataUpdatedAt
+      MeetingContext
+      MeetingContextUpdatedBy
+      MeetingContextUpdatedAt
+      Checklist {
+        ItemId
+        Text
+        Kind
+        Priority
+        Source
+        Status
+        StatusSource
+        Evidence {
+          SegmentId
+          StartTime
+          Quote
+        }
+        Note
+        UpdatedBy
+        UpdatedAt
+      }
+      ChecklistUpdatedAt
+      SummaryProfile
+      GuidanceEnabled
+      WhiteboardsEnabled
+      Playbook {
+        SkillId Name DisplayName Requested AppliedAt AppliedBy Origin
+        Guidance { Checks Assertiveness MaxItemsPer10Min }
+        QuickActions { Label Prompt }
+        Whiteboards { WhiteboardId Title Template Reused }
+        Notes
+        Previous { GuidanceEnabled WhiteboardsEnabled }
+      }
+      PlaybookUpdatedAt
+      ActionItems {
+        Text
+        Owner
+        DueDate
+        DueText
+        StartTime
+        SegmentId
+      }
+      MeetingPlatform
+      Status
+      UpdatedAt
+      CreatedAt
+      CustomerPhoneNumber
+      SystemPhoneNumber
+      RecordingUrl
+      VideoRecordingUrl
+      RecordingUrls
+      RecordingUrlSessions
+      VideoRecordingUrls
+      VideoRecordingUrlSessions
+      SessionNumber
+      SessionOffsetSeconds
+      SessionStartedNumber
+      Sessions { SessionNumber OffsetSeconds StartedAt }
+      Owner
+      SharedWith
+      TotalConversationDurationMillis
+      Sentiment {
+        OverallSentiment { REMOTE LOCAL AGENT CALLER }
+        SentimentByPeriod {
+          QUARTER {
+            REMOTE { BeginOffsetMillis EndOffsetMillis Score }
+            LOCAL { BeginOffsetMillis EndOffsetMillis Score }
+            AGENT { BeginOffsetMillis EndOffsetMillis Score }
+            CALLER { BeginOffsetMillis EndOffsetMillis Score }
+          }
+        }
+      }
+"""
+
 #: Triggers that need only one new segment rather than minNewSegments: a run
 #: on request (which waits REQUEST_GAP_SECONDS after the previous run instead
 #: of the interval) and the run at a meeting's end (which waits only for the
@@ -1015,7 +1130,7 @@ def model_for(settings: rules.Settings) -> str:
 
 
 def call_model(
-    call_id: str, model_id: str, system: list, messages: list
+    call_id: str, model_id: str, system: list, messages: list, max_tokens: int = RUN_MAX_TOKENS
 ) -> Optional[Dict[str, Any]]:
     """One model call, metered against the meeting; the tool's input, or None."""
     caching = read_setting(MEETING_ASSIST.name, "promptCachingEnabled", default=True)
@@ -1036,7 +1151,7 @@ def call_model(
         # "auto" rather than naming the tool: the Claude 5 models refuse a forced
         # tool choice; an answer given as JSON text is read the same way.
         "toolConfig": {"tools": tools, "toolChoice": {"auto": {}}},
-        "inferenceConfig": build_inference_config(model_id, RUN_MAX_TOKENS),
+        "inferenceConfig": build_inference_config(model_id, max_tokens),
     }
     extra = additional_request_fields(model_id, "low")
     if extra:
@@ -1271,7 +1386,9 @@ def _update(  # pylint: disable=too-many-arguments,too-many-locals
         screen=screen,
         elapsed_seconds=max(s.end for s in segments),
     )
-    answer = call_model(call_id, model_for(settings), system, messages)
+    answer = call_model(
+        call_id, model_for(settings), system, messages, run_max_tokens(len(targets))
+    )
     plan = updater.parse_answer(answer, targets)
     marker = {
         "LastSegmentEndTime": live_pass.next_marker(fresh, last_marker),
@@ -1313,8 +1430,13 @@ def _update(  # pylint: disable=too-many-arguments,too-many-locals
 
 
 def handler(event: Dict[str, Any], _context: Any) -> Any:
-    """AppSync (meetingWhiteboards.request.vtl) or an asynchronous run ({CallId, Trigger})."""
+    """AppSync (meetingWhiteboards.request.vtl), an asynchronous run ({CallId, Trigger}),
+    or a playbook to apply to a new meeting ({PlaybookApply}; see playbooks.py)."""
     info = event.get("info")
+    if not isinstance(info, Mapping) and isinstance(event.get("PlaybookApply"), Mapping):
+        import playbooks  # pylint: disable=import-outside-toplevel
+
+        return playbooks.apply_at_start(event)
     if not isinstance(info, Mapping):
         call_id = event.get("CallId")
         trigger = str(event.get("Trigger")) if event.get("Trigger") in ("auto", "final") else "auto"
@@ -1334,4 +1456,12 @@ def handler(event: Dict[str, Any], _context: Any) -> Any:
         return MUTATIONS[field](caller, arguments.get("input") or {})
     if field == "requestWhiteboardUpdate":
         return request_update(caller, arguments)
+    import playbooks  # pylint: disable=import-outside-toplevel
+
+    if field in playbooks.QUERIES or field in playbooks.MUTATIONS:
+        if playbooks.is_participant(event):
+            raise refuse("Unauthorized", "Unauthorized: playbooks are not offered to Participants")
+        if field in playbooks.QUERIES:
+            return playbooks.QUERIES[field](caller, arguments)
+        return playbooks.MUTATIONS[field](caller, arguments.get("input") or {})
     raise refuse("BadRequest", f"unsupported field {field}")
