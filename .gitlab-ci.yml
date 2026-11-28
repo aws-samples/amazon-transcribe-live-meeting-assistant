@@ -863,6 +863,11 @@ nightly_integ_tests:
     <<: *nightly_variables
     NIGHTLY_STAGE: tests
     NIGHTLY_POST_WHEN: always
+    # Runs the meeting-export case that writes more than 6 MB of transcript
+    # (integ-tests/test_meeting_export.py). It is opt-in so a local run stays
+    # short; the scheduled run is where it is meant to run, and under
+    # --no-skips its skip would otherwise fail the night.
+    LMA_TEST_LARGE_EXPORT: "1"
 
   # AWS credentials come from this GitLab instance's credential vendor, which
   # assumes $AWS_CREDS_TARGET_ROLE for the job and writes the result to the

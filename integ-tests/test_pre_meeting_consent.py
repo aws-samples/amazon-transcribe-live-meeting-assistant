@@ -33,6 +33,10 @@ participant list sends, and given a label. Then:
     unlisted Participant's request is kept on its row, and the START that then
     creates the meeting publishes it as the meeting's notification, which a
     second request on the meeting updates rather than repeats.
+``test_the_deployed_virtual_participant_read_is_consistent``
+    The deployed ``getVirtualParticipant`` resolver, which the START reads the
+    row through right after creating the meeting, is a consistent GetItem, so a
+    request kept just before that read is in it.
 ``test_a_meeting_counts_a_consent_given_in_advance_and_a_withdrawal_as_an_objection``
     What a Virtual Participant does, without one: the runner's assumed role
     starts the meeting's consent (opt-in) and lists the attendee by a display
@@ -581,6 +585,18 @@ def test_a_request_made_before_a_virtual_participants_meeting_exists_reaches_the
         _delete_meeting(ddb, table, call_id, created_at)
         _delete_partition(ddb, table, f"pmr#vp#{vp['id']}")
         assert not ended.get("errors"), ended
+
+
+def test_the_deployed_virtual_participant_read_is_consistent(deployment) -> None:
+    api_id = deployment.ai_resources["AppSyncApiEncrypted"].rsplit("/", 1)[-1]
+    resolver = deployment.session.client("appsync").get_resolver(
+        apiId=api_id, typeName="Query", fieldName="getVirtualParticipant"
+    )["resolver"]
+    template = json.loads(
+        resolver["requestMappingTemplate"].replace("$util.dynamodb.toDynamoDBJson($ctx.args.id)", '"id"')
+    )
+    assert template["operation"] == "GetItem"
+    assert template.get("consistentRead") is True, "the deployed getVirtualParticipant read is not consistent"
 
 
 CONSENT_FIELDS_ON_RECORD = (

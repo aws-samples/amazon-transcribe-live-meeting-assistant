@@ -16,6 +16,11 @@ and the notifications show them and a later request from the same person
 updates the one notification. See
 docs/meeting-consent.md#asking-to-be-added-before-the-meeting-exists.
 
+The row is read through getVirtualParticipant, whose resolver reads
+consistently, after the meeting is created; the request side reads the row and
+the meeting consistently after keeping a request. So a request kept while the
+meeting is being created is seen by this read or by that one.
+
 The meeting page could instead read the Virtual Participant's requests; a
 notification is used because it reaches everyone who can see the meeting, in
 the notifications drawer as well as on the page, and needs nothing new there.

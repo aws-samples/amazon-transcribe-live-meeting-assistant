@@ -1603,6 +1603,38 @@ def test_the_large_meeting_export_case_is_opt_in() -> None:
     assert "LMA_TEST_LARGE_EXPORT=1" in mark.kwargs["reason"]
 
 
+def _job_lines(name: str, next_job: str) -> list[str]:
+    """One job of .gitlab-ci.yml as lines, with comment lines removed.
+
+    Comments are dropped so a comment naming a variable cannot stand in for
+    the variable itself.
+    """
+    config = (Path(__file__).resolve().parents[1] / ".gitlab-ci.yml").read_text()
+    job = config.split(f"\n{name}:", 1)[1].split(f"\n{next_job}:", 1)[0]
+    return [line for line in job.splitlines() if not line.lstrip().startswith("#")]
+
+
+def test_the_scheduled_run_includes_the_large_meeting_export_case() -> None:
+    """The nightly tests job opts in, so the >6 MB export runs every night.
+
+    The case has no exempting marker, so under `--no-skips` its skip would fail
+    the night rather than pass it; opting in here is what keeps it in the run.
+    """
+    lines = [line.strip() for line in _job_lines("nightly_integ_tests", "zap_dast")]
+    assert 'LMA_TEST_LARGE_EXPORT: "1"' in lines
+    assert any("make integ-tests-nightly" in line for line in lines)
+
+
+def test_only_the_scheduled_tests_job_opts_in_to_the_large_export_case() -> None:
+    """Other jobs, including the merge-request checks, leave it to the nightly."""
+    config = (Path(__file__).resolve().parents[1] / ".gitlab-ci.yml").read_text()
+    code = [line for line in config.splitlines() if not line.lstrip().startswith("#")]
+    assert sum("LMA_TEST_LARGE_EXPORT" in line for line in code) == 1
+    workflows = Path(__file__).resolve().parents[1] / ".github" / "workflows"
+    for workflow in workflows.glob("*.yml"):
+        assert "LMA_TEST_LARGE_EXPORT" not in workflow.read_text(), workflow.name
+
+
 def test_the_meeting_archive_test_is_an_opt_in_optional_feature() -> None:
     """It needs LMA_TEST_MEETING_ARCHIVE=1, and writes a synthetic meeting of its own."""
     import test_meeting_archive

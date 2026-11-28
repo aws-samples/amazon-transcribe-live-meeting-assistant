@@ -7,6 +7,7 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, act, cleanup, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import { Flashbar } from '@cloudscape-design/components';
 
 const { subscribers, notifications, graphql } = vi.hoisted(() => ({
   subscribers: [],
@@ -26,6 +27,17 @@ vi.mock('aws-amplify/utils', () => ({ ConsoleLogger: class {} }));
 import ManualActionAlerts, { isUndescribedPrompt, promptIdentity, shouldClearManualAlert } from './ManualActionAlerts';
 // eslint-disable-next-line import/first
 import { VP_STATUS_CONFIG } from './VirtualParticipantDetails';
+// eslint-disable-next-line import/first
+import useVpAlerts from '../../contexts/vp-alerts';
+
+// ManualActionAlerts renders no alert itself; a page layout shows what it
+// provides. This stands in for that layout's notifications Flashbar, rendered
+// only while there is an alert so a cleared one leaves the DOM at once rather
+// than after the Flashbar's exit transition.
+const ProvidedAlerts = () => {
+  const items = useVpAlerts();
+  return items.length ? <Flashbar items={items} /> : null;
+};
 
 describe('shouldClearManualAlert', () => {
   it('keeps the alert up only while the prompt is open', () => {
@@ -161,7 +173,9 @@ describe('alerts across the updates one prompt produces', () => {
     await act(async () => {
       render(
         <MemoryRouter>
-          <ManualActionAlerts />
+          <ManualActionAlerts>
+            <ProvidedAlerts />
+          </ManualActionAlerts>
         </MemoryRouter>,
       );
     });

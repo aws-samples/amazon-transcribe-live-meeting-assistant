@@ -10431,13 +10431,18 @@ Resources:
       TypeName: Query
       FieldName: getVirtualParticipant
       DataSourceName: !GetAtt VirtualParticipantDataSource.Name
+      # A consistent read, so a read just after a write to the row sees it. The
+      # call event processor reads the row this way right after creating the
+      # Virtual Participant's meeting, to publish the requests to be added kept
+      # on it (call_event_processor/participant_list_requests.py).
       RequestMappingTemplate: |
         {
           "version": "2018-05-29",
           "operation": "GetItem",
           "key": {
             "id": $util.dynamodb.toDynamoDBJson($ctx.args.id)
-          }
+          },
+          "consistentRead": true
         }
       ResponseMappingTemplateS3Location: ../source/appsync/getVirtualParticipant.response.vtl
 

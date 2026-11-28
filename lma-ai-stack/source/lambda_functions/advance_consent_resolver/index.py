@@ -282,7 +282,7 @@ def _meeting_row(call_id: str, consistent: bool = False) -> Optional[Dict[str, A
     return _plain(item) if item else None
 
 
-def _vp_row(vp_id: str) -> Optional[Dict[str, Any]]:
+def _vp_row(vp_id: str, consistent: bool = False) -> Optional[Dict[str, Any]]:
     item = (
         DYNAMODB.Table(VIRTUAL_PARTICIPANT_TABLE)
         .get_item(
@@ -292,6 +292,7 @@ def _vp_row(vp_id: str) -> Optional[Dict[str, Any]]:
                 "participantListRequests"
             ),
             ExpressionAttributeNames={"#o": "Owner"},
+            ConsistentRead=consistent,
         )
         .get("Item")
     )
@@ -333,7 +334,7 @@ def meeting_of(arguments: Mapping[str, Any], consistent: bool = False) -> Option
             "Labels": _labels(row.get("Labels")),
             "ScheduledFor": None,
         }
-    vp = _vp_row(vp_id)
+    vp = _vp_row(vp_id, consistent)
     if not vp:
         return None
     meeting = {
@@ -971,6 +972,13 @@ def _notify_owner(meeting: Mapping[str, Any], email: str, name: str) -> bool:
     call_event_processor/participant_list_requests.py). A request kept while
     that happens could be read by neither, so once it is kept the meeting is
     looked for again, and the request published to it if it now exists.
+
+    Both sides read consistently: the call event processor reads the row (the
+    getVirtualParticipant resolver) after the meeting is written, and this
+    reads the row and then the meeting after the request is written. Whichever
+    write comes second, the read after it sees the other, so a request kept
+    while the meeting is being created is published by at least one of them;
+    the shared key per address makes a second publish update the first.
     """
     if meeting["Kind"] == "call":
         return _publish_request(meeting["CallId"], email, name)
@@ -978,7 +986,8 @@ def _notify_owner(meeting: Mapping[str, Any], email: str, name: str) -> bool:
         return False
     # Kept on the row either way, so a failure from here on is only logged.
     try:
-        # A consistent read, so a meeting created moments ago is found.
+        # Consistent reads of the row and of its meeting, so a meeting created
+        # moments ago is found.
         current = meeting_of(
             {"VirtualParticipantId": meeting["VirtualParticipantId"]}, consistent=True
         )
@@ -1001,7 +1010,8 @@ def _keep_request_on_vp(meeting: Mapping[str, Any], email: str, name: str) -> bo
     """
     table = DYNAMODB.Table(VIRTUAL_PARTICIPANT_TABLE)
     for _attempt in range(3):
-        vp = _vp_row(meeting["VirtualParticipantId"])
+        # Consistent, so the condition below is checked against the row as it is.
+        vp = _vp_row(meeting["VirtualParticipantId"], consistent=True)
         if not vp:
             return False
         current = vp.get("participantListRequests")

@@ -11,12 +11,13 @@ import Navigation from '../components/call-analytics-layout/navigation';
 import Breadcrumbs from '../components/meetings-query-layout/breadcrumbs';
 import ToolsPanel from '../components/meetings-query-layout/tools-panel';
 import { appLayoutLabels } from '../components/common/labels';
-import useNotifications from '../hooks/use-notifications';
+import useNotifications, { useStickyNotifications } from '../hooks/use-notifications';
 import useAppContext from '../contexts/app';
 
 const MeetingsQueryRoutes = () => {
   const { navigationOpen, setNavigationOpen } = useAppContext();
   const notifications = useNotifications();
+  const stickyNotifications = useStickyNotifications();
   const [toolsOpen, setToolsOpen] = useState(false);
 
   return (
@@ -29,6 +30,7 @@ const MeetingsQueryRoutes = () => {
         onNavigationChange={({ detail }) => setNavigationOpen(detail.open)}
         breadcrumbs={<Breadcrumbs />}
         notifications={<Flashbar items={notifications} />}
+        stickyNotifications={stickyNotifications}
         tools={<ToolsPanel />}
         toolsOpen={toolsOpen}
         onToolsChange={({ detail }) => setToolsOpen(detail.open)}

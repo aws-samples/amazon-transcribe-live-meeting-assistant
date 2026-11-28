@@ -1317,11 +1317,12 @@ before its meeting exists, so a request made between that moment and the
 meeting's creation is still kept on the row. A request kept while the meeting
 is being created could be missed by that read, so once a request is kept, the
 meeting is looked for again, and if it now exists the request is published to
-it as well. This narrows the window but does not close it: the call event
-processor reads the Virtual Participant's row without a consistent read, so a
-request kept within about a second of the meeting's creation can, rarely, be
-seen by neither and reach only the Virtual Participant's page, where its owner
-still sees it. Asking again reaches the meeting. A publish that fails at either
+it as well. Both reads are consistent: the call event processor reads the
+Virtual Participant's row after the meeting is created, and the request is
+followed by a read of the row and then of the meeting. Whichever comes second,
+the meeting's creation or the request, the read after it sees the other, so the
+request reaches the meeting; when both publish it, the shared key makes the
+second update the first. A publish that fails at either
 point is logged and the request stays on the Virtual Participant's page; it
 does not fail the meeting's creation or the request.
 

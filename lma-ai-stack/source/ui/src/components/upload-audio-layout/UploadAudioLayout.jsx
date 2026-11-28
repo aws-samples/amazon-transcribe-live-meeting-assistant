@@ -6,7 +6,7 @@
 import React, { useState } from 'react';
 import { AppLayout, Flashbar } from '@cloudscape-design/components';
 
-import useNotifications from '../../hooks/use-notifications';
+import useNotifications, { useStickyNotifications } from '../../hooks/use-notifications';
 
 import StreamAudio from '../stream-audio/StreamAudio';
 import { appLayoutLabels } from '../common/labels';
@@ -20,6 +20,7 @@ import useAppContext from '../../contexts/app';
 const UploadAudioLayout = () => {
   const { navigationOpen, setNavigationOpen } = useAppContext();
   const notifications = useNotifications();
+  const stickyNotifications = useStickyNotifications();
   const [toolsOpen, setToolsOpen] = useState(false);
 
   return (
@@ -30,6 +31,7 @@ const UploadAudioLayout = () => {
       onNavigationChange={({ detail }) => setNavigationOpen(detail.open)}
       breadcrumbs={<Breadcrumbs />}
       notifications={<Flashbar items={notifications} />}
+      stickyNotifications={stickyNotifications}
       tools={<ToolsPanel />}
       toolsOpen={toolsOpen}
       onToolsChange={({ detail }) => setToolsOpen(detail.open)}
