@@ -1,0 +1,86 @@
+# Fictional team and people. See ../README.md for what to test with it.
+title: Sprint 41 retrospective - Orbit field app
+purpose: >-
+  What went well, what to improve, and agreed actions with owners, in the shape a
+  retrospective summary or a three-column whiteboard is drawn from. The shortest meeting.
+agenda: |
+  1. What went well
+  2. What to improve
+  3. Actions
+meeting_context: >-
+  Retrospective for sprint forty one of the Orbit field service app at Lumenfold, a
+  fictional company. The sprint shipped the new job photo gallery.
+speakers:
+  - {name: Carlos Mendes, channel: LOCAL, voice: Stephen}
+  - {name: Grace Kim, channel: REMOTE, voice: Salli}
+  - {name: Yusuf Demir, channel: REMOTE, voice: Brian}
+  - {name: Ingrid Solberg, channel: REMOTE, voice: Niamh}
+script:
+  - speaker: Carlos Mendes
+    text: >-
+      Okay, welcome to the sprint forty one retro. Same format as usual: what went well, what
+      we should improve, and then actions. Grace, do you want to start with what went well?
+  - speaker: Grace Kim
+    text: >-
+      Sure. The photo gallery shipped on time, which feels great after the last two sprints.
+      And the pairing between design and engineering on the gallery layout really worked.
+  - speaker: Yusuf Demir
+    text: >-
+      For me, the new preview builds on every pull request were a big win. I could test
+      changes on a real phone the same afternoon instead of waiting for the nightly build.
+  - speaker: Ingrid Solberg
+    text: >-
+      I would add that the support team gave us really fast feedback on the beta. We found
+      the rotation bug two days before release because of them.
+  - chat: Grace Kim
+    text: "+1 to the preview builds, they saved me hours"
+  - speaker: Carlos Mendes
+    text: >-
+      Great. Now, what should we improve? Be honest, nothing is off limits.
+  - speaker: Yusuf Demir
+    text: >-
+      Code reviews took too long. Some pull requests waited two or three days for a review,
+      and then they had conflicts by the time anyone looked at them.
+  - speaker: Ingrid Solberg
+    text: >-
+      And we underestimated the image upload work by a lot. It was estimated at three points
+      and it took most of a week, mostly because of the slow networks technicians have on
+      site.
+  - speaker: Grace Kim
+    text: >-
+      Our stand ups also drift to twenty five minutes. By the time they end, half the morning
+      feels gone.
+  - speaker: Yusuf Demir
+    text: >-
+      One more from me. The end to end tests failed randomly about one run in five, so
+      people started re-running them without looking, and that is how the login bug nearly
+      slipped through.
+  - speaker: Carlos Mendes
+    text: >-
+      That one worries me too. A test suite nobody trusts is worse than no suite, because it
+      teaches us to ignore red builds.
+  - speaker: Carlos Mendes
+    text: >-
+      Okay, so reviews, estimation of network-heavy work, long stand ups and flaky end to end
+      tests. Let's agree actions with an owner for each.
+  - speaker: Yusuf Demir
+    text: >-
+      For reviews, I suggest a rule that every pull request gets a first review within one
+      working day. I will set up a reminder bot in the team channel by next Wednesday.
+  - speaker: Ingrid Solberg
+    text: >-
+      For estimation, I will add a network conditions checklist to our story template, so we
+      think about slow connections before we estimate. I can do that this week.
+  - speaker: Grace Kim
+    text: >-
+      And for stand ups, let's timebox them to fifteen minutes and move problem solving to
+      a follow-up. I am happy to keep time for the next sprint.
+  - speaker: Carlos Mendes
+    text: >-
+      And I will take the flaky tests. I will quarantine the five worst ones on Monday and
+      have them fixed or deleted by the end of the sprint.
+  - speaker: Carlos Mendes
+    text: >-
+      Perfect. So four actions: Yusuf owns the review reminder by Wednesday, Ingrid owns the
+      network checklist this week, Grace keeps stand ups to fifteen minutes, and I own the
+      flaky tests. Thanks, everyone.

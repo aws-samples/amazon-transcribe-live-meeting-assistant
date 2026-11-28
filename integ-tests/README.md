@@ -92,6 +92,7 @@ unit-tested in `test_security_helpers.py` (no AWS, `make test-integ-plumbing`).
 | `test_kds_pipeline_creates_meeting` | synthetic START on Kinesis → CallEventProcessor → meeting row in DynamoDB | **gql/AppSync introspection (the gql 4 regression)** |
 | `test_meeting_events.py` *(module; every test in it)* | a temporary rule and SQS queue on the meeting event bus receive Meeting Started, Summary Ready and Meeting Ended for a synthetic meeting driven through Kinesis, and Virtual Participant Status Changed for a synthetic Virtual Participant record moved to `MANUAL_ACTION_REQUIRED`; every event carries only the contract's fields and no meeting content, and a write that leaves the status alone publishes nothing. Skips when `EnableMeetingEvents` is `false`. Self-cleaning | meeting lifecycle events (docs/meeting-events.md) |
 | `test_meeting_chat_segment_is_stored_read_and_deleted` | a synthetic MEETING_CHAT segment on Kinesis is stored with an expiry, returned by `getTranscriptSegments`, left out of FetchTranscript, and removed by the transcript deletion function | meeting chat in the transcript (enum, processor gates, readers, deletion) |
+| `test_synthetic_meeting_kit.py` | the synthetic meeting kit (`scripts/synthetic_meetings/`) replays its `retrospective` meeting through Kinesis at fast pace, left live: the meeting row has the script's title (as the start of its CallId), agenda, meeting context, Owner and `synthetic-meeting` label; every turn is stored as a final segment with the script's speaker, channel, text and times, and the chat message on `MEETING_CHAT`; the kit's `--cleanup` then leaves nothing of the meeting. No Cognito user, no model call | the kit other tests and manual testing drive meetings with; the START/segment shapes it shares with the Virtual Participant |
 | `test_ws_stream_connects` *(opt-in)* | stream audio over the live `wss://.../api/v1/ws` and stay OPEN | **@fastify/websocket 11 upgrade ordering (the WS 500 regression)** |
 | `test_vp_registry_lifecycle` | VP create → get → list → end via AppSync (no meeting) | VP CRUD surface |
 | `test_vp_live_join` *(opt-in)* | VP actually joins a real meeting and leaves `INITIALIZING` | **@zoom/meetingsdk 4→6** |
@@ -152,6 +153,11 @@ appeared in the UI. The probe is reusable standalone:
   so they add no new packages to the repo.
 - For the manual/observational Zoom checklist (active-speaker, chat commands,
   DOM selectors), see `docs/dependency-upgrade-validation-runbook.md`.
+- To drive a realistic meeting into a stack by hand (sprint planning, an
+  architecture review, an incident review and others, through Kinesis or as real
+  audio over the WebSocket), use the synthetic meeting kit in
+  [`scripts/synthetic_meetings/`](../scripts/synthetic_meetings/README.md).
+  `test_synthetic_meeting_kit.py` is its live check.
 
 ## Voice enrollment consent lifecycle
 

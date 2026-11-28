@@ -109,6 +109,7 @@ title: "LMA Documentation"
 
 - [Developer Guide](developer-guide.md) — Building from source, LMA CLI, local UI development, contributing
 - [Scheduled Integration Tests](scheduled-integration-tests.md) — The nightly end-to-end run against a live stack: what it covers, how failures surface, and the one-time GitLab schedule / CI role / test-user setup it needs
+- [Synthetic Meeting Kit](../scripts/synthetic_meetings/README.md) — Scripted, fictional meetings (sprint planning, architecture review, customer discovery, incident review, retrospective, and an adversarial one) replayed into a deployed stack through Kinesis or as Polly-synthesized audio over the WebSocket transcriber, with pacing, part-way stops, extra START fields and cleanup
 - [Test Coverage](test-coverage.md) — `make test-coverage`: line coverage per component, how unimported files are accounted for, and the current baseline
 - [Virtual Participant Local Development](virtual-participant-local-dev.md) — Run the VP locally on EC2 via `make vp-start` with VSCode Remote-SSH + VNC
 - [LMA CLI Reference](lma-cli.md) — Command-line interface for deploy, publish, status, logs, Virtual Participant, and the `lma load` plugin

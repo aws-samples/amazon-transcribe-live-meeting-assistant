@@ -1,0 +1,139 @@
+# Fictional team, product and people. See ../README.md for what to test with it.
+title: Sprint 42 planning - Orbit field app
+purpose: >-
+  Stories with owners, estimates, start and end dates and dependencies, phrased so a
+  Gantt chart, a dependency list and user stories can be drawn from them.
+agenda: |
+  1. Sprint goal
+  2. Walk through the candidate stories and estimate them
+  3. Owners, dates and dependencies
+  4. Risks and capacity
+meeting_context: >-
+  Sprint planning for the Orbit field service app at Lumenfold, a fictional company.
+  The sprint runs from Monday 1 December to Friday 12 December. Capacity is about
+  thirty story points.
+speakers:
+  - {name: Priya Raman, channel: LOCAL, voice: Kajal}
+  - {name: Dana Whitfield, channel: REMOTE, voice: Joanna}
+  - {name: Marcus Delaney, channel: REMOTE, voice: Matthew}
+  - {name: Sophie Brennan, channel: REMOTE, voice: Amy}
+  - {name: Tom Achterberg, channel: REMOTE, voice: Brian}
+script:
+  - speaker: Priya Raman
+    text: >-
+      Morning everyone, thanks for joining. This is planning for sprint forty two, which
+      runs from Monday the first of December to Friday the twelfth. Dana, do you want to
+      start with the sprint goal?
+  - speaker: Dana Whitfield
+    text: >-
+      Sure. The goal is simple to say and hard to do. Field technicians should be able to
+      write job notes with no signal and have them sync when they are back online. That is
+      the thing customers keep asking for.
+  - speaker: Marcus Delaney
+    text: >-
+      Okay, so offline sync is the big one. Before we can do that properly, though, the
+      jobs API needs pagination. Right now it returns everything in one response and that
+      will not survive a sync of a few thousand notes.
+  - speaker: Priya Raman
+    text: >-
+      Right, so let's take them in order. First story, pagination for the jobs API. Marcus,
+      how big is that?
+  - speaker: Marcus Delaney
+    text: >-
+      I would call it three points. I can start on Monday the first and have it done by
+      Wednesday the third. It does not depend on anything else.
+  - speaker: Priya Raman
+    text: >-
+      Great. That is story ORB three oh five, owner Marcus, three points, first to the
+      third of December.
+  - chat: Dana Whitfield
+    text: "Board for this sprint: Orbit / Sprint 42 column, stories ORB-305 to ORB-327"
+  - speaker: Dana Whitfield
+    text: >-
+      The second story is the offline sync itself. As a field technician, I want my job
+      notes to save when I have no signal, so that I never lose work on a remote site.
+  - speaker: Marcus Delaney
+    text: >-
+      That one is eight points, honestly. It needs a local queue on the device, conflict
+      handling and retries. It depends on the pagination story, so I can only start it on
+      Thursday the fourth, and I think it takes until Wednesday the tenth.
+  - speaker: Sophie Brennan
+    text: >-
+      I will need to pair with Marcus on the device side of that, at least for a couple of
+      days. The local queue lives in the app, not on the server.
+  - speaker: Priya Raman
+    text: >-
+      Noted. So ORB three eleven, offline sync, owner Marcus with Sophie pairing, eight
+      points, fourth to the tenth, and it depends on three oh five.
+  - speaker: Dana Whitfield
+    text: >-
+      Third story. As a technician, I want to choose which push notifications I get, so
+      that I am not interrupted by updates on jobs that are not mine.
+  - speaker: Sophie Brennan
+    text: >-
+      I can take notification preferences. Five points. But I need the final designs from
+      Dana before I start, and I would like to start on Tuesday the second.
+  - speaker: Dana Whitfield
+    text: >-
+      You will have the designs by the end of Monday the first. I will put them in the
+      design channel and tag you.
+  - speaker: Priya Raman
+    text: >-
+      So ORB three eighteen, notification preferences, owner Sophie, five points, second to
+      the fifth of December, blocked on the designs from Dana due on the first.
+  - speaker: Tom Achterberg
+    text: >-
+      From the testing side, I want a regression suite for sync before we ship it. That is
+      five points as well, and obviously it cannot start until the sync story is in a
+      build, so realistically Thursday the eleventh to Friday the twelfth.
+  - speaker: Marcus Delaney
+    text: >-
+      Tom, if I get you a build on the ninth with the queue working, even without conflict
+      handling, could you start writing the tests a bit earlier?
+  - speaker: Tom Achterberg
+    text: >-
+      Yes, if there is a build on Tuesday the ninth I can start then and finish on the
+      eleventh. That gives us a day of slack before the release candidate.
+  - speaker: Priya Raman
+    text: >-
+      Perfect. ORB three twenty seven, sync regression suite, owner Tom, five points, ninth
+      to the eleventh, depends on an early build of three eleven.
+  - speaker: Sophie Brennan
+    text: >-
+      There is also the accessibility audit. We have six screen reader issues from last
+      month. I can fix those after the notification work, say the eighth to the tenth, three
+      points.
+  - speaker: Priya Raman
+    text: >-
+      Okay, ORB three twenty two, accessibility fixes, Sophie, three points, eighth to the
+      tenth. Let me add that up. Three plus eight plus five plus five plus three is twenty
+      four points.
+  - speaker: Dana Whitfield
+    text: >-
+      That leaves a little room. I would rather keep it as buffer than add another story,
+      given how risky the sync work is.
+  - speaker: Tom Achterberg
+    text: >-
+      Agreed. The biggest risk I see is conflict handling. If two technicians edit the same
+      job offline, we need a clear rule for which change wins.
+  - speaker: Marcus Delaney
+    text: >-
+      My proposal is last write wins per field, with the overwritten value kept in the job
+      history. Dana, can you confirm that is acceptable for customers by Wednesday?
+  - speaker: Dana Whitfield
+    text: >-
+      I will check with two customers and confirm by Wednesday the third. If they push back
+      we can fall back to flagging the conflict for a supervisor.
+  - chat: Tom Achterberg
+    text: "Reminder: I'm out on Friday 5 December, back Monday."
+  - speaker: Priya Raman
+    text: >-
+      Good, and Tom is out on Friday the fifth, so the testing dates still work. The release
+      candidate is Friday the twelfth, owned by me. Anything else before we close?
+  - speaker: Sophie Brennan
+    text: >-
+      Just that the design hand off on the first is on the critical path for me, so please
+      shout if it slips.
+  - speaker: Priya Raman
+    text: >-
+      Will do. Thanks everyone, that is the plan. I will send the summary after this call.

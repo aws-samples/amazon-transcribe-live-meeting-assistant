@@ -78,6 +78,7 @@ PYTHON_LINT_PATHS := \
 	$(CURDIR)/scripts/ux_recorder_render.py \
 	$(CURDIR)/scripts/ux_test_session.py \
 	$(CURDIR)/scripts/meeting_guest \
+	$(CURDIR)/scripts/synthetic_meetings \
 	$(CURDIR)/scripts/tests \
 	$(CURDIR)/scripts/testing \
 	$(CURDIR)/scripts/solution_profile \

@@ -479,6 +479,17 @@ def test_docs_only_refuses_an_instruction_path_whatever_its_rule() -> None:
         ("CLAUDE.md", "demo_recorder"),
         (".claude/skills/product-demo.md", "demo_recorder"),
         ("docs/demo-videos.md", "demo_recorder"),
+        # The synthetic meeting kit's tests read the schema, the channel names and
+        # the transcriber's START fields.
+        ("lma-ai-stack/source/appsync/schema.graphql", "demo_recorder"),
+        (
+            "lma-ai-stack/source/lambda_layers/configuration_layer/lma_channels/__init__.py",
+            "demo_recorder",
+        ),
+        (
+            "lma-websocket-transcriber-stack/source/app/src/calleventdata/eventtypes.ts",
+            "demo_recorder",
+        ),
         # The AI stack static tests scan utilities/ for createVirtualParticipant
         # selections and check parameters-page anchors in every *.md.
         ("utilities/websocket-client/src/index.ts", "ai_stack"),
@@ -917,3 +928,16 @@ def test_a_security_snapshot_runs_the_security_tooling_tests_and_is_not_document
     assert ca.primary_area(path) == ("security_tests",)
     assert "integ_plumbing" in ran([path])
     assert not ca.docs_only([path])
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "scripts/synthetic_meetings/run_meeting.py",
+        "scripts/synthetic_meetings/meetings/sprint_planning.yaml",
+    ],
+)
+def test_the_synthetic_meeting_kit_runs_its_tests_and_the_python_lint(path: str) -> None:
+    steps = ran([path])
+    assert {"demo_recorder", "python_lint"} <= steps
+    assert not steps & {"ui", "vp", "transcriber", "lambdas"}

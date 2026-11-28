@@ -1,0 +1,128 @@
+# Fictional team, product and people. See ../README.md for what to test with it.
+title: Architecture review - Ledgerline event ingestion
+purpose: >-
+  Components, a data flow, trade-offs, one decision with a rejected alternative, and
+  risks, for architecture diagrams, decision records and risk lists.
+agenda: |
+  1. Current design and the problem
+  2. Proposed ingestion pipeline
+  3. Alternatives and trade-offs
+  4. Decision
+  5. Risks and follow-ups
+meeting_context: >-
+  Ledgerline is a fictional expense platform. Partners send expense events to a public
+  API. Peak traffic during month-end close is about twenty times the daily average.
+speakers:
+  - {name: Hannah Okafor, channel: LOCAL, voice: Ruth}
+  - {name: Raj Menon, channel: REMOTE, voice: Stephen}
+  - {name: Elena Varga, channel: REMOTE, voice: Olivia}
+  - {name: Gareth Hughes, channel: REMOTE, voice: Arthur}
+script:
+  - speaker: Hannah Okafor
+    text: >-
+      Okay, let's begin. The goal today is to agree how expense events get from the partner
+      API into the ledger without falling over at month end. Raj, can you describe where we
+      are today?
+  - speaker: Raj Menon
+    text: >-
+      Today the API service receives each event and writes it straight into the Postgres
+      ledger database in the same request. At month end we see twenty times normal traffic,
+      the database connection pool runs out, and partners get timeouts and retry, which
+      makes it worse.
+  - speaker: Elena Varga
+    text: >-
+      And the retries create duplicate expenses, which finance then has to clean up by hand.
+      That is the part that actually hurts customers.
+  - speaker: Hannah Okafor
+    text: >-
+      Right. Elena, you wrote the proposal, so walk us through the new data flow.
+  - speaker: Elena Varga
+    text: >-
+      Sure. The API service validates the event, assigns an idempotency key, and puts it on
+      a durable queue, then returns accepted to the partner straight away. A pool of
+      ingestion workers reads from the queue in batches and writes to the ledger database.
+      The workers also write the raw event to object storage for audit.
+  - speaker: Elena Varga
+    text: >-
+      Separately, a change stream from the ledger feeds the search index, so the reporting
+      screens stop querying the primary database directly.
+  - speaker: Gareth Hughes
+    text: >-
+      So the components are the API service, the queue, the ingestion workers, the ledger
+      database, the audit bucket, and the search index fed from the change stream. Is that
+      the full list?
+  - speaker: Elena Varga
+    text: >-
+      Plus a dead letter queue for events that fail validation in the workers three times.
+      Those go to a small review screen for the support team.
+  - chat: Elena Varga
+    text: "Proposal doc: Ledgerline ingestion v2, section 3 has the diagram"
+  - speaker: Raj Menon
+    text: >-
+      The trade-off I want to call out is latency. Today a partner knows the expense is in
+      the ledger when the call returns. With the queue, they only know it was accepted, and
+      it lands a few seconds later.
+  - speaker: Gareth Hughes
+    text: >-
+      I think that is fine if we give them a status endpoint. Most partners already poll for
+      approval status anyway.
+  - speaker: Hannah Okafor
+    text: >-
+      Let's talk alternatives. Gareth, you looked at a streaming platform instead of a
+      queue.
+  - speaker: Gareth Hughes
+    text: >-
+      I did. A self-managed streaming cluster gives us ordering per partner and replay,
+      which is nice. But it means running brokers ourselves, with upgrades, disk sizing and
+      on-call. For a team of five that is a lot of operational weight for a feature we
+      mostly do not need yet.
+  - speaker: Raj Menon
+    text: >-
+      The other option was simply to scale the database, a bigger instance and more
+      connections. It is the cheapest change, but it does nothing for duplicates and we
+      would hit the same wall next year.
+  - speaker: Elena Varga
+    text: >-
+      And ordering matters less than it sounds. Expenses carry their own timestamps, and the
+      ledger sorts by those, not by arrival order.
+  - speaker: Hannah Okafor
+    text: >-
+      Okay, I am hearing a decision. We go with the managed queue and batch workers, with
+      idempotency keys enforced by a unique constraint in the ledger. We reject the
+      self-managed streaming cluster because of the operational cost, and we reject simply
+      scaling the database because it does not solve duplicates. Does anyone disagree?
+  - speaker: Gareth Hughes
+    text: >-
+      No disagreement. I would just like it written down that we revisit streaming if we
+      ever need replay for analytics.
+  - speaker: Hannah Okafor
+    text: >-
+      Noted as a follow-up. Now risks. What worries people?
+  - speaker: Raj Menon
+    text: >-
+      Poison messages. If one partner sends a malformed batch, I do not want the workers
+      stuck retrying it forever. That is why the dead letter queue matters, and we need an
+      alarm on its depth.
+  - speaker: Elena Varga
+    text: >-
+      Schema changes are my worry. Partners add fields without telling us. The workers
+      should accept unknown fields and store them in the audit copy rather than rejecting
+      the event.
+  - speaker: Gareth Hughes
+    text: >-
+      Cost of the search index is mine. If we index every raw field it gets expensive
+      quickly. I suggest we index only the twelve fields the reporting screens use.
+  - speaker: Hannah Okafor
+    text: >-
+      Good. So the actions are: Elena writes the decision record by Friday, Raj adds the dead
+      letter alarm and the status endpoint design, and Gareth sizes the search index for the
+      twelve fields. I will book a follow-up review in two weeks.
+  - chat: Raj Menon
+    text: "I'll draft the status endpoint as an OpenAPI snippet in the same doc"
+  - speaker: Raj Menon
+    text: >-
+      Sounds good to me. I will have the status endpoint draft in the proposal doc by
+      Thursday.
+  - speaker: Hannah Okafor
+    text: >-
+      Thanks everyone. That was a useful review, and we have a clear decision.

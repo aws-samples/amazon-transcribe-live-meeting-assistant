@@ -1,0 +1,119 @@
+# Fictional service, incident and people. See ../README.md for what to test with it.
+title: Incident review - checkout latency on 24 November
+purpose: >-
+  A timeline with clock times, how the incident was detected and mitigated, its root
+  cause, and action items with owners and dates, for timelines and action-item extraction.
+agenda: |
+  1. Timeline
+  2. Detection
+  3. Mitigation
+  4. Root cause
+  5. Action items
+meeting_context: >-
+  Blameless review of a fictional incident: checkout latency on the Brookhaven Market
+  storefront, Monday 24 November, severity 2. All times are UTC.
+speakers:
+  - {name: Nadia Petrov, channel: LOCAL, voice: Danielle}
+  - {name: Ben Carter, channel: REMOTE, voice: Gregory}
+  - {name: Mei Lin Zhou, channel: REMOTE, voice: Kimberly}
+  - {name: Oliver Grant, channel: REMOTE, voice: Brian}
+  - {name: Fatima Al-Sayed, channel: REMOTE, voice: Aria}
+script:
+  - speaker: Nadia Petrov
+    text: >-
+      Welcome to the review of last Monday's checkout latency incident. As always this is
+      blameless. We want to understand what happened and what we change. Ben, you were on
+      call, so please take us through the timeline.
+  - speaker: Ben Carter
+    text: >-
+      Sure. At fourteen oh two UTC, version two point thirty one of the pricing service was
+      deployed to production. Nothing looked wrong at first.
+  - speaker: Ben Carter
+    text: >-
+      At fourteen oh nine, the alarm on checkout latency fired. The ninety ninth percentile
+      had gone from about four hundred milliseconds to over six seconds.
+  - speaker: Ben Carter
+    text: >-
+      I acknowledged the page at fourteen twelve. At first I thought it was the payment
+      provider, because they had a status notice that morning, so I spent about eight minutes
+      looking there.
+  - speaker: Mei Lin Zhou
+    text: >-
+      I joined at fourteen eighteen, and at fourteen twenty we declared a severity two
+      incident and opened the incident channel.
+  - speaker: Ben Carter
+    text: >-
+      Mei Lin spotted that the slow calls were all to the pricing service. At fourteen thirty
+      one we started rolling back to version two point thirty, and the rollback completed at
+      fourteen thirty eight.
+  - speaker: Oliver Grant
+    text: >-
+      Latency was back to normal by fourteen forty five, and we kept watching until fifteen
+      ten, when we called the all clear.
+  - chat: Mei Lin Zhou
+    text: "Timeline doc is in the incident channel, all times UTC"
+  - speaker: Nadia Petrov
+    text: >-
+      So roughly forty three minutes from the deploy to recovery, and thirty six minutes of
+      customer impact. Let's talk about detection. Did the alarm fire as fast as it should
+      have?
+  - speaker: Oliver Grant
+    text: >-
+      Not really. The latency alarm uses a five minute window, so it needed several minutes
+      of bad data before firing. And there is no alarm on the pricing service itself, only on
+      checkout, which is why it took a while to find the culprit.
+  - speaker: Fatima Al-Sayed
+    text: >-
+      From the support side, the first customer complaints arrived at fourteen fifteen. So
+      customers noticed before we had found the cause.
+  - speaker: Nadia Petrov
+    text: >-
+      Mitigation was the rollback. Mei Lin, was there any reason we did not roll back
+      earlier?
+  - speaker: Mei Lin Zhou
+    text: >-
+      Mostly that we were not sure the deploy was related, because the payment notice was a
+      distraction. Once we had the traces it was obvious. In hindsight, rolling back the most
+      recent deploy should be the first move.
+  - speaker: Nadia Petrov
+    text: >-
+      Now the root cause. Ben, what did we find?
+  - speaker: Ben Carter
+    text: >-
+      Version two point thirty one picked up a new release of our configuration library. That
+      release changed the default database connection pool size from fifty to five. Our
+      configuration did not set the pool size explicitly, so we silently got five.
+  - speaker: Ben Carter
+    text: >-
+      Under normal traffic five connections is almost enough, which is why the canary
+      machines in staging looked fine. At Monday afternoon traffic, requests queued waiting
+      for a connection, and checkout waited on pricing.
+  - speaker: Oliver Grant
+    text: >-
+      And the cache hit rate dropped at the same time, because the cache warms from the same
+      database. So every request needed a connection.
+  - speaker: Nadia Petrov
+    text: >-
+      Clear. Let's agree action items, each with an owner and a date.
+  - speaker: Ben Carter
+    text: >-
+      I will add explicit settings for the pool size to every service config, and a startup
+      check that fails if it is missing. I can have that done by Friday the fifth of December.
+  - speaker: Mei Lin Zhou
+    text: >-
+      I will add a production canary stage to the pricing pipeline, so a new version takes ten
+      percent of traffic for fifteen minutes first. Target date is Friday the twelfth.
+  - speaker: Oliver Grant
+    text: >-
+      I will add latency and saturation alarms on the pricing service itself, and shorten the
+      checkout alarm window to one minute. That is done by Wednesday the third.
+  - speaker: Fatima Al-Sayed
+    text: >-
+      And I will write a customer status page template for checkout problems, so support can
+      post within ten minutes next time. I will have a draft by Tuesday the second.
+  - chat: Nadia Petrov
+    text: "Action items will go in the tracker under INC-2411 follow-ups"
+  - speaker: Nadia Petrov
+    text: >-
+      Thank you. One more for me: I will update the on-call runbook so rolling back the most
+      recent deploy is step one. That closes the review. Good work, everyone.
