@@ -295,14 +295,17 @@ def cleanup(
 def _is_own(rest: str, exact: bool) -> bool:
     """Whether a key that begins with the meeting's file name is the meeting's.
 
-    ``<name>.wav``, ``<name>.raw``, ``<name>/...`` and a later session's
-    ``<name>_<timestamp>.wav`` are; ``<name>_copy.wav`` is another meeting's.
+    ``<name>.wav``, ``<name>.raw``, ``<name>/...``, ``<name>-SUMMARY.txt`` and a
+    later session's ``<name>_<timestamp>.wav`` are; ``<name>_copy.wav`` is another
+    meeting's.
     """
     if not rest:
         return True
     if exact:
         return False
-    return rest[0] in "./" or (rest[0] == "_" and rest[1:2].isdigit())
+    # A file name never holds "-" (it becomes "_"), so "<name>-SUMMARY.txt" is this
+    # meeting's: the summary and transcript files the summarizer writes.
+    return rest[0] in "./-" or (rest[0] == "_" and rest[1:2].isdigit())
 
 
 def _delete_objects(s3: Any, bucket: str, prefix: str, exact: bool = False) -> int:

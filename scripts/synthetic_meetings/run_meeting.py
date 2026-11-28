@@ -482,6 +482,7 @@ def main(argv: list[str] | None = None) -> int:
     say(f"Meeting {'ended' if result['ended'] else 'left live (no END sent)'}: {call_id}")
     say(
         f"Clean up:  python scripts/synthetic_meetings/run_meeting.py --stack {args.stack} "
+        f"--region {stack.region} "
         f"--cleanup {json.dumps(call_id)}{' --force' if args.via == 'audio' else ''}"
     )
     if args.summary_json:

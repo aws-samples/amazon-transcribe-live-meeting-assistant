@@ -76,9 +76,13 @@ It asks for speaker diarization on each channel that has more than one speaker.
   name sent in the START frame (the LOCAL speaker's name); a diarized channel gets
   the engine's speaker labels (`Meeting participants (spk_0)` and so on), which
   the speaker naming feature may later replace. Assert on speaker names only on
-  the Kinesis path.
+  the Kinesis path. (Measured once, on `retrospective` with Amazon Transcribe:
+  its three REMOTE voices came back as three labels, `spk_0`, `spk_2` and
+  `spk_3`, each matching one scripted speaker on every one of its 20 rows; that
+  is one run, not a guarantee.)
 - Transcript text, segmentation and times are the engine's, not the script's,
-  though the times are on the same meeting timeline.
+  though the times are on the same meeting timeline. The engine splits long turns,
+  so expect more rows than turns (the same run stored 37 speech rows for 18 turns).
 - Chat messages are still put on Kinesis at their meeting times, because the
   transcriber has no chat input.
 - The transcriber START carries no agenda, meeting context or label, and
@@ -142,8 +146,12 @@ would make `createCall` refuse the meeting. The useful ones:
 
 ## Examples
 
+The Region is `--region`, else `AWS_REGION`, else `AWS_DEFAULT_REGION`, else the
+profile's. `AWS_REGION` wins over `AWS_DEFAULT_REGION`, so where a shell sets it,
+export both or pass `--region`.
+
 ```bash
-export AWS_PROFILE=default AWS_DEFAULT_REGION=us-east-1
+export AWS_PROFILE=default AWS_REGION=us-east-1 AWS_DEFAULT_REGION=us-east-1
 K=scripts/synthetic_meetings/run_meeting.py
 
 # What is there

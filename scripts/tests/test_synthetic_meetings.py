@@ -568,7 +568,9 @@ def test_cleanup_removes_every_partition_of_the_meeting_and_nothing_of_another()
             f"lma-audio-recordings/{name}.wav",
             f"lma-audio-recordings/{name}_20261128.wav",
             f"lma-audio-recordings/{name}_copy.wav",
-            f"lma-transcripts/{name}.txt",
+            f"lma-transcripts/{name}-TRANSCRIPT.txt",
+            f"lma-transcripts/{name}-SUMMARY.txt.metadata.json",
+            f"lma-transcripts/{name}_copy-SUMMARY.txt",
         ]
     )
     before = set(table.items)
@@ -594,9 +596,13 @@ def test_cleanup_removes_every_partition_of_the_meeting_and_nothing_of_another()
         "the other meeting is untouched"
     )
     # "..._copy.wav" begins with this meeting's file name, but is the other meeting's.
-    assert s3.keys == {f"lma-audio-recordings/{name}_copy.wav"}
-    # Recording names that start with the name and "_" are this meeting's (a later session's).
-    assert report.objects == 3
+    assert s3.keys == {
+        f"lma-audio-recordings/{name}_copy.wav",
+        f"lma-transcripts/{name}_copy-SUMMARY.txt",
+    }
+    # A later session's recording (<name>_<timestamp>) and the summarizer's
+    # <name>-TRANSCRIPT/-SUMMARY files are this meeting's.
+    assert report.objects == 4
 
 
 def test_cleanup_refuses_a_meeting_the_kit_did_not_create_unless_forced() -> None:
