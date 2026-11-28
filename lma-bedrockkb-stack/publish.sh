@@ -27,6 +27,7 @@ PREFIX=$2
 REGION=$3
 [ -z "$REGION" ] && echo "Region is a required parameter. Usage $USAGE" && exit 1
 export AWS_DEFAULT_REGION=$REGION
+export AWS_REGION=$REGION
 
 ACL=$4
 if [ "$ACL" == "public" ]; then

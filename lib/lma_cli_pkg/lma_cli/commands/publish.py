@@ -9,6 +9,7 @@ import sys
 import click
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
+from lma_cli.commands import resolve_region
 from lma_cli.formatters import (
     console,
     print_error,
@@ -80,6 +81,7 @@ def publish_cmd(
         import logging
         logging.basicConfig(level=logging.DEBUG, format="%(name)s %(levelname)s: %(message)s")
 
+    region = resolve_region(ctx, region)
     client: LMAClient = ctx.obj["client_factory"](region=region)
 
     # Auto-generate bucket basename if not provided (same pattern as IDP)

@@ -560,14 +560,23 @@ class Publisher:
 
     def __init__(self, client: LMAClient) -> None:
         self._client = client
+        # The Region being published to. publish() sets it from
+        # PublishConfig.region, so the S3 and CloudFormation clients, the
+        # artifact URLs and the packaging subprocesses all use the same Region
+        # whatever the client's session, profile or environment default is.
+        self._region: str | None = None
+
+    @property
+    def _target_region(self) -> str:
+        return self._region or self._client.region
 
     @property
     def _s3(self):
-        return self._client.session.client("s3", region_name=self._client.region)
+        return self._client.session.client("s3", region_name=self._target_region)
 
     @property
     def _cfn(self):
-        return self._client.session.client("cloudformation", region_name=self._client.region)
+        return self._client.session.client("cloudformation", region_name=self._target_region)
 
     def publish(
         self,
@@ -606,6 +615,7 @@ class Publisher:
         prefix = config.prefix.rstrip("/")
         prefix_and_version = f"{prefix}/{version}"
         region = config.region
+        self._region = region
 
         # Check prerequisites
         if progress_callback:
@@ -1198,7 +1208,7 @@ class Publisher:
             "--s3-prefix", s3_prefix,
             "--region", region,
         ]
-        self._run_command(cmd, cwd=str(work_dir), desc=f"cfn package {stack_def.name}")
+        self._run_command(cmd, cwd=str(work_dir), desc=f"cfn package {stack_def.name}", region=region)
 
         # Upload packaged template
         s3_template_key = f"{prefix_and_version}/{stack_def.name}/template.yaml"
@@ -1220,7 +1230,7 @@ class Publisher:
 
         script.chmod(0o755)
         cmd = [str(script), bucket, prefix_and_version, region]
-        self._run_command(cmd, cwd=str(stack_dir), desc=f"delegate {stack_def.name}")
+        self._run_command(cmd, cwd=str(stack_dir), desc=f"delegate {stack_def.name}", region=region)
 
         return {"message": f"Delegated to {stack_def.delegate_script}"}
 
@@ -1243,7 +1253,7 @@ class Publisher:
         script.chmod(0o755)
         s3_prefix = f"{prefix_and_version}/{stack_def.name}"
         cmd = [str(script), bucket_basename, s3_prefix, version, region]
-        self._run_command(cmd, cwd=str(deployment_dir), desc=f"build {stack_def.name}")
+        self._run_command(cmd, cwd=str(deployment_dir), desc=f"build {stack_def.name}", region=region)
 
         return {"message": f"Built via {stack_def.build_script}"}
 
@@ -1277,7 +1287,7 @@ class Publisher:
             "--s3-prefix", s3_prefix,
             "--region", region,
         ]
-        self._run_command(cmd, cwd=str(deployment_dir), desc=f"cfn package {stack_def.name}")
+        self._run_command(cmd, cwd=str(deployment_dir), desc=f"cfn package {stack_def.name}", region=region)
 
         _inject_source_hash(output_file, stack_def.hash_template_field, content_hash)
 
@@ -1383,8 +1393,15 @@ class Publisher:
         cwd: str | None = None,
         desc: str = "",
         timeout: int = 1200,
+        region: str | None = None,
     ) -> subprocess.CompletedProcess:
         """Run a shell command, raising LMAPublishError on failure.
+
+        When ``region`` is given, AWS_REGION and AWS_DEFAULT_REGION are set to
+        it in the child's environment, so the AWS CLI, SAM CLI and any SDK the
+        build scripts run use the target Region rather than the caller's
+        environment or profile default (SAM CLI, for one, writes the Region it
+        resolves into the nested TemplateURLs it packages).
 
         Automatically sets DOCKER_DEFAULT_PLATFORM=linux/amd64 on Apple Silicon
         Macs to ensure Lambda-compatible container builds.
@@ -1393,8 +1410,11 @@ class Publisher:
 
         logger.info("Running: %s (cwd=%s)", " ".join(cmd), cwd)
 
-        # On Apple Silicon (arm64) Macs, Lambda containers need linux/amd64
         env = os.environ.copy()
+        if region:
+            env["AWS_REGION"] = region
+            env["AWS_DEFAULT_REGION"] = region
+        # On Apple Silicon (arm64) Macs, Lambda containers need linux/amd64
         if _platform.system() == "Darwin" and _platform.machine() == "arm64":
             env.setdefault("DOCKER_DEFAULT_PLATFORM", "linux/amd64")
             # Also set SAM CLI to use container for correct architecture

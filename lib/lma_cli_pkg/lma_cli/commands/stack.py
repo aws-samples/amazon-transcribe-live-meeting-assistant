@@ -10,6 +10,7 @@ from typing import Optional
 
 import click
 
+from lma_cli.commands import resolve_region
 from lma_cli.formatters import (
     console,
     print_error,
@@ -487,11 +488,16 @@ def deploy_cmd(
             print_error("Cannot specify more than one of --from-code, --template-url, --template-file")
             sys.exit(1)
 
-        # Auto-detect region if not provided
+        # A --region on the command line wins over AWS_DEFAULT_REGION, and the
+        # Region resolved here is the one every client, the build and every
+        # artifact URL use.
+        region = resolve_region(ctx, region)
+
+        # Auto-detect region if not provided, from the profile the CLI uses
         if not region:
             import boto3
 
-            session = boto3.session.Session()
+            session = boto3.session.Session(profile_name=(ctx.obj or {}).get("profile"))
             region = session.region_name
             if not region:
                 print_error(

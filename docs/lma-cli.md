@@ -52,7 +52,7 @@ lma publish --public
 | `--source-dir PATH` | Path to LMA project root (default: `.`) |
 | `--bucket-basename TEXT` | S3 bucket basename (auto-generated from account ID if omitted) |
 | `--prefix TEXT` | S3 key prefix (default: `lma`) |
-| `--region TEXT` | AWS region (default: from AWS CLI profile) |
+| `--region TEXT` | AWS Region to publish to (default: `AWS_DEFAULT_REGION`, then the AWS CLI profile). The artifact bucket, every packaged template URL, and the AWS and SAM CLI commands the build runs all use this Region; see [Region resolution](#region-resolution) |
 | `--public` | Make artifacts publicly readable |
 | `--force` | Force full rebuild (delete checksums) |
 | `--version TEXT` | Override version string |
@@ -96,6 +96,7 @@ lma deploy --stack-name MyLMA --template-file /tmp/lma-main.yaml --wait
 | Option | Description |
 |--------|-------------|
 | `--stack-name TEXT` | CloudFormation stack name (default: LMA) |
+| `--region TEXT` | AWS Region to deploy to (default: `AWS_DEFAULT_REGION`, then the AWS CLI profile). With `--from-code`, the build publishes to this Region too; see [Region resolution](#region-resolution) |
 | `--admin-email TEXT` | Admin user email (required for new stacks) |
 | `--from-code DIRECTORY` | Build and publish from local source before deploying |
 | `--template-url TEXT` | S3 URL for CloudFormation template |
@@ -481,6 +482,19 @@ lma --profile prod outputs                     # Use specific AWS profile
 lma --stack-name MyLMA status                  # Override stack name
 lma -v publish --source-dir . --region us-east-1  # Verbose logging
 ```
+
+### Region resolution
+
+A command's Region is, in order: a `--region` given on the command line, after
+the subcommand or before it (`lma --region us-east-1 deploy ...`); then
+`AWS_DEFAULT_REGION`; then the Region of the AWS CLI profile (`--profile` or
+`AWS_PROFILE`). `lma publish` and `lma deploy --from-code` build everything in
+the Region chosen this way: the S3 and CloudFormation clients, the artifact
+bucket (`<bucket-basename>-<region>`), every packaged template URL, and the
+`aws`, `sam` and stack build scripts they run, which are given that Region with
+`--region` and in `AWS_REGION` and `AWS_DEFAULT_REGION`. A profile or
+environment whose default Region differs from `--region` therefore does not
+change where artifacts are published.
 
 ## Environment Variables
 

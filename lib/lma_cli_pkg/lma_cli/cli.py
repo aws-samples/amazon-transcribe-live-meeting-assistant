@@ -38,6 +38,16 @@ def _make_client(**overrides):
     return LMAClient(**kwargs)
 
 
+def _subcommand_region(region):
+    """Apply resolve_region() for the subcommand that is creating a client."""
+    from lma_cli.commands import resolve_region
+
+    sub_ctx = click.get_current_context(silent=True)
+    if sub_ctx is None or sub_ctx.parent is None:
+        return region
+    return resolve_region(sub_ctx, region)
+
+
 # ── Main group ────────────────────────────────────────────────
 
 
@@ -69,11 +79,14 @@ def main(ctx, region, profile, stack_name, verbose):
     # Use setdefault so tests can inject a mock factory via obj={"client_factory": ...}.
     ctx.ensure_object(dict)
     ctx.obj.setdefault("client_factory", lambda **kw: _make_client(
-        region=kw.get("region") or region,
+        region=_subcommand_region(kw.get("region")) or region,
         profile=kw.get("profile") or profile,
         stack_name=kw.get("stack_name") or stack_name,
     ))
     ctx.obj["region"] = region
+    ctx.obj["region_from_command_line"] = (
+        ctx.get_parameter_source("region") == click.core.ParameterSource.COMMANDLINE
+    )
     ctx.obj["profile"] = profile
     ctx.obj["stack_name"] = stack_name
 

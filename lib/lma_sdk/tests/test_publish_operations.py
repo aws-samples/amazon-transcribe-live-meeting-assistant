@@ -509,7 +509,7 @@ class TestHashAndPackage:
         publisher = Publisher(client)
         uploaded = {}
 
-        def fake_package(cmd, cwd, desc):
+        def fake_package(cmd, cwd, desc, **_kw):
             src = Path(cwd) / cmd[cmd.index("--template-file") + 1]
             Path(cmd[cmd.index("--output-template-file") + 1]).write_text(src.read_text())
 

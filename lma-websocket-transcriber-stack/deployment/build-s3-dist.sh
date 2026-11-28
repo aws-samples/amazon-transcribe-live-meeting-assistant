@@ -50,6 +50,9 @@ if [ -z "$4" ]; then
 else
     export AWS_REGION="$4"
 fi
+# SAM CLI and boto3 read AWS_DEFAULT_REGION (or the profile), not AWS_REGION,
+# so pin both to the target Region for every tool this script runs.
+export AWS_DEFAULT_REGION="$AWS_REGION"
 
 [ -d ${OUT_DIR} ] && rm -fr ${OUT_DIR}
 mkdir -p ${OUT_DIR}
@@ -77,7 +80,7 @@ cd deployment
 
 # git ls-files .. | xargs zip -@ --filesync ${OUT_DIR}/audiohooksrc.zip
 export RELEASE_S3_BUCKET=${RELEASE_S3_BUCKET_BASE}-${AWS_REGION}
-aws s3 cp ${OUT_DIR}/${ZIPFILE} s3://${RELEASE_S3_BUCKET}/${RELEASE_S3_PREFIX}/${RELEASE_VERSION}/${ZIPFILE}
+aws s3 cp --region ${AWS_REGION} ${OUT_DIR}/${ZIPFILE} s3://${RELEASE_S3_BUCKET}/${RELEASE_S3_PREFIX}/${RELEASE_VERSION}/${ZIPFILE}
 
 TEMPLATE_FILE="./lma-websocket-transcriber.yaml"
 RELEASE_S3_PREFIX_SUB=${RELEASE_S3_PREFIX////_}
@@ -116,6 +119,7 @@ sam build \
 
 echo "[INFO] sam packaging for release ${RELEASE_VERSION}"
 sam package \
+	--region ${AWS_REGION} \
 	--s3-bucket ${RELEASE_S3_BUCKET} \
 	--s3-prefix ${RELEASE_S3_PREFIX}/${RELEASE_VERSION} \
 	--output-template-file ${PACKAGE_RELEASE_OUT_FILE} 
@@ -124,6 +128,6 @@ RELEASE_TEMPLATE_S3_URL=s3://${RELEASE_S3_BUCKET}/${RELEASE_S3_PREFIX}/${RELEASE
 RELEASE_UPLOAD_FILE=${OUT_DIR}/release-upload-${PACKAGE_RELEASE_FILE_NAME}.txt
 
 echo "[INFO] uploading ${PACKAGE_RELEASE_OUT_FILE} to ${RELEASE_TEMPLATE_S3_URL}"
-aws s3 cp ${PACKAGE_RELEASE_OUT_FILE} ${RELEASE_TEMPLATE_S3_URL} | tee ${RELEASE_UPLOAD_FILE}
+aws s3 cp --region ${AWS_REGION} ${PACKAGE_RELEASE_OUT_FILE} ${RELEASE_TEMPLATE_S3_URL} | tee ${RELEASE_UPLOAD_FILE}
 
 echo "[INFO] CloudFormation template URL: https://${RELEASE_S3_BUCKET}.s3.amazonaws.com/${RELEASE_S3_PREFIX}/${RELEASE_VERSION}/template.yaml"

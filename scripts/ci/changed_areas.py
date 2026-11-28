@@ -394,6 +394,14 @@ EXTRA_RULES: tuple[Rule, ...] = _rules(
     # ...and stages the manifest version with the SDK's publish mapping.
     ("lib/lma_sdk/lma_sdk/_core/publish.py", "browser_extension"),
     ("lib/lma_sdk/lma_sdk/operations/publish.py", "browser_extension"),
+    # The SDK's publish tests hold the build scripts the publisher runs to passing
+    # the target Region to sam, aws and their child processes (test_publish_region.py).
+    ("lma-ai-stack/Makefile", "sdk_cli"),
+    ("lma-ai-stack/deployment/build-s3-dist.sh", "sdk_cli"),
+    ("lma-websocket-transcriber-stack/deployment/build-s3-dist.sh", "sdk_cli"),
+    ("lma-meetingassist-setup-stack/publish.sh", "sdk_cli"),
+    ("lma-bedrockkb-stack/publish.sh", "sdk_cli"),
+    ("lma-bedrockagent-stack/publish.sh", "sdk_cli"),
     # The integration plumbing tests hold the Stream page probe's route to the UI's,
     # and its slides to the transcriber's key frame detector.
     (f"{UI}/src/routes/constants.js", "integ_plumbing"),

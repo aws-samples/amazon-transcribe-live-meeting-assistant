@@ -45,6 +45,9 @@ if [ -z "$4" ]; then
 else
     export AWS_REGION="$4"
 fi
+# SAM CLI and boto3 read AWS_DEFAULT_REGION (or the profile), not AWS_REGION,
+# so pin both to the target Region for every tool this script runs.
+export AWS_DEFAULT_REGION="$AWS_REGION"
 
 TEMPLATE_DIR=$(cd "$(dirname "$0")" && pwd)
 export TEMPLATE_FILE="$TEMPLATE_DIR/lma-ai-stack.yaml"
