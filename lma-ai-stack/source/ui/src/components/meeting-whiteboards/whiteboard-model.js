@@ -171,12 +171,11 @@ export const mermaidProblem = (text) => {
     const masked = labelled ? line.replace(LABEL, (label) => ' '.repeat(label.length)) : line;
     const parts = [];
     let start = 0;
-    [...masked].forEach((character, index) => {
-      if (character === ';') {
-        parts.push(line.slice(start, index));
-        start = index + 1;
-      }
-    });
+    // UTF-16 indices, as slice takes them.
+    for (let index = masked.indexOf(';'); index >= 0; index = masked.indexOf(';', index + 1)) {
+      parts.push(line.slice(start, index));
+      start = index + 1;
+    }
     parts.push(line.slice(start));
     return parts.map((part) => part.trim()).filter(Boolean);
   });

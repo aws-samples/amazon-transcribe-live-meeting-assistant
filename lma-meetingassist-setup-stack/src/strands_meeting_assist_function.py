@@ -1927,8 +1927,8 @@ def create_whiteboard_tools(call_id: str, user_email: str, message_id: str = Non
             outcome = run()
             if isinstance(outcome, tuple):
                 board, result = outcome
-                # The whiteboard the change made, carried for a link to it from the
-                # chat; the meeting page's chat frame reads it from the step's ToolInput.
+                # The whiteboard the change made, carried in the step's ToolInput so
+                # that the chat can offer a link to it; nothing reads it yet.
                 result_step = {
                     'whiteboardId': board.get('WhiteboardId'),
                     'whiteboardTitle': board.get('Title'),

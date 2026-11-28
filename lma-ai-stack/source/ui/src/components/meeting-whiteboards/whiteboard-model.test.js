@@ -107,6 +107,7 @@ describe('checks before sending', () => {
     expect(mermaidProblem('flowchart TD\n  a-->b; style a fill:url(x)')).toMatch(/fetch/);
     expect(mermaidProblem('flowchart TD\n  a-->b; click a call go()')).toMatch(/click/);
     expect(mermaidProblem('flowchart TD\n  a["Fix; link checker"] --> b[Retry; click again]')).toBeNull();
+    expect(mermaidProblem('flowchart TD\n  a["🚀 launch"] --> b; style b fill:url(x)')).toMatch(/style b fill/);
     expect(mermaidProblem('sequenceDiagram\n  Alice->>Bob: "x; click Bob call go()"')).toMatch(/click/);
     expect(mermaidProblem('timeline\n  2026 : (a; style x fill:url(y))')).toMatch(/fetch/);
   });
