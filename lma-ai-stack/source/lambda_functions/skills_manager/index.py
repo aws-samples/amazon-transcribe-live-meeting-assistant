@@ -165,6 +165,14 @@ def _file_sizes(skill: skill_formats.Skill) -> Dict[str, int]:
 
 
 def _put(skill_id: str, skill: skill_formats.Skill, who: str, existing: Optional[Dict]) -> None:
+    if (
+        skill_formats.METADATA_PLAYBOOK_FIELD in skill.metadata
+        and skill_id in skill_formats.RESERVED_PLAYBOOK_NAMES
+    ):
+        # A renamed or library-imported playbook keeps an id the VP form reads as its own choice.
+        raise skill_formats.SkillError(
+            f"A meeting playbook cannot be stored under the id {skill_id!r}."
+        )
     now = _now()
     item = {
         "AccountId": _account(),
@@ -485,7 +493,7 @@ def import_skill_library(event: Dict[str, Any]) -> Dict[str, Any]:
                 results.append({**result, "Action": "unchanged"})
                 continue
             _put(step.skill_id, step.skill, who, existing)
-        except ClientError as exc:
+        except (ClientError, skill_formats.SkillError) as exc:
             LOGGER.error("Skill %s of the library could not be stored", step.skill_id)
             results.append({**result, "Action": "failed", "Message": str(exc)})
             continue
@@ -529,4 +537,10 @@ def handler(event: Dict[str, Any], context: Any) -> Any:  # pylint: disable=unus
         raise Exception(f"Unauthorized: {exc}") from exc  # pylint: disable=broad-exception-raised
     if not SKILLS_TABLE:
         raise Exception("The skills table is not configured")  # pylint: disable=broad-exception-raised
-    return OPERATIONS[field_name](event)
+    try:
+        return OPERATIONS[field_name](event)
+    except skill_formats.SkillError as exc:
+        # A refusal at the write itself (a playbook under a reserved id), as any other refusal.
+        if field_name in ("createSkill", "updateSkill", "importSkill"):
+            return _output(False, str(exc))
+        raise

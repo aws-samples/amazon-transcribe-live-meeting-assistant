@@ -118,3 +118,24 @@ def test_a_playbook_may_not_take_a_name_the_vp_form_uses_for_its_own_choices(nam
     text = PLAYBOOK_MD.replace("name: launch-review", f"name: {name}")
     with pytest.raises(sf.SkillError, match="cannot be named"):
         sf.parse_skill_file("SKILL.md", text.encode())
+
+
+def test_a_skill_stored_as_none_cannot_become_a_playbook(monkeypatch):
+    """Its id would read as the Virtual Participant's "no playbook"."""
+    import test_skills_manager as harness  # pylint: disable=import-outside-toplevel
+
+    fake = harness._Table()  # pylint: disable=protected-access
+    monkeypatch.setattr(harness.index, "DYNAMODB", harness.mock.Mock(Table=lambda _name: fake))
+    monkeypatch.setattr(harness.index, "SKILLS_TABLE", "skills")
+    monkeypatch.setattr(harness.index, "ACCOUNT_ID", "111122223333")
+    created = harness.call("createSkill", input={**harness.SKILL, "Name": "none", "Metadata": "{}"})
+    assert created["Success"] and created["SkillId"] == "none"
+    playbook = json.dumps({"playbook": {"guidance": {"checks": ["clarify"]}}})
+    updated = harness.call(
+        "updateSkill",
+        skillId="none",
+        input={**harness.SKILL, "Name": "none-a", "Metadata": playbook},
+    )
+    assert (
+        updated["Success"] is False and "cannot be stored under the id 'none'" in updated["Message"]
+    )

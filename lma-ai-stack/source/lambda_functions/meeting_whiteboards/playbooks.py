@@ -377,6 +377,7 @@ def _create_boards(
     display_name: str,
     settings: board_rules.Settings,
     notes: List[str],
+    own: Optional[set] = None,
 ) -> List[Dict[str, Any]]:
     """The playbook's whiteboards, made or found: one of the same title and template is reused."""
     existing = wb.read_boards(call_id)
@@ -392,14 +393,15 @@ def _create_boards(
             None,
         )
         if same is not None:
-            made.append(
-                {
-                    "WhiteboardId": same["WhiteboardId"],
-                    "Title": board["title"],
-                    "Template": board["template"],
-                    "Reused": True,
-                }
-            )
+            entry = {
+                "WhiteboardId": same["WhiteboardId"],
+                "Title": board["title"],
+                "Template": board["template"],
+            }
+            # One this playbook made on an earlier apply stays its own.
+            if str(same["WhiteboardId"]) not in (own or set()):
+                entry["Reused"] = True
+            made.append(entry)
             continue
         if count >= settings.max_whiteboards:
             notes.append(
@@ -612,7 +614,12 @@ def apply(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict[str, Any]:
     board_settings = board_rules.Settings.from_raw(whiteboard_settings_raw())
     guidance = guidance_settings()
     limits = deployment_limits(guidance, board_settings)
-    boards = _create_boards(call_id, playbook, display_name, board_settings, notes)
+    own = {
+        str(b.get("WhiteboardId"))
+        for b in ((applied or {}).get("Whiteboards") or [])
+        if not b.get("Reused") and (applied or {}).get("SkillId") == skill_id
+    }
+    boards = _create_boards(call_id, playbook, display_name, board_settings, notes, own)
 
     switches: Dict[str, Optional[bool]] = {
         # Off unless something below turns it on: a switch the previous playbook
@@ -622,16 +629,26 @@ def apply(caller: Mapping[str, Any], data: Mapping[str, Any]) -> Dict[str, Any]:
     }
     checks = (playbook.get("guidance") or {}).get("checks") or []
     if checks:
-        if limits["guidanceAvailable"]:
-            switches["GuidanceEnabled"] = True
-        else:
-            notes.append("Live guidance is turned off for this deployment, so no check runs.")
-        for check, flag in (("fact_check", "factChecksEnabled"), ("lookup", "lookupsEnabled")):
+        running = [
+            c
+            for c in checks
+            if c not in playbook_rules.RESEARCH_CHECKS or limits[playbook_rules.RESEARCH_CHECKS[c]]
+        ]
+        for check, flag in playbook_rules.RESEARCH_CHECKS.items():
             if check in checks and not limits[flag]:
                 notes.append(
                     f"{playbook_rules.GUIDANCE_CHECKS[check]} are turned off for this "
                     "deployment, so they do not run."
                 )
+        if not limits["guidanceAvailable"]:
+            notes.append("Live guidance is turned off for this deployment, so no check runs.")
+        elif running:
+            switches["GuidanceEnabled"] = True
+        else:
+            # Every check it names is off here: live guidance would only bill runs.
+            notes.append(
+                "None of its checks can run in this deployment, so live guidance is left as it was."
+            )
     if any(b.get("assistantUpdates") for b in playbook.get("whiteboards") or []):
         if limits["whiteboardUpdatesAvailable"]:
             switches["WhiteboardsEnabled"] = True

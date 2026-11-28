@@ -480,3 +480,24 @@ def test_a_guidance_part_whose_checks_are_all_unknown_leaves_live_guidance_alone
     applied = apply(SkillId="odd")
     assert "Guidance" not in applied["Playbook"]
     assert applied["GuidanceEnabled"] is True
+
+
+def test_reapplying_the_current_playbook_keeps_its_whiteboards_its_own(world) -> None:
+    apply(SkillId="retrospective")
+    again = apply(SkillId="retrospective")
+    assert [b.get("Reused") for b in again["Playbook"]["Whiteboards"]] == [None]
+    apply(SkillId=None, DeleteWhiteboards=True)
+    assert boards() == []
+
+
+def test_a_playbook_whose_only_checks_are_off_here_leaves_live_guidance_alone(world) -> None:
+    world["table"].skills["research"] = skill(
+        "research",
+        {
+            "guidance": {"checks": ["fact_check", "lookup"]},
+            "quickActions": [{"label": "a", "prompt": "b"}],
+        },
+    )
+    applied = apply(SkillId="research")
+    assert applied["GuidanceEnabled"] is False
+    assert any("None of its checks can run" in n for n in applied["Playbook"]["Notes"])

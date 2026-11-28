@@ -256,8 +256,11 @@ give them. A model the price table does not list is shown as not priced.
 With Claude Haiku 5.5 and the shipped settings, the Sprint planning playbook is
 estimated at about $0.06 per meeting-hour and under $0.20 for a meeting;
 with fact checks or lookups on, a playbook that names them adds about $0.02 at
-most. These are estimates, not measurements of a recorded meeting; a quiet
-meeting runs less often, and the meeting's own cost estimate shows what it used.
+most. These are estimates, not measurements; a quiet meeting runs less often,
+and the meeting's own cost estimate shows what it used. For scale, one measured
+case: a 4.6-minute scripted sprint planning meeting replayed at real time with
+the Sprint planning playbook, on Claude Haiku 5.5, showed about $0.005 in its
+cost estimate for its live guidance and whiteboard runs together.
 
 ## Who can see and choose playbooks
 
