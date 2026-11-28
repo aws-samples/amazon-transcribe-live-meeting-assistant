@@ -49,6 +49,10 @@ LOAD_SKILL = "load_skill"
 READ_SKILL_FILE = "read_skill_file"
 TOOL_NAMES = (LOAD_SKILL, READ_SKILL_FILE)
 
+#: The SourceFormat of a skill shipped with LMA (the configuration seeder's
+#: skill_seeder.SOURCE_SHIPPED).
+SOURCE_SHIPPED = "shipped"
+
 
 @dataclass(frozen=True)
 class SkillSummary:
@@ -59,6 +63,7 @@ class SkillSummary:
     description: str
     display_name: str = ""
     updated_at: str = ""
+    source_format: str = ""
 
 
 _catalog: List[SkillSummary] = []
@@ -99,13 +104,14 @@ def load_catalog(table: Any = None, now: Optional[float] = None) -> List[SkillSu
             "KeyConditionExpression": "AccountId = :account",
             "ExpressionAttributeValues": {":account": AWS_ACCOUNT_ID},
             # Every name aliased, so none can collide with a DynamoDB reserved word.
-            "ProjectionExpression": "#i, #n, #d, #dn, #u",
+            "ProjectionExpression": "#i, #n, #d, #dn, #u, #s",
             "ExpressionAttributeNames": {
                 "#i": "SkillId",
                 "#n": "Name",
                 "#d": "Description",
                 "#dn": "DisplayName",
                 "#u": "UpdatedAt",
+                "#s": "SourceFormat",
             },
         }
         items: List[Dict[str, Any]] = []
@@ -126,6 +132,7 @@ def load_catalog(table: Any = None, now: Optional[float] = None) -> List[SkillSu
                 description=str(i.get("Description") or ""),
                 display_name=str(i.get("DisplayName") or ""),
                 updated_at=str(i.get("UpdatedAt") or ""),
+                source_format=str(i.get("SourceFormat") or ""),
             )
             for i in items
             if i.get("SkillId")
@@ -135,6 +142,18 @@ def load_catalog(table: Any = None, now: Optional[float] = None) -> List[SkillSu
     _catalog[:] = found
     _catalog_at = moment
     return list(found)
+
+
+def in_meeting_default(skill: SkillSummary) -> Optional[bool]:
+    """The skill's own default for Participant use, or None to follow the request's.
+
+    A skill shipped with LMA (``SourceFormat: shipped``, seeded at deploy time;
+    see docs/meeting-assistant-skills.md#default-skills) is not offered for
+    Participant use until the profile allows it (``inMeetingRequests: true``),
+    whatever the Participant use setting's default. Every other skill follows
+    that setting.
+    """
+    return False if skill.source_format == SOURCE_SHIPPED else None
 
 
 def load_body(summary: SkillSummary, table: Any = None) -> Optional[Dict[str, Any]]:

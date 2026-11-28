@@ -73,6 +73,7 @@ const SOURCE_LABELS = {
   'agent-skills': 'SKILL.md',
   'amazon-quick': 'Amazon Quick',
   library: 'Skill library',
+  shipped: 'Shipped with LMA',
 };
 
 export const SkillImportResult = ({ result }) => (

@@ -95,6 +95,12 @@ describe('the Skills page', () => {
     expect(screen.getByText('Amazon Quick')).toBeTruthy();
   });
 
+  it('shows a default skill as shipped with LMA', async () => {
+    respond('listSkills', [{ ...SKILL, SkillId: 'catch-me-up', Name: 'catch-me-up', SourceFormat: 'shipped' }]);
+    render(<SkillsPage />);
+    expect(await screen.findByText('Shipped with LMA')).toBeTruthy();
+  });
+
   it('offers a user outside the Admin group no change, only export', async () => {
     groups.isAdmin = false;
     render(<SkillsPage />);

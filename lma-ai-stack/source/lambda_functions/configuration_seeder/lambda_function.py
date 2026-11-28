@@ -67,6 +67,11 @@ revision history. A profile this run creates starts at revision 1, holding
 everything carried across; a profile that exists with no history yet has its
 state as it stands recorded. The outcome is reported as ``RevisionHistory``.
 
+Given the skills table, it also seeds the meeting assistant's default skills
+(``default_skills/``), never replacing one an Admin edited and never
+re-creating one an Admin deleted; see ``skill_seeder``. Reported as
+``DefaultSkills``.
+
 CloudFormation re-invokes this on UPDATE only when one of the custom resource's
 properties changes, so the template passes a hash of the shipped content *and*
 of this handler. A property that never changes would mean a resource that is
@@ -86,6 +91,7 @@ from typing import Any, Callable, Dict, Mapping, NamedTuple, Optional, Tuple
 
 import boto3
 import cfnresponse  # vendored beside this handler; see cfnresponse.py
+import skill_seeder
 from botocore.exceptions import ClientError
 
 # pylint: disable=import-error
@@ -1078,6 +1084,25 @@ def retire_shipped_prompts(store: ConfigurationStore) -> str:
     return ",".join(f"{name}={outcome}" for name, outcome in sorted(outcomes.items())) or "none"
 
 
+def seed_default_skills(properties: Mapping[str, Any], table: Any = None) -> str:
+    """The meeting assistant's default skills, seeded into the skills table; see skill_seeder.
+
+    Never fails the deployment: the skills are examples, and a run that cannot
+    write them now reports "deferred" and the next run that re-seeds tries
+    again. "not-configured" when the template names no skills table.
+    """
+    table_name = properties.get("SkillsTableName") or ""
+    account_id = properties.get("SkillsAccountId") or ""
+    if not table_name or not account_id:
+        return "not-configured"
+    try:
+        chosen = table if table is not None else boto3.resource("dynamodb").Table(table_name)
+        return skill_seeder.seed_default_skills(chosen, account_id)
+    except Exception:  # noqa: BLE001 -- see the docstring; never fail the deploy for this
+        LOGGER.warning("could not seed the default skills now", exc_info=True)
+        return "deferred"
+
+
 def handler(event: Dict[str, Any], context: Any) -> None:
     """CloudFormation custom resource entry point."""
     LOGGER.info("seeding the configuration table: %s", json.dumps(event, default=str))
@@ -1143,6 +1168,7 @@ def handler(event: Dict[str, Any], context: Any) -> None:
             # writes them. Nothing reads a Managed profile until it is activated.
             LOGGER.warning("could not write the Managed profiles now", exc_info=True)
             outcome["ManagedProfiles"] = "deferred"
+        outcome["DefaultSkills"] = seed_default_skills(properties)
         LOGGER.info("seeded the configuration table: %s", outcome)
         cfnresponse.send(event, context, cfnresponse.SUCCESS, outcome, physical_id)
     except Exception as error:  # noqa: BLE001 -- must answer CloudFormation either way

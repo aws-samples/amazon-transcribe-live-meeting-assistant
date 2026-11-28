@@ -133,6 +133,20 @@ describe('Tool selection', () => {
     expect(stored(onChange)).toEqual({ alpha: { inMeetingRequests: false } });
   });
 
+  it('says a shipped skill is not allowed for participants until it is allowed here', async () => {
+    const { onChange } = renderField({
+      skills: [...SKILLS, { SkillId: 'follow-up-email', Name: 'follow-up-email', SourceFormat: 'shipped' }],
+    });
+    await screen.findByText('follow-up-email');
+    const shipped = createWrapper(screen.getByLabelText('Participant use: follow-up-email').closest('td')).findSelect();
+    expect(shipped.findTrigger().getElement().textContent).toBe('Not allowed until allowed here (shipped skill)');
+    const other = createWrapper(screen.getByLabelText('Participant use: incident-notes').closest('td')).findSelect();
+    expect(other.findTrigger().getElement().textContent).toBe('Follow the Participant use setting');
+    shipped.openDropdown();
+    shipped.selectOptionByValue('true', { expandToViewport: true });
+    expect(stored(onChange, 'skills')).toEqual({ 'follow-up-email': { inMeetingRequests: true } });
+  });
+
   it('a read-only profile offers no change', async () => {
     renderField({ readOnly: true });
     await screen.findByText('Alpha');
