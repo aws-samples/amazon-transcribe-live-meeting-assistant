@@ -269,6 +269,27 @@ def test_an_admin_skill_holding_the_shipped_text_is_not_adopted():
     assert (LEDGER, "alpha") not in table.items
 
 
+def test_a_replacement_whose_ledger_write_failed_is_recorded_by_the_next_run():
+    table = FakeSkillsTable()
+    _seed(table, SHIPPED)
+    real_put = table.put_item
+    failed = []
+
+    def ledger_write_fails_once(**request):
+        if request["Item"]["AccountId"] == LEDGER and not failed:
+            failed.append(True)
+            raise ClientError({"Error": {"Code": "ThrottlingException"}}, "PutItem")
+        return real_put(**request)
+
+    table.put_item = ledger_write_fails_once
+    newer = [_default("alpha", "Do the new thing.\n")]
+    assert _seed(table, newer) == {"alpha": "deferred"}
+    assert table.skill("alpha")["Instructions"] == "Do the new thing.\n"
+    assert _seed(table, newer) == {"alpha": "adopted"}
+    # Tracked again, so the release after that still updates it.
+    assert _seed(table, [_default("alpha", "Newer still.\n")]) == {"alpha": "updated"}
+
+
 def test_a_default_skill_whose_id_is_taken_gets_a_numbered_id():
     table = FakeSkillsTable()
     table.create("alpha", "renamed-by-an-admin")

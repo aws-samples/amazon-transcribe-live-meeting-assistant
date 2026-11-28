@@ -276,7 +276,13 @@ class DefaultSkillSeeder:
         # the shipped source: an import over it, even of the same text, makes it
         # the Admin's, with the import's source.
         ours = current.get("SourceFormat") == SOURCE_SHIPPED
-        if not ours or content_digest(current) != entry.get("ContentDigest"):
+        held = content_digest(current)
+        if ours and held == shipped and held != entry.get("ContentDigest"):
+            # It already holds this release's text: a run that replaced it and
+            # failed before its ledger write. Recorded now, as on the create path.
+            self._record(skill, skill_id, shipped)
+            return "adopted"
+        if not ours or held != entry.get("ContentDigest"):
             return "edited"
         if entry.get("ContentDigest") == shipped:
             return "unchanged"
