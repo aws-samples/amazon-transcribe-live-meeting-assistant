@@ -119,6 +119,8 @@ INSTRUCTIONS = (
     "(a Gantt chart: gantt; components and how they connect: architecture; options: "
     "comparison; stories: user_stories; RACI: raci; risks: risks; decisions: decision_log; "
     "a retrospective: retrospective), and fill its panels in the same call."
+    "\n- To fill or check a whiteboard from what was said, read the whole meeting "
+    "(current_meeting_transcript with mode \"full\"), not only its last lines."
     "\n- Write what was said: do not invent owners, dates or numbers. Keep panels short."
     "\n- After a change, say in one sentence what you put where (the whiteboard and panel), "
     "rather than repeating the content."
