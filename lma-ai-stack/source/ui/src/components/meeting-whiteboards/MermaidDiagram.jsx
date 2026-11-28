@@ -4,7 +4,7 @@
  * See the LICENSE file in the project root for full license information.
  */
 /* eslint-disable react/prop-types */
-import React, { useEffect, useId, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { Box } from '@cloudscape-design/components';
 import { ConsoleLogger } from 'aws-amplify/utils';
 
@@ -63,11 +63,22 @@ const Source = ({ text, note }) => (
   </div>
 );
 
+/**
+ * The source as it is drawn: a Gantt chart gets the width it has on the page
+ * (LMA's own directive, added after the source was checked, which may hold none).
+ */
+export const sourceToDraw = (source, width) => {
+  if (!/^\s*(%%[^\n]*\n\s*)*gantt\b/.test(source)) return source;
+  const useWidth = Math.max(480, Math.round(width || 0) || 960);
+  return `%%{init: {"gantt": {"useWidth": ${useWidth}, "useMaxWidth": false, "barHeight": 24, "fontSize": 13, "sectionFontSize": 13}}}%%\n${source}`;
+};
+
 /** A diagram panel's content, drawn; its source, when it cannot be drawn. */
 const MermaidDiagram = ({ text }) => {
   const id = `wb-diagram-${useId().replace(/[^A-Za-z0-9_-]/g, '')}`;
   const [svg, setSvg] = useState(null);
   const [failed, setFailed] = useState(false);
+  const boxRef = useRef(null);
   const source = (text || '').trim();
   const problem = source ? mermaidProblem(source) : null;
 
@@ -76,8 +87,9 @@ const MermaidDiagram = ({ text }) => {
     setSvg(null);
     setFailed(false);
     if (!source || problem) return undefined;
+    const width = boxRef.current?.parentElement?.clientWidth;
     loadMermaid()
-      .then((renderer) => renderer.render(id, source))
+      .then((renderer) => renderer.render(id, sourceToDraw(source, width)))
       .then((sanitized) => {
         if (!current) return;
         if (sanitized) setSvg(sanitized);
@@ -99,7 +111,11 @@ const MermaidDiagram = ({ text }) => {
     return <Source text={source} note={problem || 'This diagram could not be drawn; its source is shown.'} />;
   }
   if (!svg) {
-    return <Box color="text-status-inactive">Drawing the diagram…</Box>;
+    return (
+      <div ref={boxRef}>
+        <Box color="text-status-inactive">Drawing the diagram…</Box>
+      </div>
+    );
   }
   // Mermaid's own output in strict mode, sanitized with DOMPurify (loadMermaid).
   const markup = { __html: svg };

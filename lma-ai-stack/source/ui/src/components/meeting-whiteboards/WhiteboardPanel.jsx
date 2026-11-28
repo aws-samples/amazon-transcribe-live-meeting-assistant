@@ -145,7 +145,9 @@ const WhiteboardPanel = ({
 
   return (
     <div
-      className={`whiteboard-panel${highlighted ? ' whiteboard-panel-highlighted' : ''}`}
+      className={`whiteboard-panel${isDiagram ? ' whiteboard-panel-wide' : ''}${
+        highlighted ? ' whiteboard-panel-highlighted' : ''
+      }`}
       data-panel-id={panel.PanelId}
     >
       <Container

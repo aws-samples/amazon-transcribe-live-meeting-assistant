@@ -79,10 +79,13 @@ function setAskContext(context) {
         return;
     }
     askContextLabel.textContent = context.label;
-    askContextExcerpt.textContent = context.text;
+    // The excerpt leaves out the first line when the label already says it.
+    const [firstLine, ...rest] = context.text.split('\n');
+    const labelText = context.label.includes(': ') ? context.label.split(': ').slice(1).join(': ') : context.label;
+    askContextExcerpt.textContent = (firstLine.trim() === labelText.trim() ? rest.join(' ') : context.text).trim();
     askContext.hidden = false;
     messageInput.placeholder = context.question
-        ? 'Press Send to ask what it means, or type your own question'
+        ? 'Send to ask, or type a question'
         : 'Ask about this...';
     messageInput.focus();
 }

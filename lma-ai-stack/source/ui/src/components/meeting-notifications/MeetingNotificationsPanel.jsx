@@ -34,6 +34,7 @@ import {
   requestMeetingAction,
   useMeetingActionAvailable,
 } from '../common/meeting-actions';
+import { FROM_GUIDANCE } from '../meeting-whiteboards/pin-to-whiteboard';
 import './MeetingNotificationsPanel.css';
 
 const logger = new ConsoleLogger('MeetingNotificationsPanel');
@@ -87,6 +88,7 @@ const NotificationCard = ({ notification, dismissed, onDismiss, onRestore, clien
     requestMeetingAction(notification.CallId, ADD_TO_WHITEBOARD, {
       title,
       text: notification.Body || title,
+      panelTitle: FROM_GUIDANCE,
     });
   const run = async (action) => {
     setStatus(null);
@@ -130,12 +132,12 @@ const NotificationCard = ({ notification, dismissed, onDismiss, onRestore, clien
         )}
         <div className="meeting-notification-buttons">
           {canAsk && (
-            <Button variant="normal" iconName="contact" onClick={ask}>
+            <Button variant="inline-link" iconName="contact" onClick={ask}>
               Ask the assistant
             </Button>
           )}
           {canPin && (
-            <Button variant="normal" iconName="add-plus" onClick={pin}>
+            <Button variant="inline-link" iconName="add-plus" onClick={pin}>
               Add to whiteboard
             </Button>
           )}

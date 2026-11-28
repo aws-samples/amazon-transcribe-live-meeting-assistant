@@ -11,7 +11,6 @@ import {
   Box,
   Button,
   ButtonDropdown,
-  ColumnLayout,
   Container,
   FormField,
   Header,
@@ -288,7 +287,7 @@ const WhiteboardView = ({ board, readOnly, whiteboards, onAskAboutPanel = undefi
         {panels.length === 0 ? (
           <Box color="text-status-inactive">This whiteboard has no panels.</Box>
         ) : (
-          <ColumnLayout columns={2}>
+          <div className="whiteboard-panels">
             {panels.map((panel, index) => (
               <WhiteboardPanel
                 key={panel.PanelId}
@@ -305,7 +304,7 @@ const WhiteboardView = ({ board, readOnly, whiteboards, onAskAboutPanel = undefi
                 highlighted={highlightPanelId === panel.PanelId}
               />
             ))}
-          </ColumnLayout>
+          </div>
         )}
       </SpaceBetween>
 

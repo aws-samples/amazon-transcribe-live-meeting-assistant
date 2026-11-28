@@ -19,6 +19,17 @@
   overflow-wrap: anywhere;
 }
 
+/* Two columns of panels where there is room; a diagram takes the whole row. */
+.whiteboard-panels {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 20px;
+}
+
+.whiteboard-panel-wide {
+  grid-column: 1 / -1;
+}
+
 /* A panel the page was asked to show, picked out for a moment. */
 .whiteboard-panel {
   border-radius: 16px;
@@ -33,7 +44,7 @@
   border: 1px solid #c6c6cd;
   border-radius: 8px;
   padding: 8px 12px;
-  max-height: 240px;
+  max-height: 160px;
   overflow-y: auto;
 }
 

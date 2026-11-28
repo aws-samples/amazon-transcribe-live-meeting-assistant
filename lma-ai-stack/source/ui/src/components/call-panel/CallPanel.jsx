@@ -71,7 +71,7 @@ import ChecklistPanel from './ChecklistPanel';
 import LiveGuidancePanel from './LiveGuidancePanel';
 import WhiteboardsTab, { useMeetingWhiteboards } from '../meeting-whiteboards';
 import PinToWhiteboardModal from '../meeting-whiteboards/PinToWhiteboardModal';
-import { titleFrom } from '../meeting-whiteboards/pin-to-whiteboard';
+import { PINNED_ANSWERS } from '../meeting-whiteboards/pin-to-whiteboard';
 import {
   ADD_TO_WHITEBOARD,
   ASK_ASSISTANT,
@@ -2184,13 +2184,17 @@ export const CallPanel = ({
   useMeetingActions(ownerCallId, {
     [ASK_ASSISTANT]: assistantEnabled ? askAssistant : null,
     [ADD_TO_WHITEBOARD]: canChangeWhiteboards
-      ? (detail) => setPinRequest({ ...detail, heading: 'Add to whiteboard' })
+      ? ({ title, text, panelTitle }) =>
+          setPinRequest({
+            text: title && text !== title ? `**${title}**\n\n${text}` : text,
+            title: panelTitle || title,
+            heading: 'Add to whiteboard',
+          })
       : null,
     [OPEN_WHITEBOARD]: participantMode ? null : openWhiteboard,
   });
   const onPinAnswer = useCallback(
-    ({ text, question }) =>
-      setPinRequest({ text, title: titleFrom(question || text), heading: 'Pin the answer to a whiteboard' }),
+    ({ text }) => setPinRequest({ text, title: PINNED_ANSWERS, heading: 'Pin the answer to a whiteboard' }),
     [],
   );
   const onAskAboutPanel = useCallback(

@@ -13,6 +13,9 @@
 import { KIND_MARKDOWN, LIMITS, SOURCE_ASSISTANT, panelInputs, panelProblem } from './whiteboard-model';
 
 export const NEW_WHITEBOARD = '__new_whiteboard__';
+/** The panel pinned answers gather in, and guidance added from the drawer. */
+export const PINNED_ANSWERS = 'Pinned answers';
+export const FROM_GUIDANCE = 'From guidance';
 export const NEW_PANEL = '__new_panel__';
 
 /** A short title from the first line of a text: no Markdown marks, at most `limit` characters. */

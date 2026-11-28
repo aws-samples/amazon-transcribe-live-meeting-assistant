@@ -88,7 +88,11 @@ describe('a guidance card', () => {
       question: GUIDANCE_QUESTION,
     });
     fireEvent.click(screen.getByRole('button', { name: 'Add to whiteboard' }));
-    expect(pin).toHaveBeenCalledWith({ title: 'Ask about the budget', text: 'Nobody named a number.' });
+    expect(pin).toHaveBeenCalledWith({
+      title: 'Ask about the budget',
+      text: 'Nobody named a number.',
+      panelTitle: 'From guidance',
+    });
   });
 
   it('shows the links only while the page offers them, and only on guidance', async () => {
