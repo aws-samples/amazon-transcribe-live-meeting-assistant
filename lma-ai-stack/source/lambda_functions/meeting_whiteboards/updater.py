@@ -238,12 +238,11 @@ def whiteboards_block(boards: Sequence[Mapping[str, Any]]) -> str:
     """The whiteboards the run updates, as JSON: each panel marked yours or a user's."""
     shown = []
     for board in boards:
-        template = rules.TEMPLATES.get(str(board.get("Template")), {})
         shown.append(
             {
                 "whiteboardId": board.get("WhiteboardId"),
                 "title": board.get("Title"),
-                "purpose": template.get("description", ""),
+                "purpose": rules.template_purpose(board.get("Template")),
                 "instructions": board.get("Instructions") or "",
                 "panels": [
                     {

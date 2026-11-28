@@ -49,6 +49,12 @@ MEETING_WAIT_SECONDS = 90
 #: A little over the shipped Seconds between runs, so a wave's first segment queues a run.
 WAVE_GAP_SECONDS = 200
 RUN_WAIT_SECONDS = 300
+#: A Gantt chart in the subset a diagram panel holds.
+GANTT_CHART = (
+    "gantt\n  dateFormat YYYY-MM-DD\n  section Payments\n"
+    "  Refund API (Priya) :api, 2026-12-01, 5d\n  Load test (Sam) :after api, 2d\n"
+    "  Launch :milestone, launch, 2026-12-10, 0d"
+)
 USER_DECISION = (
     "- Launch moves to the second week of March (set by the integration test)"
 )
@@ -447,6 +453,46 @@ def run_probe(stack_name: str, region: str | None = None) -> dict:  # noqa: C901
             },
         )
         observed["manual"] = edited["updateMeetingWhiteboard"]
+
+        # A project plan: the gantt template's panels, a Gantt chart written into
+        # its Plan panel, and a style that fetches something refused.
+        plan = probe.gql(
+            CREATE,
+            {"i": {"CallId": control.call_id, "Template": "gantt"}},
+        )["createMeetingWhiteboard"]
+        observed["gantt_created"] = plan
+        plan_panels = _panels(plan)
+        plan_panels[0]["Content"] = GANTT_CHART
+        observed["gantt_written"] = probe.gql(
+            UPDATE,
+            {
+                "i": {
+                    "CallId": control.call_id,
+                    "WhiteboardId": plan["WhiteboardId"],
+                    "BaseVersion": plan["Version"],
+                    "Panels": plan_panels,
+                }
+            },
+        )["updateMeetingWhiteboard"]
+        fetching = _panels(observed["gantt_written"])
+        fetching[0]["Content"] = GANTT_CHART + "\n  style api fill:url(https://example.com/x)"
+        try:
+            probe.gql(
+                UPDATE,
+                {
+                    "i": {
+                        "CallId": control.call_id,
+                        "WhiteboardId": plan["WhiteboardId"],
+                        "BaseVersion": observed["gantt_written"]["Version"],
+                        "Panels": fetching,
+                    }
+                },
+            )
+            observed["fetching_style_refused"] = False
+        except ProbeError as error:
+            observed["fetching_style_refused"] = "WhiteboardInvalid" in str(error) or (
+                "fetch" in str(error)
+            )
 
         for meeting in (assisted, control):
             meeting.send(waves[0], 0)

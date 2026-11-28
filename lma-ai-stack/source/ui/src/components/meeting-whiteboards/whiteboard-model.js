@@ -38,13 +38,48 @@ export const TEMPLATES = [
     label: 'Process diagram',
     description: 'A flowchart of the process or system being discussed, with notes.',
   },
+  {
+    name: 'architecture',
+    label: 'Architecture diagram',
+    description: 'The components discussed and how they connect, with their responsibilities and the design decisions.',
+  },
   { name: 'comparison', label: 'Comparison', description: 'The options being compared, with notes.' },
   { name: 'timeline', label: 'Timeline', description: 'Dates and milestones mentioned, as a timeline, with notes.' },
+  {
+    name: 'gantt',
+    label: 'Project plan (Gantt chart)',
+    description: 'The work agreed, with owners, dates and dependencies, as a Gantt chart.',
+  },
+  {
+    name: 'user_stories',
+    label: 'User stories',
+    description: 'The user stories discussed, each with its acceptance criteria.',
+  },
+  {
+    name: 'raci',
+    label: 'RACI matrix',
+    description: 'Who is Responsible, Accountable, Consulted and Informed for each piece of work.',
+  },
+  {
+    name: 'risks',
+    label: 'Risk register',
+    description: 'The risks raised, with their likelihood, impact, owner and mitigation.',
+  },
+  {
+    name: 'decision_log',
+    label: 'Decision log',
+    description: 'Each decision with its context, consequences and the alternatives considered.',
+  },
+  {
+    name: 'retrospective',
+    label: 'Retrospective',
+    description: 'What went well, what to improve, and the actions agreed.',
+  },
   { name: 'blank', label: 'Blank', description: 'One Markdown panel to start from.' },
 ];
 export const DEFAULT_TEMPLATE = 'decisions';
 
-export const MERMAID_TYPES = ['flowchart', 'graph', 'sequenceDiagram', 'timeline', 'mindmap'];
+export const MERMAID_TYPES = ['flowchart', 'graph', 'sequenceDiagram', 'timeline', 'mindmap', 'gantt'];
 
 const byCreation = (a, b) =>
   String(a.CreatedAt || '').localeCompare(String(b.CreatedAt || '')) ||
@@ -129,6 +164,9 @@ export const mermaidProblem = (text) => {
   }
   const lowered = String(text).toLowerCase();
   if (/javascript\s*:/.test(lowered) || /<\s*\/?\s*[a-z!]/.test(lowered)) return 'A diagram may not hold HTML.';
+  if (/url\s*\(/.test(lowered) || lowered.includes('@import')) {
+    return "A diagram's styles may not fetch anything (url( or @import).";
+  }
   return null;
 };
 

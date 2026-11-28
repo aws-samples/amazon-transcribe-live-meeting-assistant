@@ -13,6 +13,7 @@ import {
   lineDiff,
   mergeWhiteboard,
   mermaidProblem,
+  TEMPLATES,
   panelInputs,
   panelProblem,
   withPanelAdded,
@@ -87,6 +88,30 @@ describe('checks before sending', () => {
     expect(mermaidProblem('%%{init: {}}%%\nflowchart TD\n a-->b')).toMatch(/directives/);
     expect(mermaidProblem('flowchart TD\n click a call x()')).toMatch(/click/);
     expect(mermaidProblem('flowchart TD\n a["<b>x</b>"]')).toMatch(/HTML/);
+    expect(
+      mermaidProblem(
+        'gantt\n  dateFormat YYYY-MM-DD\n  section Build\n  API (Priya) :api, 2026-12-01, 5d\n  Tests :after api, 2d',
+      ),
+    ).toBeNull();
+    expect(mermaidProblem('gantt\n  Task :t1, 2026-12-01, 1d\n  click t1 href "https://example.com"')).toMatch(/click/);
+    expect(mermaidProblem('flowchart TD\n a-->b\n style a fill:url(https://example.com/x.svg)')).toMatch(/fetch/);
+  });
+
+  it('offers the templates the server has, in its order', () => {
+    expect(TEMPLATES.map((t) => t.name)).toEqual([
+      'decisions',
+      'process',
+      'architecture',
+      'comparison',
+      'timeline',
+      'gantt',
+      'user_stories',
+      'raci',
+      'risks',
+      'decision_log',
+      'retrospective',
+      'blank',
+    ]);
   });
 
   it('checks titles and lengths', () => {
