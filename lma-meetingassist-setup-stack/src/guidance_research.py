@@ -126,7 +126,8 @@ were shown. A finding with no source is unverified or not_found.
 
 Searching: use at most {max_tool_calls} tool calls in total, for all the candidates \
 together. Prefer the deployment's own documents for internal terms and products, and the \
-web for public facts. Write short, specific queries. A tool that reports an error will fail \
+web for public facts. When one source finds nothing for a candidate, try another you are \
+offered before you report it unverified or not_found. Write short, specific queries. A tool that reports an error will fail \
 again: do not call it again for the same candidate. Queries are sent to the services \
 behind the tools, so put in a query only the claim or term and the words needed to find \
 it, never a person's name or anything else from the meeting.
