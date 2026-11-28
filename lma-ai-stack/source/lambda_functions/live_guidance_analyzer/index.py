@@ -1083,9 +1083,10 @@ def research_run(  # pylint: disable=too-many-locals,too-many-arguments
 
     Every candidate in the batch is recorded as checked whatever happens, so a
     candidate that failed is not researched again and again. Nothing is
-    published once the meeting has ended, its transcript is deleted or live
-    guidance was turned off for it meanwhile, nor for a candidate whose earlier
-    item was dismissed.
+    published once the meeting's transcript is deleted or live guidance was
+    turned off for it meanwhile, nor for a candidate whose earlier item was
+    dismissed; a batch under way at the meeting's end, and the run at the end,
+    still publish.
     """
     now = time.time()
     lease = row["LeaseUntil"]
