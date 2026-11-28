@@ -2345,8 +2345,8 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W11
-            reason: "CodeBuild integration requires broad CloudWatch Logs access for log group creation and management"
-    # checkov:skip=CKV_AWS_111: "CodeBuild integration requires broad CloudWatch Logs access for log group creation and management"
+            reason: "Wildcards are the EventBridge rule and Lambda permission resources the custom resource helper poller creates and names at run time"
+    # checkov:skip=CKV_AWS_111: "Wildcards are the EventBridge rule and Lambda permission resources the custom resource helper poller creates and names at run time"
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"

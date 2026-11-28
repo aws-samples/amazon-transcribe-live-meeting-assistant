@@ -1948,8 +1948,6 @@ Resources:
     Metadata:
       cdk_nag:
         rules_to_suppress:
-          - id: AwsSolutions-IAM4
-            reason: 'AWS-managed policies are used intentionally for standard Lambda execution; scope is narrow'
           - id: AwsSolutions-IAM5
             reason: 'Wildcards scoped by service/resource or PassedToService condition; standard CFN least-privilege pattern'
     Properties:
@@ -2132,11 +2130,6 @@ Resources:
 
   UpdateLMASettingsFunctionRole:
     Type: "AWS::IAM::Role"
-    Metadata:
-      cdk_nag:
-        rules_to_suppress:
-          - id: AwsSolutions-IAM4
-            reason: 'AWS-managed policies are used intentionally for standard Lambda execution; scope is narrow'
     Properties:
       AssumeRolePolicyDocument:
         Statement:
@@ -2274,8 +2267,6 @@ Resources:
     Metadata:
       cdk_nag:
         rules_to_suppress:
-          - id: AwsSolutions-IAM4
-            reason: 'AWS-managed policies are used intentionally for standard Lambda execution; scope is narrow'
           - id: AwsSolutions-IAM5
             reason: 'Wildcards scoped by service/resource or PassedToService condition; standard CFN least-privilege pattern'
     Properties:
@@ -2770,8 +2761,6 @@ Resources:
     Metadata:
       cdk_nag:
         rules_to_suppress:
-          - id: AwsSolutions-IAM4
-            reason: 'AWS-managed policies are used intentionally for standard Lambda execution; scope is narrow'
           - id: AwsSolutions-L1
             reason: 'python3.12 is an actively supported Lambda runtime per AWS; upgrade to 3.13 is an availability/testing consideration'
     Condition: ShouldCreateRecordingBucket

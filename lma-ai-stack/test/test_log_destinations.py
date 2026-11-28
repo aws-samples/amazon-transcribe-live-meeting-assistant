@@ -575,7 +575,7 @@ def _grants(statement: dict, action: str) -> bool:
 def test_custom_resource_functions_are_found():
     """Guards the test below against passing because it collected nothing."""
     found = sum(len(_custom_resource_functions(_resources(path))) for path in DEPLOYED_TEMPLATES)
-    assert found >= 30, f"only {found} functions back a custom resource — collection stale?"
+    assert found >= 31, f"only {found} functions back a custom resource — collection stale?"
     assert "S3BucketCleanupFunction" in _custom_resource_functions(_resources("lma-main.yaml"))
 
 
