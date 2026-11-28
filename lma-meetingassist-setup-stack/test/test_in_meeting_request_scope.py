@@ -64,7 +64,16 @@ ALL_TOOLS = {
 # them, and a request made in the meeting is not, whatever inMeetingRequestTools
 # says, unless inMeetingContextAccess is "allowed" (test_meeting_preparation_tools.py).
 CONTEXT_TOOLS = {"get_meeting_context", "get_meeting_checklist"}
-PAGE_TOOLS = ALL_TOOLS | CONTEXT_TOOLS
+# The meeting's whiteboards: the meeting page's own chat only, for the people
+# who see them; never a request made in the meeting or a Participant's
+# (test_whiteboard_tools.py).
+WHITEBOARD_TOOLS = {
+    "list_meeting_whiteboards",
+    "get_meeting_whiteboard",
+    "create_meeting_whiteboard",
+    "update_meeting_whiteboard",
+}
+PAGE_TOOLS = ALL_TOOLS | CONTEXT_TOOLS | WHITEBOARD_TOOLS
 
 # The current meeting: its transcript, its agenda, its shared screen and the
 # attachments shared in its chat. Guests in the meeting may read the agenda of
@@ -190,6 +199,11 @@ def built(monkeypatch, configured):  # pylint: disable=unused-argument,redefined
         monkeypatch.setattr(
             handler_module, factory, lambda *_args, _name=name, **_kw: _named(_name)
         )
+    monkeypatch.setattr(
+        handler_module,
+        "create_whiteboard_tools",
+        lambda *_args, **_kw: [_named(name) for name in sorted(WHITEBOARD_TOOLS)],
+    )
 
     def run(event: dict) -> dict:
         constructed.clear()

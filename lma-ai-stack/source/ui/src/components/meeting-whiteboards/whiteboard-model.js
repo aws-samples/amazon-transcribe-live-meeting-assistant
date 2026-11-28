@@ -86,6 +86,8 @@ export const DEFAULT_TEMPLATE = 'decisions';
 export const MERMAID_TYPES = ['flowchart', 'graph', 'sequenceDiagram', 'timeline', 'mindmap', 'gantt'];
 /** The statements that carry CSS in the subset, by their first word, lowered (rules.STYLE_STATEMENTS). */
 const STYLE_STATEMENTS = ['style', 'classdef', 'linkstyle'];
+/** A label within a statement: quoted text, or a node's text in brackets (rules._LABEL). */
+const LABEL = /"[^"]*"|\[[^\]]*\]|\([^)]*\)|\{[^}]*\}/g;
 
 const byCreation = (a, b) =>
   String(a.CreatedAt || '').localeCompare(String(b.CreatedAt || '')) ||
@@ -162,7 +164,21 @@ export const mermaidProblem = (text) => {
     return 'A diagram may not hold Mermaid directives or front matter.';
   }
   // A line may hold several statements separated by ";".
-  const statements = meaningful.flatMap((line) => line.split(';').map((part) => part.trim())).filter(Boolean);
+  // A ";" in a label (quoted, or in a node's brackets) does not separate statements.
+  // Only a flowchart's brackets and quotes are node labels (rules._statements).
+  const labelled = ['flowchart', 'graph'].includes(first.split(/\s+/)[0]);
+  const statements = meaningful.flatMap((line) => {
+    const masked = labelled ? line.replace(LABEL, (label) => ' '.repeat(label.length)) : line;
+    const parts = [];
+    let start = 0;
+    // UTF-16 indices, as slice takes them.
+    for (let index = masked.indexOf(';'); index >= 0; index = masked.indexOf(';', index + 1)) {
+      parts.push(line.slice(start, index));
+      start = index + 1;
+    }
+    parts.push(line.slice(start));
+    return parts.map((part) => part.trim()).filter(Boolean);
+  });
   if (
     statements.some((statement) =>
       ['click', 'callback', 'link', 'links', 'href'].includes(statement.split(/\s+/)[0].toLowerCase()),

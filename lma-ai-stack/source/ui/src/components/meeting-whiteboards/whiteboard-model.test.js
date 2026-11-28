@@ -106,6 +106,10 @@ describe('checks before sending', () => {
     expect(mermaidProblem('flowchart TD\n a-->b\n linkStyle 0 stroke:url(#g)')).toMatch(/linkStyle 0/);
     expect(mermaidProblem('flowchart TD\n  a-->b; style a fill:url(x)')).toMatch(/fetch/);
     expect(mermaidProblem('flowchart TD\n  a-->b; click a call go()')).toMatch(/click/);
+    expect(mermaidProblem('flowchart TD\n  a["Fix; link checker"] --> b[Retry; click again]')).toBeNull();
+    expect(mermaidProblem('flowchart TD\n  a["🚀 launch"] --> b; style b fill:url(x)')).toMatch(/style b fill/);
+    expect(mermaidProblem('sequenceDiagram\n  Alice->>Bob: "x; click Bob call go()"')).toMatch(/click/);
+    expect(mermaidProblem('timeline\n  2026 : (a; style x fill:url(y))')).toMatch(/fetch/);
   });
 
   // The server's rules (lma_whiteboards/rules.py) are the source of these lists.
@@ -119,6 +123,13 @@ describe('checks before sending', () => {
     const names = [...block.matchAll(/^ {4}"([a-z_]+)": \{$/gm)].map((match) => match[1]);
     expect(names.length).toBeGreaterThan(10);
     expect(TEMPLATES.map((t) => t.name)).toEqual(names);
+  });
+
+  it('holds style statements to the rules the server does', () => {
+    const listed = RULES.match(/^STYLE_STATEMENTS = \(([^)]*)\)/m)[1].match(/"([a-z]+)"/g);
+    listed.forEach((word) => {
+      expect(mermaidProblem(`flowchart TD\n  a-->b\n  ${word.slice(1, -1)} a fill:url(x)`)).toMatch(/fetch/);
+    });
   });
 
   it('accepts the diagram types the server does', () => {
