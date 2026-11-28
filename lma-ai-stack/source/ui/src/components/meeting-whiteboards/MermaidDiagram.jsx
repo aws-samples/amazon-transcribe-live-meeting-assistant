@@ -100,7 +100,7 @@ const MermaidDiagram = ({ text }) => {
     setSvg(null);
     setFailed(false);
     if (!source || problem) return undefined;
-    const width = boxRef.current?.parentElement?.clientWidth;
+    const width = boxRef.current?.clientWidth;
     loadMermaid()
       .then((renderer) => renderer.render(id, sourceToDraw(source, width, isDarkPage())))
       .then((sanitized) => {
@@ -117,29 +117,27 @@ const MermaidDiagram = ({ text }) => {
     };
   }, [id, source, problem]);
 
+  let shown;
   if (!source) {
-    return <Box color="text-status-inactive">No diagram yet.</Box>;
-  }
-  if (problem || failed) {
-    return <Source text={source} note={problem || 'This diagram could not be drawn; its source is shown.'} />;
-  }
-  if (!svg) {
-    return (
-      <div ref={boxRef}>
-        <Box color="text-status-inactive">Drawing the diagram…</Box>
-      </div>
+    shown = <Box color="text-status-inactive">No diagram yet.</Box>;
+  } else if (problem || failed) {
+    shown = <Source text={source} note={problem || 'This diagram could not be drawn; its source is shown.'} />;
+  } else if (!svg) {
+    shown = <Box color="text-status-inactive">Drawing the diagram…</Box>;
+  } else {
+    // Mermaid's own output in strict mode, sanitized with DOMPurify (loadMermaid).
+    const markup = { __html: svg };
+    shown = (
+      <div
+        className="whiteboard-diagram"
+        data-testid="whiteboard-diagram"
+        // eslint-disable-next-line react/no-danger
+        dangerouslySetInnerHTML={markup}
+      />
     );
   }
-  // Mermaid's own output in strict mode, sanitized with DOMPurify (loadMermaid).
-  const markup = { __html: svg };
-  return (
-    <div
-      className="whiteboard-diagram"
-      data-testid="whiteboard-diagram"
-      // eslint-disable-next-line react/no-danger
-      dangerouslySetInnerHTML={markup}
-    />
-  );
+  // Measured whatever is shown, so a redrawn chart gets the panel's width.
+  return <div ref={boxRef}>{shown}</div>;
 };
 
 export default MermaidDiagram;

@@ -409,14 +409,24 @@ const MeetingAssistantPanel = ({
     else pendingContextRef.current = message;
   }, [contextRequest]);
 
-  const onFrameLoad = () => {
-    frameLoadedRef.current = true;
+  const postHostFeatures = () =>
     postToFrame({
       type: 'STRANDS_HOST_FEATURES',
       showInTranscript: Boolean(onShowInTranscriptRef.current),
       pinToWhiteboard: Boolean(onPinAnswerRef.current),
       openWhiteboard: Boolean(onOpenWhiteboardRef.current),
     });
+  // What the page can do changes once it knows (the meeting's whiteboards can no
+  // longer be changed, say): the frame is told again.
+  const canPin = Boolean(onPinAnswer);
+  const canOpen = Boolean(onOpenWhiteboard);
+  useEffect(() => {
+    if (frameLoadedRef.current) postHostFeatures();
+  }, [canPin, canOpen]);
+
+  const onFrameLoad = () => {
+    frameLoadedRef.current = true;
+    postHostFeatures();
     if (pendingContextRef.current) {
       postToFrame(pendingContextRef.current);
       pendingContextRef.current = null;
@@ -438,10 +448,7 @@ const MeetingAssistantPanel = ({
       } else if (type === 'STRANDS_SHOW_IN_TRANSCRIPT' && typeof event.data.frameId === 'string') {
         onShowInTranscriptRef.current?.(event.data.frameId);
       } else if (type === 'STRANDS_PIN_TO_WHITEBOARD' && typeof event.data.text === 'string') {
-        onPinAnswerRef.current?.({
-          text: event.data.text,
-          question: typeof event.data.question === 'string' ? event.data.question : '',
-        });
+        onPinAnswerRef.current?.({ text: event.data.text });
       } else if (type === 'STRANDS_OPEN_WHITEBOARD' && typeof event.data.whiteboardId === 'string') {
         onOpenWhiteboardRef.current?.(event.data.whiteboardId);
       }
@@ -669,7 +676,7 @@ MeetingAssistantPanel.propTypes = {
    */
   // eslint-disable-next-line react/forbid-prop-types
   contextRequest: PropTypes.object,
-  /** Called with `{ text, question }` when "Pin to whiteboard" is chosen under an answer; none, no such button. */
+  /** Called with `{ text }` when "Pin to whiteboard" is chosen under an answer; none, no such button. */
   onPinAnswer: PropTypes.func,
   /** Called with a WhiteboardId when "Open" is chosen under an answer that changed a whiteboard. */
   onOpenWhiteboard: PropTypes.func,

@@ -2175,6 +2175,7 @@ export const CallPanel = ({
   const openWhiteboard = useCallback(
     ({ whiteboardId, panelId }) => {
       setActiveTab(TAB_WHITEBOARDS);
+      // A new object each time (`at`), so asking for the same whiteboard again shows it again.
       setWhiteboardSelect({ whiteboardId, panelId, at: Date.now() });
       // On a narrow page the assistant lies over the tabs.
       if (assistantOverlays) setAssistantOpen(false);

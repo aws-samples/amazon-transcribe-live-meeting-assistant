@@ -29,7 +29,7 @@ import {
   titleFrom,
 } from './pin-to-whiteboard';
 
-/** The panel offered first: one whose title the text's title names, else a new panel. */
+/** The panel offered first: the board's panel with the given title (Pinned answers, From guidance), else a new one. */
 const defaultPanel = (board, title) => {
   const wanted = (title || '').trim().toLowerCase();
   const match = markdownPanels(board).find((panel) => panel.Title.trim().toLowerCase() === wanted);
@@ -100,7 +100,13 @@ const PinToWhiteboardModal = ({ whiteboards, text, title, heading = 'Add to whit
       }
       let current = board;
       for (let attempt = 0; attempt < 3; attempt += 1) {
-        const change = panelsWithText(current, { panelId, newTitle, text: content, keepWithAssistant });
+        const change = panelsWithText(current, {
+          panelId,
+          newTitle,
+          text: content,
+          // Only where the choice was offered: otherwise the change makes the panel the user's.
+          keepWithAssistant: keepWithAssistant && toAssistantPanel,
+        });
         if (change.problem) {
           setError(change.problem);
           return;

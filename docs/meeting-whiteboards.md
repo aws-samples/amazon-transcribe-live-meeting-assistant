@@ -137,13 +137,15 @@ Two buttons add a piece of text to a whiteboard without retyping it:
 
 Each opens **Add to whiteboard**: choose one of the meeting's whiteboards (the
 most recent is chosen first) or **New whiteboard…**, then one of its Markdown
-panels (a panel whose title matches the text's is chosen first) or **New
+panels (its **Pinned answers** panel for an answer, or **From guidance** for a
+guidance card, is chosen first, and a new panel takes that title) or **New
 panel…**, and edit the text before it is added. The text goes at the end of the
 panel, after what it holds, or into a new panel at the end of the whiteboard;
 the dialog shows a preview. Adding to a panel the assistant keeps offers **Let
-the assistant keep updating this panel**, on by default: the panel stays the
-assistant's, and its updates may reword what you added. Untick it to make the
-panel yours, as any edit does.
+the assistant keep updating this panel**, on by default, while the whiteboard's
+assistant updates are on: the panel stays the assistant's, and its updates may
+reword what you added. Untick it to make the panel yours, as any edit does;
+where the choice is not offered, adding to a panel makes it yours.
 
 The change is yours and is held to every rule on this page. If somebody changed
 the whiteboard after the page last read it, the dialog reads it again and adds
