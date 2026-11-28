@@ -29,13 +29,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import base64
 import getpass
 import json
 import os
-import secrets
 import sys
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -179,11 +178,6 @@ def _cognito_credentials(args: argparse.Namespace, region: str | None) -> tuple[
     import cognito_test_user  # pylint: disable=import-outside-toplevel
 
     return cognito_test_user.resolve(region)
-
-
-def _claims(token: str) -> dict[str, Any]:
-    payload = token.split(".")[1]
-    return json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
 
 
 def _cleanup(args: argparse.Namespace) -> int:
@@ -411,7 +405,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"warning: audio faster than {kit.AUDIO_FAST_SPEED:g}x real time has not been measured"
             )
     call_id = args.call_id or kit.default_call_id(
-        meeting, datetime.now(timezone.utc), secrets.token_hex(2)
+        meeting, datetime.now(timezone.utc), uuid.uuid4().hex[:4]
     )
 
     if args.dry_run:
@@ -435,7 +429,7 @@ def main(argv: list[str] | None = None) -> int:
             outputs["CognitoUserPoolClientId"],
             *credentials,
         )
-        owner = _claims(tokens["access"]).get("username") or credentials[0]
+        owner = None  # the signed-in user; read back from the meeting record below
     else:
         # A sign-in email is resolved to the pool's username, which is what the web
         # UI matches a meeting's Owner against; a name not in the pool is kept as given.
@@ -453,7 +447,6 @@ def main(argv: list[str] | None = None) -> int:
 
     say(f"Meeting:  {meeting.name} ({meeting.title})")
     say(f"CallId:   {call_id}")
-    say(f"Owner:    {owner}")
     say(
         f"Page:     {delivery.meeting_url(stack.outputs, call_id) or '(no ApplicationCloudfrontEndpoint output)'}"
     )
@@ -467,9 +460,12 @@ def main(argv: list[str] | None = None) -> int:
         "call_id": call_id,
         "meeting": meeting.name,
         "via": args.via,
-        "owner": owner,
         **result,
     }
+    # Reported from the meeting record, which says whom the stack made the Owner.
+    row = delivery.get_meeting(stack.client("dynamodb"), stack.table, call_id) or {}
+    summary["owner"] = row.get("Owner")
+    say(f"Owner:    {summary['owner'] or '(no meeting record yet)'}")
     if not args.no_verify:
         expected = result["sent_segments"] + result["sent_chats"] if args.via == "kinesis" else 0
         timeout = args.verify_timeout or (60 if args.via == "kinesis" else 180)
@@ -485,7 +481,8 @@ def main(argv: list[str] | None = None) -> int:
         say(f"Speakers seen: {stored['speakers']}")
     say(f"Meeting {'ended' if result['ended'] else 'left live (no END sent)'}: {call_id}")
     say(
-        f"Clean up:  python {Path(__file__).relative_to(ROOT)} --stack {args.stack} --cleanup {json.dumps(call_id)}"
+        f"Clean up:  python scripts/synthetic_meetings/run_meeting.py --stack {args.stack} "
+        f"--cleanup {json.dumps(call_id)}{' --force' if args.via == 'audio' else ''}"
     )
     if args.summary_json:
         args.summary_json.write_text(json.dumps(summary, indent=1, default=str), encoding="utf-8")
