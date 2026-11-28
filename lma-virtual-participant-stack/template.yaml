@@ -1039,13 +1039,22 @@ Resources:
             Action:
               - "sts:AssumeRole"
       Path: "/"
-      ManagedPolicyArns:
-        - !GetAtt LogsPolicy.PolicyArn
       PermissionsBoundary: !If
         - HasPermissionsBoundary
         - !Ref PermissionsBoundaryArn
         - !Ref AWS::NoValue
       Policies:
+        # Writes to its own declared log group only. No logs:CreateLogGroup:
+        # see the custom resource section of lma-ai-stack/test/test_log_destinations.py.
+        - PolicyName: FunctionLogGroup
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt BuildCustomResourceFunctionLogGroup.Arn
         - PolicyName: BuildPolicy
           PolicyDocument:
             Version: "2012-10-17"
@@ -1159,13 +1168,22 @@ Resources:
             Action:
               - "sts:AssumeRole"
       Path: "/"
-      ManagedPolicyArns:
-        - !GetAtt LogsPolicy.PolicyArn
       PermissionsBoundary: !If
         - HasPermissionsBoundary
         - !Ref PermissionsBoundaryArn
         - !Ref AWS::NoValue
       Policies:
+        # Writes to its own declared log group only. No logs:CreateLogGroup:
+        # see the custom resource section of lma-ai-stack/test/test_log_destinations.py.
+        - PolicyName: FunctionLogGroup
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt ECSRoleCustomResourceFunctionLogGroup.Arn
         - PolicyName: IAMPolicy
           PolicyDocument:
             Version: "2012-10-17"
@@ -1822,13 +1840,22 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - !GetAtt LogsPolicy.PolicyArn
       PermissionsBoundary: !If
         - HasPermissionsBoundary
         - !Ref PermissionsBoundaryArn
         - !Ref AWS::NoValue
       Policies:
+        # Writes to its own declared log group only. No logs:CreateLogGroup:
+        # see the custom resource section of lma-ai-stack/test/test_log_destinations.py.
+        - PolicyName: FunctionLogGroup
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt ASGDeletionHandlerFunctionLogGroup.Arn
         - PolicyName: ASGDeletionPolicy
           PolicyDocument:
             Version: "2012-10-17"
@@ -2464,10 +2491,19 @@ Resources:
             Condition:
               StringEquals:
                 aws:SourceAccount: !Ref AWS::AccountId
-      ManagedPolicyArns:
-        - !GetAtt LogsPolicy.PolicyArn
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       Policies:
+        # Writes to its own declared log group only. No logs:CreateLogGroup:
+        # see the custom resource section of lma-ai-stack/test/test_log_destinations.py.
+        - PolicyName: FunctionLogGroup
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt VPMicrovmImagePrunerLogGroup.Arn
         - PolicyName: MicrovmImageVersions
           PolicyDocument:
             Version: "2012-10-17"

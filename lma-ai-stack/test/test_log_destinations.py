@@ -41,6 +41,7 @@ Run via `make test-ai-stack` or pytest directly.
 
 from __future__ import annotations
 
+import fnmatch
 import re
 from pathlib import Path
 
@@ -445,4 +446,178 @@ def test_every_microvm_launcher_names_its_images_log_group(template: str):
                 f"{function_name}: MICROVM_LOG_GROUP_NAME is {actual!r}, expected "
                 f"a Ref to {expected} (the group {image_name} logs to)"
             )
+    assert not broken, f"{template}: {broken}"
+
+
+# ── custom resource functions cannot re-create their log group ──────────────
+#
+# CloudFormation invokes a custom resource's function on Delete, which happens
+# on a stack delete and on the rollback of the create or update that added the
+# resource. It then deletes the function and, after it, the function's log
+# group. The invocation can still be delivering its last log lines when the
+# group goes: if the function's role may call logs:CreateLogGroup, Lambda
+# re-creates the group under the same name, with no retention and the AWS-owned
+# key, and CloudFormation owns none of it. A named group then fails the next
+# attempt to create the stack's own group, so the retry of a rolled-back update
+# (or a new stack with the same name) cannot start until the group is deleted
+# by hand. An unnamed group is left behind instead, with no expiry.
+#
+# Every function's group is declared (rule 1), so no function needs to create
+# one. These functions' roles therefore grant only logs:CreateLogStream and
+# logs:PutLogEvents, on the function's own group: logs that arrive after the
+# group is deleted are dropped instead. The rule is on roles, not functions, so
+# it reads every policy that reaches the role: inline policies, the managed
+# policies in `ManagedPolicyArns`, and AWS::IAM::Policy / ManagedPolicy
+# resources that name the role in `Roles`. A SAM function with no `Role` fails
+# outright, because SAM attaches AWSLambdaBasicExecutionRole to the role it
+# generates, which grants logs:CreateLogGroup on every group.
+
+CUSTOM_RESOURCE_TYPE = "AWS::CloudFormation::CustomResource"
+FUNCTION_TYPES = ("AWS::Lambda::Function", "AWS::Serverless::Function")
+POLICY_TYPES = ("AWS::IAM::Policy", "AWS::IAM::ManagedPolicy")
+
+# AWS managed policies a custom resource function's role may carry, each known
+# to grant no CloudWatch Logs action. Anything else in `ManagedPolicyArns` that
+# is not a policy declared in the same template fails, so that a new managed
+# policy is looked at before it is allowed.
+AWS_MANAGED_POLICIES_WITHOUT_LOGS = ("AWSXRayDaemonWriteAccess", "AWSXrayWriteOnlyAccess")
+
+
+def _custom_resource_functions(resources: dict) -> list[str]:
+    """Logical ids of the functions some custom resource in `resources` invokes."""
+    functions = _of_type(resources, *FUNCTION_TYPES)
+    found = set()
+    for resource in resources.values():
+        resource_type = resource.get("Type", "")
+        if resource_type == CUSTOM_RESOURCE_TYPE or resource_type.startswith("Custom::"):
+            token = (resource.get("Properties", {}) or {}).get("ServiceToken")
+            found |= {target for target, _ in _references(token) if target in functions}
+    return sorted(found)
+
+
+def _as_list(value: object) -> list:
+    return value if isinstance(value, list) else [value]
+
+
+def _role_statements(resources: dict, role_name: str) -> tuple[list[dict], list[str]]:
+    """(every statement that reaches the role, the problems found collecting them)."""
+    role = resources[role_name].get("Properties", {}) or {}
+    statements, problems = [], []
+    for policy in role.get("Policies", []) or []:
+        statements += _as_list(policy.get("PolicyDocument", {}).get("Statement", []))
+    for arn in role.get("ManagedPolicyArns", []) or []:
+        targets = [target for target, _ in _references(arn) if target in resources]
+        declared = [t for t in targets if resources[t].get("Type") in POLICY_TYPES]
+        if declared:
+            for target in declared:
+                document = resources[target]["Properties"].get("PolicyDocument", {})
+                statements += _as_list(document.get("Statement", []))
+            continue
+        spelled = _as_name(arn) or ""
+        allowed = tuple(f"policy/{name}" for name in AWS_MANAGED_POLICIES_WITHOUT_LOGS)
+        if not spelled.endswith(allowed):
+            problems.append(f"managed policy {arn!r} is not known to leave out logs:CreateLogGroup")
+    for resource in _of_type(resources, *POLICY_TYPES).values():
+        attached_to = (resource.get("Properties", {}) or {}).get("Roles", [])
+        if role_name in {target for target, _ in _references(attached_to)}:
+            document = resource["Properties"].get("PolicyDocument", {})
+            statements += _as_list(document.get("Statement", []))
+    return statements, problems
+
+
+def _branches(node: object) -> list:
+    """The values a resource entry can take: both arms of an `Fn::If`, list items."""
+    if isinstance(node, list):
+        return [leaf for item in node for leaf in _branches(item)]
+    if isinstance(node, dict) and set(node) == {"Fn::If"}:
+        return [leaf for arm in node["Fn::If"][1:] for leaf in _branches(arm)]
+    if isinstance(node, dict) and node == {"Ref": "AWS::NoValue"}:
+        return []
+    return [node]
+
+
+def _covers(resource: object, group_id: str, group: dict, *, unknown: bool) -> bool:
+    """Whether a statement's `Resource` entry includes the log group `group_id`.
+
+    `unknown` is the answer for an entry this cannot read (a `Fn::Join`, say):
+    True when looking for a grant that must be absent, False when looking for
+    one that must be present, so that neither check passes by not understanding.
+    """
+    if resource == "*":
+        return True
+    if isinstance(resource, dict) and set(resource) == {"Fn::GetAtt"}:
+        target = resource["Fn::GetAtt"]
+        target = target[0] if isinstance(target, list) else str(target).split(".")[0]
+        return target == group_id
+    spelled = _as_name(resource)
+    if spelled is None:
+        return unknown
+    if "log-group:" not in spelled:
+        return False
+    pattern = spelled.split("log-group:", 1)[1]
+    name = _as_name(group.get("Properties", {}).get("LogGroupName"))
+    if name is None:
+        # CloudFormation names an unnamed group <stack>-<logical id>-<suffix>.
+        name = f"${{AWS::StackName}}-{group_id}-SUFFIX"
+    return any(
+        fnmatch.fnmatchcase(candidate, pattern)
+        for candidate in (name, f"{name}:*", f"{name}:log-stream:stream")
+    )
+
+
+def _grants(statement: dict, action: str) -> bool:
+    if statement.get("Effect") != "Allow":
+        return False
+    actions = _as_list(statement.get("Action", []))
+    return any(isinstance(a, str) and fnmatch.fnmatch(action.lower(), a.lower()) for a in actions)
+
+
+def test_custom_resource_functions_are_found():
+    """Guards the test below against passing because it collected nothing."""
+    found = sum(len(_custom_resource_functions(_resources(path))) for path in DEPLOYED_TEMPLATES)
+    assert found >= 30, f"only {found} functions back a custom resource — collection stale?"
+    assert "S3BucketCleanupFunction" in _custom_resource_functions(_resources("lma-main.yaml"))
+
+
+@pytest.mark.parametrize("template", DEPLOYED_TEMPLATES)
+def test_custom_resource_functions_cannot_recreate_their_log_group(template: str):
+    """See the section comment above: a deleted group must stay deleted."""
+    resources = _resources(template)
+    log_groups = _of_type(resources, LOG_GROUP_TYPE)
+    broken = []
+    for name in _custom_resource_functions(resources):
+        function = resources[name]
+        group_id = _destination(function, log_groups)
+        if group_id is None:
+            continue  # rule 1 reports this
+        group = log_groups[group_id]
+        roles = [
+            target
+            for target, _ in _references(function.get("Properties", {}).get("Role"))
+            if resources.get(target, {}).get("Type") == "AWS::IAM::Role"
+        ]
+        if not roles:
+            broken.append(
+                f"{name}: no Role declared in this template (the role SAM generates "
+                f"carries AWSLambdaBasicExecutionRole)"
+            )
+            continue
+        statements, problems = _role_statements(resources, roles[0])
+        broken += [f"{name} ({roles[0]}): {problem}" for problem in problems]
+        for statement in statements:
+            if _grants(statement, "logs:CreateLogGroup") and any(
+                _covers(entry, group_id, group, unknown=True)
+                for entry in _branches(statement.get("Resource"))
+            ):
+                broken.append(f"{name} ({roles[0]}): may create {group_id}: {statement}")
+        for action in ("logs:CreateLogStream", "logs:PutLogEvents"):
+            if not any(
+                _grants(statement, action)
+                and any(
+                    _covers(entry, group_id, group, unknown=False)
+                    for entry in _branches(statement.get("Resource"))
+                )
+                for statement in statements
+            ):
+                broken.append(f"{name} ({roles[0]}): no {action} on {group_id}")
     assert not broken, f"{template}: {broken}"

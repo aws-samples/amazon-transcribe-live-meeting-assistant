@@ -71,9 +71,18 @@ Resources:
               Service: lambda.amazonaws.com
             Action:
               - "sts:AssumeRole"
-      ManagedPolicyArns:
-        - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
       Policies:
+        # Writes to its own declared log group only. No logs:CreateLogGroup:
+        # see the custom resource section of lma-ai-stack/test/test_log_destinations.py.
+        - PolicyName: FunctionLogGroup
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt LLMPromptUploadFunctionLogGroup.Arn
         - PolicyName: allow-s3-notification-config
           PolicyDocument:
             Statement:

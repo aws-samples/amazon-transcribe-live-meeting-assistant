@@ -305,11 +305,9 @@ Resources:
             Resource: !GetAtt DesktopCaptureAppCodeBuildProject.Arn
           - Effect: Allow
             Action:
-            - logs:CreateLogGroup
             - logs:CreateLogStream
             - logs:PutLogEvents
-            Resource:
-            - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*"
+            Resource: !GetAtt CodeBuildTriggerFunctionLogGroup.Arn
 
   CodeBuildTriggerFunction:
     Type: AWS::Lambda::Function

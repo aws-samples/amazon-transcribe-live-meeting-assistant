@@ -1906,9 +1906,12 @@ def test_the_pruner_reruns_whenever_a_version_has_been_added(template: dict) -> 
 
 def test_the_pruner_never_deletes_the_image_it_prunes(template: dict) -> None:
     """Scoped to the one image, and to reading and removing versions only."""
-    statements = template["Resources"]["VPMicrovmImagePrunerRole"]["Properties"][
-        "Policies"
-    ][0]["PolicyDocument"]["Statement"]
+    policies = template["Resources"]["VPMicrovmImagePrunerRole"]["Properties"]["Policies"]
+    (statements,) = [
+        p["PolicyDocument"]["Statement"]
+        for p in policies
+        if p["PolicyName"] == "MicrovmImageVersions"
+    ]
     actions = {a for s in statements for a in s["Action"]}
     assert actions == {
         "lambda:GetMicrovmImage",

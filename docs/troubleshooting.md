@@ -13,6 +13,8 @@ title: "Troubleshooting"
   - [Log Format](#log-format)
 - [Common Issues](#common-issues)
   - [Deployment Fails on Nested Stack](#deployment-fails-on-nested-stack)
+  - [Update Rolls Back With "MicroVM terminated before it started"](#update-rolls-back-with-microvm-terminated-before-it-started)
+  - [Update Fails Because a Log Group Already Exists](#update-fails-because-a-log-group-already-exists)
   - [Meeting Stuck In Progress](#meeting-stuck-in-progress)
   - [No Transcription Appearing](#no-transcription-appearing)
   - [Discarded Transcript Records](#discarded-transcript-records)
@@ -163,6 +165,29 @@ that has no quotes in it.
 ### Deployment Fails on Nested Stack
 
 Navigate to the specific failed nested stack and check its Events tab for the root cause. The parent stack typically shows a generic "nested stack failed" error that is not actionable on its own.
+
+### Update Rolls Back With "MicroVM terminated before it started"
+
+An update can fail in the ASR MicroVM nested stack (`ASRMICROVMSTACK`) while it builds the ASR MicroVM image, with the image reporting that the MicroVM terminated before it started, and the whole update then rolls back. The image build's snapshot step can run out of time while the speech model loads; it is not caused by your parameters and usually succeeds on the next attempt (tracked in [#1119](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/issues/1119)).
+
+Wait until the stack is back in `UPDATE_ROLLBACK_COMPLETE`, then run the same update again (`lma-cli deploy ... --wait`, or **Update** in the CloudFormation console with the same template and parameters).
+
+### Update Fails Because a Log Group Already Exists
+
+After an update that rolled back, the next update of a stack deployed from an earlier template can fail before any resource changes, with an event such as:
+
+```
+NAME_CONFLICT_VALIDATION: Resource of type 'AWS::Logs::LogGroup' with identifier
+'/<stack name>/lambda/S3BucketCleanupFunction' already exists
+```
+
+The rollback deleted the function's log group, and the function's last log lines then created the group again outside the stack. The functions that CloudFormation calls during a rollback (its custom resources) are no longer allowed to create log groups, so a rollback of the current template leaves none behind. A stack that is already in this state, because the rollback happened under an earlier template, recovers as follows:
+
+1. Note the log group name from the event (in the example, `/<stack name>/lambda/S3BucketCleanupFunction`). The group holds only the log lines of the rolled-back attempt.
+2. Delete that log group, in the CloudWatch console or with `aws logs delete-log-group --log-group-name "/<stack name>/lambda/S3BucketCleanupFunction" --region <region>`.
+3. Run the update again.
+
+If the event names a different log group under `/<stack name>/lambda/`, the same steps apply to it.
 
 ### Meeting Stuck In Progress
 

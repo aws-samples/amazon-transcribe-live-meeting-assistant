@@ -8,6 +8,7 @@ title: "Stack Updates & Upgrades"
 
 - [Overview](#overview)
 - [Update Steps](#update-steps)
+  - [If an Update Rolls Back](#if-an-update-rolls-back)
 - [Template URLs by Region](#template-urls-by-region)
 - [Building from Source](#building-from-source)
 - [What Is Preserved Across Updates](#what-is-preserved-across-updates)
@@ -47,6 +48,13 @@ The CLI auto-selects the correct template for your region and streams deployment
 4. Enter the template URL for your region (see table below).
 5. Review and adjust parameters as needed.
 6. Click **Next** twice, check the IAM acknowledgement boxes, and click **Update stack**.
+
+### If an Update Rolls Back
+
+Find the first failure in the Events tab of the nested stack that failed. Two failures have a known remedy:
+
+- The ASR MicroVM stack reports that the MicroVM terminated before it started: run the same update again once the stack is in `UPDATE_ROLLBACK_COMPLETE`. See [Update Rolls Back With "MicroVM terminated before it started"](troubleshooting.md#update-rolls-back-with-microvm-terminated-before-it-started).
+- The retry itself fails at once with `NAME_CONFLICT_VALIDATION` on a log group: delete the log group it names and run the update again. See [Update Fails Because a Log Group Already Exists](troubleshooting.md#update-fails-because-a-log-group-already-exists).
 
 ## Template URLs by Region
 
