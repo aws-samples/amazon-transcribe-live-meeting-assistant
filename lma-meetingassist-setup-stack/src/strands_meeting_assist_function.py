@@ -1970,6 +1970,8 @@ def create_read_chat_attachment_tool(call_id: str, model_id: str, message_id: st
     accepts_files = meeting_frames.model_accepts_images(model_id)
     # Document names must differ across the request's messages (Converse).
     reads = itertools.count(1)
+    # Contents given in this answer (see meeting_attachments.MAX_READS_PER_ANSWER).
+    read_count = [0]
 
     def run_query(document: str, variables: Dict[str, Any]) -> Dict[str, Any]:
         from gql import gql
@@ -1994,6 +1996,9 @@ def create_read_chat_attachment_tool(call_id: str, model_id: str, message_id: st
         )
         if refused is not None:
             return refused, 'not found' if attachment is None else 'not read'
+        if read_count[0] >= meeting_attachments.MAX_READS_PER_ANSWER:
+            return {'status': 'success', 'content': [{'text': meeting_attachments.TOO_MANY_READS}]}, 'read limit'
+        read_count[0] += 1
         content_type = attachment.get('ContentType')
         try:
             body = meeting_attachments.download(

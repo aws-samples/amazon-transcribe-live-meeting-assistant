@@ -237,6 +237,14 @@ def test_every_document_in_one_answer_has_a_name_of_its_own(tool):
         assert all(c.isalnum() or c in " -()[]" for c in name) and "  " not in name
 
 
+def test_no_more_than_the_read_limit_is_given_in_one_answer(tool):
+    read, _ = tool([attachment()])
+    for _ in range(meeting_attachments.MAX_READS_PER_ANSWER):
+        assert "document" in read("0000065000-ab")["content"][1]
+    assert texts(read("0000065000-ab")) == meeting_attachments.TOO_MANY_READS
+    assert len(tool.downloads) == meeting_attachments.MAX_READS_PER_ANSWER
+
+
 def test_a_powerpoint_file_is_said_to_be_unreadable_with_its_title_and_summary(tool):
     read, _ = tool([attachment(ContentType=PPTX, FileName="deck.pptx")])
     text = texts(read("0000065000-ab"))
