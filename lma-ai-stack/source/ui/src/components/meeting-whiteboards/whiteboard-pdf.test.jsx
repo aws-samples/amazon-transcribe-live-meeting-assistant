@@ -173,7 +173,9 @@ describe('the document', () => {
     });
     const doc = await buildWhiteboardsPdf(meeting, { jsPDF, compress: false, draw: async () => PICTURE });
     const strings = [...doc.output().matchAll(/\(((?:\\.|[^\\)])*)\) Tj/g)].map((m) => m[1]);
-    expect(strings).toEqual(expect.arrayContaining(['WHITEBOARDS', 'Weekly sync', 'Risks', 'Notes', 'Keep ', 'this', '2', '3']));
+    expect(strings).toEqual(
+      expect.arrayContaining(['WHITEBOARDS', 'Weekly sync', 'Risks', 'Notes', 'Keep ', 'this', '2', '3']),
+    );
     expect(strings).toContain(`Page 1 of ${doc.getNumberOfPages()}`);
     expect(addImage).toHaveBeenCalledTimes(1);
     addImage.mockRestore();
@@ -181,7 +183,9 @@ describe('the document', () => {
 });
 
 describe('svgSize', () => {
-  const svg = (attrs) => new DOMParser().parseFromString(`<svg xmlns="http://www.w3.org/2000/svg" ${attrs}/>`, 'image/svg+xml').documentElement;
+  const svg = (attrs) =>
+    new DOMParser().parseFromString(`<svg xmlns="http://www.w3.org/2000/svg" ${attrs}/>`, 'image/svg+xml')
+      .documentElement;
 
   it("reads a drawing's size from its viewBox, else its width and height", () => {
     expect(svgSize(svg('viewBox="-8 -8 640.5 300" width="100%"'))).toEqual({ width: 640.5, height: 300 });

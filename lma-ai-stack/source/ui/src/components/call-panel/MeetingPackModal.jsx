@@ -239,9 +239,7 @@ const MeetingPackModal = ({
         {mode === 'email' ? (
           <FormField
             label="To"
-            description={
-              "The meeting's participants with an email address. You can change the recipients in your mail app."
-            }
+            description="The meeting's participants with an email address. Change them here or in your mail app."
           >
             {recipients.length ? (
               <TokenGroup

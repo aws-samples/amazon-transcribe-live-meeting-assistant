@@ -164,7 +164,9 @@ describe('Email participants', () => {
     expect(within(dialog()).getByText('Ana Lima')).toBeTruthy();
     expect(within(dialog()).getByText('bo@example.org')).toBeTruthy();
     ['summary', 'slides', 'whiteboards'].forEach((id) => expect(checkbox(id).checked).toBe(true));
-    await waitFor(() => expect(screen.getByTestId('pack-total').textContent).toMatch(/^Total: 6 KB \(about 8 KB as an email\)$/));
+    await waitFor(() =>
+      expect(screen.getByTestId('pack-total').textContent).toMatch(/^Total: 6 KB \(about 8 KB as an email\)$/),
+    );
     expect(within(dialog()).queryByText('The email may be too large to send')).toBeNull();
   });
 
@@ -216,7 +218,9 @@ describe('Email participants', () => {
     const saveFile = vi.fn();
     openEmail({ saveFile });
     fireEvent.click(within(dialog()).getByRole('button', { name: 'Open in mail app (no attachments)' }));
-    expect(open.mock.calls[0][0]).toMatch(/^mailto:ana@example.com,bo@example.org\?subject=Weekly%20sync%20summary&body=/);
+    expect(open.mock.calls[0][0]).toMatch(
+      /^mailto:ana@example.com,bo@example.org\?subject=Weekly%20sync%20summary&body=/,
+    );
     expect(within(dialog()).getByText(/cannot carry attachments/)).toBeTruthy();
     await waitFor(() => expect(within(part('whiteboards')).getByText('3 KB')).toBeTruthy());
     fireEvent.click(within(dialog()).getByRole('button', { name: 'Download the files' }));

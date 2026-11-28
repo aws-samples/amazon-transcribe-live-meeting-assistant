@@ -250,8 +250,7 @@ const PORTRAIT_COLUMN = 612 - 2 * 54;
  * Whether a drawn diagram would be shrunk by more than a quarter on a
  * portrait page, and is wider than tall, so that a landscape page shows it larger.
  */
-export const isWideDiagram = ({ width, height }) =>
-  width > height * 1.3 && width * 0.75 > PORTRAIT_COLUMN * 1.3;
+export const isWideDiagram = ({ width, height }) => width > height * 1.3 && width * 0.75 > PORTRAIT_COLUMN * 1.3;
 
 let diagramCount = 0;
 
