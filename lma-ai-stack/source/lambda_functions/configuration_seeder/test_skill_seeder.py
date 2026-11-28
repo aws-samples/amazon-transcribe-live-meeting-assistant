@@ -247,6 +247,28 @@ def test_a_skill_stored_without_its_ledger_record_is_adopted_not_duplicated():
     assert _seed(table, SHIPPED)["alpha"] == "deleted"
 
 
+def test_a_default_skill_replaced_by_an_import_of_the_same_text_is_left_to_the_admin():
+    table = FakeSkillsTable()
+    _seed(table, SHIPPED)
+    table.edit("alpha", SourceFormat="agent-skills")
+    newer = [_default("alpha", "Do the new thing.\n"), SHIPPED[1]]
+    assert _seed(table, newer)["alpha"] == "edited"
+    assert table.skill("alpha")["SourceFormat"] == "agent-skills"
+    assert table.skill("alpha")["Instructions"] == "Do the thing.\n"
+
+
+def test_an_admin_skill_holding_the_shipped_text_is_not_adopted():
+    table = FakeSkillsTable()
+    table.create("alpha", "alpha", instructions="Do the thing.\n")
+    table.edit("alpha", DisplayName="Alpha", Description="The alpha skill.")
+    assert skill_seeder.content_digest(table.skill("alpha")) == skill_seeder.content_digest(
+        SHIPPED[0].fields
+    )
+    assert _seed(table, SHIPPED[:1]) == {"alpha": "name-in-use"}
+    assert table.skill("alpha")["SourceFormat"] == "manual"
+    assert (LEDGER, "alpha") not in table.items
+
+
 def test_a_default_skill_whose_id_is_taken_gets_a_numbered_id():
     table = FakeSkillsTable()
     table.create("alpha", "renamed-by-an-admin")

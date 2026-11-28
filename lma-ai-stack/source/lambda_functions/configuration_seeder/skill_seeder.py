@@ -21,7 +21,8 @@ digest of what was stored. Then:
   ledger record written (``created``). This is a new deployment, and an upgrade
   from a release that shipped no default skills.
 - **No ledger record, and a skill of the name holding exactly the shipped
-  text**: the ledger record is written for it (``adopted``). This is a run that
+  text with the shipped source**: the ledger record is written for it
+  (``adopted``). This is a run that
   stored the skill and failed before its ledger write, or a table restored
   without its ledger.
 - **No ledger record, and a skill of the name holding other text**: an Admin's
@@ -32,8 +33,9 @@ digest of what was stored. Then:
 - **A ledger record, and the skill holds what was stored**: nobody changed it.
   When the release ships different text it is replaced (``updated``), keeping
   its id and creation fields; otherwise nothing is written (``unchanged``).
-- **A ledger record, and the skill holds anything else**: an Admin edited it. It
-  is left alone, whatever the release ships (``edited``).
+- **A ledger record, and the skill holds anything else, or no longer has the
+  shipped source** (an import replaced it, even with the same text): an Admin
+  edited it. It is left alone, whatever the release ships (``edited``).
 
 Writes are conditional on what was read (``UpdatedAt`` for a replacement), so an
 Admin's save landing between the read and the write wins, and the next run
@@ -234,7 +236,10 @@ class DefaultSkillSeeder:
         if entry is None:
             same_name = next((s for s in stored if s.get("Name") == skill.name), None)
             if same_name is not None:
-                if content_digest(same_name) == shipped:
+                if (
+                    same_name.get("SourceFormat") == SOURCE_SHIPPED
+                    and content_digest(same_name) == shipped
+                ):
                     self._record(skill, str(same_name["SkillId"]), shipped)
                     return "adopted"
                 LOGGER.warning(
@@ -267,7 +272,11 @@ class DefaultSkillSeeder:
         current = by_id.get(skill_id)
         if current is None:
             return "deleted"
-        if content_digest(current) != entry.get("ContentDigest"):
+        # Still the seeder's own only while it holds what was stored *and* keeps
+        # the shipped source: an import over it, even of the same text, makes it
+        # the Admin's, with the import's source.
+        ours = current.get("SourceFormat") == SOURCE_SHIPPED
+        if not ours or content_digest(current) != entry.get("ContentDigest"):
             return "edited"
         if entry.get("ContentDigest") == shipped:
             return "unchanged"
