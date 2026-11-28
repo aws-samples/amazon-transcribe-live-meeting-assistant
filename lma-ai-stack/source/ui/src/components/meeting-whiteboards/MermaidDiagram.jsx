@@ -86,6 +86,35 @@ export const sourceToDraw = (source, width, dark = false) => {
 
 const isDarkPage = () => typeof document !== 'undefined' && document.body.classList.contains('awsui-dark-mode');
 
+/** Widths are followed in steps of this many pixels, so a resize redraws a chart only now and then. */
+const WIDTH_STEP = 40;
+
+/**
+ * The width of the element `ref` holds, in WIDTH_STEP steps, or 0 while it is not
+ * laid out (a tab that is not shown); and whether the page is dark. Each change
+ * redraws a diagram that depends on it.
+ */
+const useDrawingContext = (ref, follow) => {
+  const [width, setWidth] = useState(0);
+  const [dark, setDark] = useState(isDarkPage);
+  useEffect(() => {
+    if (!follow || typeof ResizeObserver === 'undefined' || !ref.current) return undefined;
+    const observer = new ResizeObserver(([entry]) => {
+      const measured = Math.floor((entry?.contentRect?.width || 0) / WIDTH_STEP) * WIDTH_STEP;
+      setWidth(measured);
+    });
+    observer.observe(ref.current);
+    return () => observer.disconnect();
+  }, [ref, follow]);
+  useEffect(() => {
+    if (typeof MutationObserver === 'undefined' || typeof document === 'undefined') return undefined;
+    const observer = new MutationObserver(() => setDark(isDarkPage()));
+    observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
+  }, []);
+  return { width, dark };
+};
+
 /** A diagram panel's content, drawn; its source, when it cannot be drawn. */
 const MermaidDiagram = ({ text }) => {
   const id = `wb-diagram-${useId().replace(/[^A-Za-z0-9_-]/g, '')}`;
@@ -94,15 +123,19 @@ const MermaidDiagram = ({ text }) => {
   const boxRef = useRef(null);
   const source = (text || '').trim();
   const problem = source ? mermaidProblem(source) : null;
+  // Only a Gantt chart is drawn at a width of its own; others are drawn once and scaled.
+  const isGantt = sourceToDraw(source, 1) !== source;
+  const { width, dark } = useDrawingContext(boxRef, isGantt);
 
   useEffect(() => {
     let current = true;
     setSvg(null);
     setFailed(false);
     if (!source || problem) return undefined;
-    const width = boxRef.current?.clientWidth;
+    // A Gantt chart on a tab that is not shown waits until it is laid out.
+    if (isGantt && !width && typeof ResizeObserver !== 'undefined') return undefined;
     loadMermaid()
-      .then((renderer) => renderer.render(id, sourceToDraw(source, width, isDarkPage())))
+      .then((renderer) => renderer.render(id, sourceToDraw(source, width, dark)))
       .then((sanitized) => {
         if (!current) return;
         if (sanitized) setSvg(sanitized);
@@ -115,7 +148,7 @@ const MermaidDiagram = ({ text }) => {
     return () => {
       current = false;
     };
-  }, [id, source, problem]);
+  }, [id, source, problem, isGantt, width, dark]);
 
   let shown;
   if (!source) {

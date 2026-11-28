@@ -30,7 +30,10 @@ export const ASK_ASSISTANT = 'ask-assistant';
 export const ADD_TO_WHITEBOARD = 'add-to-whiteboard';
 export const OPEN_WHITEBOARD = 'open-whiteboard';
 
-/** The most text one action carries, so a long card or panel stays a reasonable question. */
+/**
+ * The most text one action carries, so a long card or panel stays a reasonable question.
+ * The chat frame holds the same limit (MAX_CONTEXT_CHARS in public/js/strands-chat.js).
+ */
 export const MAX_ACTION_TEXT = 6000;
 
 // callId -> Map(type -> handler ref)

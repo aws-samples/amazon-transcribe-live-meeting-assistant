@@ -66,6 +66,7 @@ const hostFeatures = { showInTranscript: false, pinToWhiteboard: false, openWhit
 const askContext = document.getElementById('askContext');
 const askContextLabel = document.getElementById('askContextLabel');
 const askContextExcerpt = document.getElementById('askContextExcerpt');
+// The page holds the same limit (MAX_ACTION_TEXT in src/components/common/meeting-actions.js).
 const MAX_CONTEXT_CHARS = 6000;
 const DEFAULT_PLACEHOLDER = messageInput.placeholder;
 let pendingContext = null;
