@@ -158,6 +158,7 @@ def meeting(stack, credentials):
     kinesis = stack.session.client("kinesis")
     stream = outputs["CallDataStreamName"]
     frame_keys = []
+    list_key = None
 
     def put(record: dict) -> None:
         base = {"CallId": call_id, "AccessToken": "", "IdToken": "", "RefreshToken": ""}
@@ -189,6 +190,12 @@ def meeting(stack, credentials):
         assert record, (
             f"the START did not create the meeting within {MEETING_TIMEOUT_S:.0f}s"
         )
+        # The meeting list's entry, deleted by its key afterwards.
+        stored = record["CreatedAt"]
+        list_key = {
+            "PK": {"S": f"cls#{stored[:10]}#s#{int(stored[11:13]) // 4:02d}"},
+            "SK": {"S": f"ts#{stored}#id#{call_id}"},
+        }
         put({"EventType": "END"})
         wait_for(
             lambda: (
@@ -287,23 +294,9 @@ def meeting(stack, credentials):
                         TableName=stack.event_table,
                         Key={"PK": item["PK"], "SK": item["SK"]},
                     )
-        with contextlib.suppress(Exception):
-            day = created_at[:10]
-            shard = f"{int(created_at[11:13]) // 4:02d}"
-            listed = ddb.query(
-                TableName=stack.event_table,
-                KeyConditionExpression="PK = :pk",
-                FilterExpression="CallId = :c",
-                ExpressionAttributeValues={
-                    ":pk": {"S": f"cls#{day}#s#{shard}"},
-                    ":c": {"S": call_id},
-                },
-            ).get("Items", [])
-            for item in listed:
-                ddb.delete_item(
-                    TableName=stack.event_table,
-                    Key={"PK": item["PK"], "SK": item["SK"]},
-                )
+        if list_key:
+            with contextlib.suppress(Exception):
+                ddb.delete_item(TableName=stack.event_table, Key=list_key)
         for object_key in frame_keys:
             with contextlib.suppress(Exception):
                 s3.delete_object(Bucket=stack.recordings_bucket, Key=object_key)

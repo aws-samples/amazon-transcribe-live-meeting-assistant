@@ -121,11 +121,13 @@ const MeetingPackModal = ({
   const total = chosenStates.reduce((sum, state) => sum + (state?.status === 'ready' ? state.size : 0), 0);
   const tooLarge = mode === 'email' && emailTooLarge(total);
 
-  const downloadPack = async () => {
+  // Saves the chosen files; `forMail` keeps the note about attaching them by hand.
+  const downloadPack = async ({ zip = asZip === 'zip', forMail = false } = {}) => {
     setWorking(true);
     try {
-      await savePack(files, { callId: item.callId, asZip: asZip === 'zip', save });
-      setOutcome({ type: 'success', text: asZip === 'zip' ? 'The meeting pack was saved.' : 'The files were saved.' });
+      await savePack(files, { callId: item.callId, asZip: zip, save });
+      if (!forMail)
+        setOutcome({ type: 'success', text: zip ? 'The meeting pack was saved.' : 'The files were saved.' });
     } catch (error) {
       setOutcome({ type: 'error', text: 'The files could not be saved.' });
     } finally {
@@ -224,7 +226,7 @@ const MeetingPackModal = ({
           <Button onClick={onDismiss}>Close</Button>
           <Button
             variant="primary"
-            onClick={downloadPack}
+            onClick={() => downloadPack()}
             loading={working || waiting}
             disabled={!chosen.length || blocked}
           >
@@ -310,10 +312,7 @@ const MeetingPackModal = ({
           <Alert
             type="info"
             action={
-              <Button
-                onClick={() => savePack(files, { callId: item.callId, asZip: false, save })}
-                disabled={!ready || !files.length}
-              >
+              <Button onClick={() => downloadPack({ zip: false, forMail: true })} disabled={!ready || !files.length}>
                 Download the files
               </Button>
             }

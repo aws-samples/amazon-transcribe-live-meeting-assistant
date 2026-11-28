@@ -22,8 +22,9 @@ const logger = new ConsoleLogger('useMeetingPack');
 
 /** What a part is built from, to tell whether a built file is still current. */
 export const partSignature = (id, ctx) => {
-  if (id === PART_SUMMARY) return String(ctx.item?.callSummaryText ?? '');
-  if (id === PART_SLIDES) return String(ctx.keyframeCount ?? 0);
+  // The summary PDF lists the speakers' names; the slides are labelled by the chapters.
+  if (id === PART_SUMMARY) return JSON.stringify([ctx.item?.callSummaryText ?? '', ctx.participants || []]);
+  if (id === PART_SLIDES) return JSON.stringify([ctx.keyframeCount ?? 0, ctx.chapters || []]);
   return JSON.stringify((ctx.whiteboards || []).map((board) => [board.WhiteboardId, board.Version]));
 };
 

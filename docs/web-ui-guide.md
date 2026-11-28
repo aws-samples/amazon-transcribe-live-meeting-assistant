@@ -796,7 +796,8 @@ opens, with its progress, then its size, and the total below them; a file that
 could not be built says so and offers **Try again**. While the meeting is still
 going on, the dialog says the files are a snapshot of it as it is then. What
 was built is kept while the meeting page is open, and built again when what it
-came from has changed (the summary, the number of key frames, a whiteboard).
+came from has changed (the summary or the speakers' names, the number of key frames
+or the chapters, a whiteboard).
 
 - **Meeting pack** saves the chosen files as **One .zip file** or as **Separate
   files**; for separate files the browser may ask once to allow several
@@ -817,8 +818,8 @@ came from has changed (the summary, the number of key frames, a whiteboard).
     turn into a new one to send (for example **Edit as New Message** in
     Thunderbird, or **Send Again** in Apple Mail).
   - **Open in mail app (no attachments)** opens your mail app with a new
-    message to the same recipients, with the subject and the summary as its
-    body, as **Email summary** did before. A message opened this way cannot carry
+    message to the same recipients, with the subject *<meeting name> summary* (it
+    was the Meeting ID) and the summary as its body. A message opened this way cannot carry
     attachments: the dialog then offers **Download the files**, to attach by
     hand.
 

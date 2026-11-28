@@ -105,6 +105,8 @@ const MeetingDownloadMenu = ({
     { builders: packBuilders },
   );
   const [packDialog, setPackDialog] = useState(null);
+  const currentCallId = useRef(callId);
+  currentCallId.current = callId;
   const whiteboardsReason = !whiteboards.length && !whiteboardsWritable ? WHITEBOARDS_DELETED : null;
 
   // The stored attachments, for an entry each; read when the page opens, and
@@ -197,7 +199,10 @@ const MeetingDownloadMenu = ({
 
   const saveWhiteboardsPdf = async () => {
     setNotice({ type: 'loading', text: 'Preparing the whiteboards PDF…' });
+    const askedFor = callId;
     const built = await pack.ensure(PART_WHITEBOARDS);
+    // Another meeting opened meanwhile: this one's file is not saved on its page.
+    if (currentCallId.current !== askedFor) return;
     if (built?.status === 'ready') {
       saveFile(built.blob, built.filename);
       setNotice({ type: 'success', text: `Saved ${built.filename}`, fades: true });
