@@ -10,8 +10,8 @@
  * size), unavailable (the reason) or failed -- kept while the meeting page is
  * open, so opening the dialog again, or the other dialog, reuses what was
  * built. A part is built again when what it is built from has changed since
- * (the summary's text, the number of key frames, a whiteboard's version), so
- * a meeting still going on gets a fresh snapshot.
+ * (the summary's text or the speakers' names, the number of key frames or the
+ * chapters, a whiteboard's version), so a meeting still going on gets a fresh snapshot.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ConsoleLogger } from 'aws-amplify/utils';

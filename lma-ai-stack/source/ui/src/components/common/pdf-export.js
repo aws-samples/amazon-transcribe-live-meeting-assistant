@@ -171,8 +171,13 @@ export const buildPdf = async (
     return doc.getTextWidth(text);
   };
 
-  const newPage = (wanted = orientation) => {
+  // A new page; with `replaceBlank`, one that takes the place of the current
+  // page when nothing has been placed on it yet (a turn to landscape at the
+  // top of a page leaves no blank page behind).
+  const newPage = (wanted = orientation, { replaceBlank = false } = {}) => {
+    const blank = replaceBlank && y === MARGIN ? doc.getCurrentPageInfo().pageNumber : null;
     doc.addPage(format, wanted);
+    if (blank) doc.deletePage(blank);
     pageOrientation = wanted;
     pageWidth = doc.internal.pageSize.getWidth();
     pageHeight = doc.internal.pageSize.getHeight();
@@ -338,7 +343,7 @@ export const buildPdf = async (
       width > height * 1.3 &&
       natural > contentWidth * 1.3
     ) {
-      newPage('landscape');
+      newPage('landscape', { replaceBlank: true });
     }
     let w = Math.min(contentWidth, natural);
     let h = (height / width) * w;
@@ -409,7 +414,7 @@ export const buildPdf = async (
       ...rows.map((row) => ({ runs: cell(row, c), bold: false })),
     ]);
     // A table too wide for a portrait page gets a landscape one.
-    if (pageOrientation === 'portrait' && isWideTable(block)) newPage('landscape');
+    if (pageOrientation === 'portrait' && isWideTable(block)) newPage('landscape', { replaceBlank: true });
     const widths = columnWidths(columns, byColumn, TABLE_SIZE);
     const lineHeight = TABLE_SIZE * LINE_HEIGHT;
     const layoutRow = (row, bold) =>

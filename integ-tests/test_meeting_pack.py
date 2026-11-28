@@ -282,7 +282,7 @@ def meeting(stack, credentials):
         )
         yield {"call_id": call_id, "username": username, "password": password}
     finally:
-        for prefix in ("c#", "trs#", "kf#", "wb#", "nt#", "mtr#"):
+        for prefix in ("c#", "trs#", "kf#", "wb#", "nt#", "mtr#", "gd#"):
             with contextlib.suppress(Exception):
                 items = ddb.query(
                     TableName=stack.event_table,

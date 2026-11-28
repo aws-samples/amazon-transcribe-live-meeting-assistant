@@ -170,6 +170,29 @@ describe('a part found empty, and a part that changes', () => {
     );
     await waitFor(() => expect(live.whiteboards).toHaveBeenCalledTimes(2));
   });
+
+  it('builds the summary again when a speaker is renamed while the dialog is open', async () => {
+    const live = builders();
+    const props = {
+      item: ITEM,
+      callTranscriptPerCallId: {},
+      keyframeCount: 2,
+      whiteboards: BOARDS,
+      loadAttachments: vi.fn(async () => []),
+      packBuilders: live,
+      saveFile: vi.fn(),
+    };
+    // eslint-disable-next-line react/jsx-props-no-spreading -- the same menu, rendered again with a new name
+    const { rerender } = render(<MeetingDownloadMenu {...props} speakers={[{ key: 's1', label: 'Speaker 1' }]} />);
+    openMenu();
+    choose('Meeting pack (PDF files)…');
+    await waitFor(() => expect(within(part('summary')).getByText('1000 B')).toBeTruthy());
+    expect(live.summary).toHaveBeenCalledTimes(1);
+    // eslint-disable-next-line react/jsx-props-no-spreading -- as above
+    rerender(<MeetingDownloadMenu {...props} speakers={[{ key: 's1', label: 'Ana Lima' }]} />);
+    await waitFor(() => expect(live.summary).toHaveBeenCalledTimes(2));
+    expect(live.summary.mock.calls[1][0].participants).toEqual(['Ana Lima']);
+  });
 });
 
 describe('Whiteboards (PDF)', () => {

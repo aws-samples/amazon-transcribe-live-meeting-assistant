@@ -31,6 +31,7 @@
 import { ConsoleLogger } from 'aws-amplify/utils';
 
 import { getTextFileFormattedMeetingDetails } from '../common/summary';
+import { NO_SLIDES, NO_WHITEBOARDS } from './meeting-pack';
 import {
   downloadSummaryAsDocx,
   downloadSummaryAsHtml,
@@ -155,9 +156,7 @@ export const recordingSessions = (current, earlier) => {
   return urls;
 };
 
-const NO_SHARED_SCREEN = 'Nothing was shared on screen in this meeting.';
 const NO_ATTACHMENTS = 'No chat attachments were captured for this meeting.';
-const NO_WHITEBOARDS = 'This meeting has no whiteboards.';
 const NO_PACK = 'This meeting has no summary, slides or whiteboards yet.';
 
 const recordingItems = (kind, label, urls) => {
@@ -231,7 +230,7 @@ export const downloadMenuItems = ({
       ].map((entry) => ({
         ...entry,
         disabled: keyframeCount === 0,
-        disabledReason: keyframeCount === 0 ? NO_SHARED_SCREEN : undefined,
+        disabledReason: keyframeCount === 0 ? NO_SLIDES : undefined,
       })),
     },
     {

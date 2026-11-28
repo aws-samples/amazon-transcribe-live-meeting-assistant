@@ -71,6 +71,16 @@ describe('line breaks', () => {
   });
 });
 
+describe('turning to landscape', () => {
+  it('leaves no blank page when the wide block is the first on its page', async () => {
+    const wide = { kind: 'table', header: Array.from({ length: 8 }, (_, i) => [{ text: `C${i}` }]), rows: [] };
+    const doc = await buildPdf([wide], { jsPDF, compress: false });
+    expect(doc.getNumberOfPages()).toBe(1);
+    expect(doc.internal.pageSize.getWidth()).toBeGreaterThan(doc.internal.pageSize.getHeight());
+    expect(pageStrings(doc, 1)).toEqual(expect.arrayContaining(['C0', 'C7', 'Page 1 of 1']));
+  });
+});
+
 describe('other blocks', () => {
   it('keeps the spaces of code, and wraps a long line inside the block', async () => {
     const doc = await buildPdf([{ kind: 'code', text: `def f():\n    return 1  # ${'x'.repeat(200)}` }], {
