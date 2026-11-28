@@ -89,21 +89,30 @@ def _send_injections(meeting: Meeting, offset: int) -> None:
         )
 
 
-def _summary(boards: list[dict]) -> list[dict]:
+#: Stands in for the test user's username in what the probe reports, so its
+#: output names no account.
+TEST_USER = "<test user>"
+
+
+def _who(name: Any, owner: str) -> Any:
+    return TEST_USER if name == owner else name
+
+
+def _summary(boards: list[dict], owner: str) -> list[dict]:
     return [
         {
             "WhiteboardId": b.get("WhiteboardId"),
             "Title": b.get("Title"),
             "Template": b.get("Template"),
             "Version": b.get("Version"),
-            "CreatedBy": b.get("CreatedBy"),
-            "UpdatedBy": b.get("UpdatedBy"),
+            "CreatedBy": _who(b.get("CreatedBy"), owner),
+            "UpdatedBy": _who(b.get("UpdatedBy"), owner),
             "Panels": [
                 {
                     "Title": p.get("Title"),
                     "Kind": p.get("Kind"),
                     "Source": p.get("Source"),
-                    "UpdatedBy": p.get("UpdatedBy"),
+                    "UpdatedBy": _who(p.get("UpdatedBy"), owner),
                     "Content": p.get("Content") or "",
                 }
                 for p in b.get("Panels") or []
@@ -137,7 +146,7 @@ def run_probe(stack_name: str, region: str | None = None) -> dict:
     owner = _claims(tokens["id"]).get("cognito:username") or username
     probe = Probe(deployment, tokens["id"])
     meeting = Meeting(deployment, owner, assisted=False)
-    observed: dict[str, Any] = {"call_id": meeting.call_id, "owner": owner, "answers": {}}
+    observed: dict[str, Any] = {"call_id": meeting.call_id, "answers": {}}
     key, prefix = None, None
     try:
         meeting.start()
@@ -162,7 +171,7 @@ def run_probe(stack_name: str, region: str | None = None) -> dict:
                 "answer": answer if failed else answer.get("answer"),
                 "seconds": round(time.monotonic() - started, 1),
             }
-            observed[f"after_{step}"] = _summary(probe.boards(meeting))
+            observed[f"after_{step}"] = _summary(probe.boards(meeting), owner)
     finally:
         if prefix:
             try:

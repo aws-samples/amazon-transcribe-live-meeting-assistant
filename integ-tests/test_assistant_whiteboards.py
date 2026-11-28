@@ -23,7 +23,7 @@ import json
 
 import cognito_test_user
 import pytest
-from assistant_whiteboards_probe import QUESTION_MARK
+from assistant_whiteboards_probe import QUESTION_MARK, TEST_USER
 
 
 @pytest.fixture(scope="module")
@@ -65,7 +65,7 @@ def test_a_comparison_whiteboard_is_made_for_the_user_with_the_options(observed)
     assert len(boards) == 1, boards
     board = boards[0]
     assert board["Template"] == "comparison"
-    assert board["CreatedBy"] == observed["owner"]
+    assert board["CreatedBy"] == TEST_USER
     table = board["Panels"][0]
     assert table["Title"] == "Comparison" and "|" in table["Content"], table
     content = table["Content"].lower()
@@ -92,4 +92,4 @@ def test_a_question_is_added_to_the_open_questions_and_kept(observed) -> None:
     assert QUESTION_MARK.lower().rstrip("?") in panels[0]["Content"].lower()
     # The comparison table it already had is still there.
     assert "|" in comparison["Panels"][0]["Content"]
-    assert panels[0]["UpdatedBy"] == observed["owner"]
+    assert panels[0]["UpdatedBy"] == TEST_USER

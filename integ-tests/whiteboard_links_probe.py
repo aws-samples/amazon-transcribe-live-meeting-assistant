@@ -30,6 +30,7 @@ import urllib.parse
 from typing import Any
 
 import cognito_test_user
+from assistant_whiteboards_probe import TEST_USER
 from meeting_whiteboards_probe import CONVERSATION, Deployment, Meeting, Probe
 from mcp_api_key_probe import ProbeError
 from mcp_meeting_tools_probe import _claims
@@ -104,7 +105,7 @@ def run_probe(stack_name: str, region: str | None = None) -> dict:
     owner = _claims(tokens["id"]).get("cognito:username") or username
     probe = Probe(deployment, tokens["id"])
     meeting = Meeting(deployment, owner, assisted=False)
-    observed: dict[str, Any] = {"call_id": meeting.call_id, "owner": owner}
+    observed: dict[str, Any] = {"call_id": meeting.call_id}
     prefix = None
     try:
         meeting.start()
@@ -123,7 +124,8 @@ def run_probe(stack_name: str, region: str | None = None) -> dict:
         observed["boards"] = [
             {
                 "Title": b.get("Title"),
-                "CreatedBy": b.get("CreatedBy"),
+                # The test user stands as TEST_USER, so the output names no account.
+                "CreatedBy": TEST_USER if b.get("CreatedBy") == owner else b.get("CreatedBy"),
                 "Panels": [
                     {"Title": p.get("Title"), "Source": p.get("Source"), "Content": p.get("Content") or ""}
                     for p in b.get("Panels") or []
