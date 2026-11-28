@@ -41,7 +41,9 @@ export const TEMPLATES = [
   {
     name: 'architecture',
     label: 'Architecture diagram',
-    description: 'The components discussed and how they connect, with their responsibilities and the design decisions.',
+    description:
+      'The components of the system being discussed and how they connect, ' +
+      "with each component's responsibility and the design decisions.",
   },
   { name: 'comparison', label: 'Comparison', description: 'The options being compared, with notes.' },
   { name: 'timeline', label: 'Timeline', description: 'Dates and milestones mentioned, as a timeline, with notes.' },
@@ -68,7 +70,9 @@ export const TEMPLATES = [
   {
     name: 'decision_log',
     label: 'Decision log',
-    description: 'Each decision with its context, consequences and the alternatives considered.',
+    description:
+      'Each decision as a short decision record: its context, the decision, ' +
+      'its consequences and the alternatives considered.',
   },
   {
     name: 'retrospective',

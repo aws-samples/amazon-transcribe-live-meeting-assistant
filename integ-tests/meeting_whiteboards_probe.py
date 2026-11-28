@@ -490,9 +490,7 @@ def run_probe(stack_name: str, region: str | None = None) -> dict:  # noqa: C901
             )
             observed["fetching_style_refused"] = False
         except ProbeError as error:
-            observed["fetching_style_refused"] = "WhiteboardInvalid" in str(error) or (
-                "fetch" in str(error)
-            )
+            observed["fetching_style_refused"] = "may not fetch anything" in str(error)
 
         for meeting in (assisted, control):
             meeting.send(waves[0], 0)

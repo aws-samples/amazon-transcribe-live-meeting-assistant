@@ -3528,8 +3528,9 @@ type MeetingWhiteboard @aws_cognito_user_pools @aws_iam {
 	CallId: ID!
 	WhiteboardId: ID!
 	Title: String!
-	# The template it was made from: decisions, process, comparison, timeline
-	# or blank.
+	# The template it was made from, one of lma_whiteboards.rules.TEMPLATES
+	# (decisions, process, architecture, comparison, timeline, gantt,
+	# user_stories, raci, risks, decision_log, retrospective or blank).
 	Template: String
 	# What the assistant should keep on this whiteboard, at most 1000 characters.
 	Instructions: String
