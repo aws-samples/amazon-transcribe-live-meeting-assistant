@@ -197,10 +197,20 @@ def refusal(error: Exception) -> str:
         return _REFUSALS[kind]
     if kind == "WhiteboardInvalid":
         # The resolver's message names the rule the change broke.
-        message = str(error)
-        start = message.find("WhiteboardInvalid")
-        return "The change was refused: " + message[start:][:300]
+        return "The change was refused: " + _message(error)[:300]
     return "The whiteboard could not be changed just now."
+
+
+def _message(error: Exception) -> str:
+    """The resolver's own message: the first GraphQL error's, else the exception's text."""
+    errors = getattr(error, "errors", None)
+    if isinstance(errors, list) and errors and isinstance(errors[0], Mapping):
+        message = errors[0].get("message")
+        if isinstance(message, str) and message:
+            return message
+    text = str(error)
+    start = text.find("WhiteboardInvalid")
+    return text[start + len("WhiteboardInvalid") :].lstrip(":' ,") if start >= 0 else text
 
 
 def _clean(value: Any) -> str:

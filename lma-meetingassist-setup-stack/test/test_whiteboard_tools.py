@@ -359,6 +359,18 @@ def test_a_refusal_names_the_rule_or_what_to_do() -> None:
     assert tools.refusal(Exception("boom")) == "The whiteboard could not be changed just now."
 
 
+def test_a_graphql_refusal_is_given_in_the_resolvers_own_words() -> None:
+    class TransportQueryError(Exception):
+        def __init__(self, errors):
+            super().__init__(str(errors[0]))
+            self.errors = errors
+
+    error = TransportQueryError(
+        [{"errorType": "WhiteboardInvalid", "message": "A diagram may not hold HTML", "path": ["x"]}]
+    )
+    assert tools.refusal(error) == "The change was refused: A diagram may not hold HTML"
+
+
 def test_the_handlers_tool_bodies_report_a_refusal_to_the_agent(monkeypatch) -> None:
     import strands_stand_in
 
