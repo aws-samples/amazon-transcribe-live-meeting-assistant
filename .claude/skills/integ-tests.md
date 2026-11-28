@@ -152,6 +152,7 @@ make docker-build-check-all    # + Virtual Participant image (heavy)
 | `test_transcriber_ecs_service_running` | ECS tasks running, not crash-looping | fastify 5 stability |
 | `test_appsync_reachable` | IAM-signed GraphQL query works | AppSync data plane |
 | `test_kds_pipeline_creates_meeting` | synthetic START → meeting in DynamoDB | **gql 4→AppSync** |
+| `test_synthetic_meeting_kit.py` | the synthetic meeting kit replays `retrospective` through Kinesis (fast, left live) → meeting row with its title/agenda/context/label, every turn with the scripted speaker/channel/text/times, the chat line on `MEETING_CHAT`; `--cleanup` leaves nothing | `scripts/synthetic_meetings/` (other workstreams drive meetings with it) |
 | `test_ws_stream_transcribes_to_meeting` *(opt-in)* | stream a real WAV → meeting **+ transcript segments** | **@fastify/websocket 11 upgrade + Transcribe + gql** |
 | `test_vp_registry_lifecycle` | VP create→get→list→end (no meeting) | VP CRUD surface |
 | `test_vp_live_join` *(opt-in)* | VP joins a real meeting | `@zoom/meetingsdk` |
@@ -229,3 +230,7 @@ anything that needs a real meeting or user creds `@pytest.mark.live` or gate it 
 env vars + `pytest.skip` so the default `make integ-tests` run stays green and
 side-effect-free. The reusable probes are `kds_pipeline_probe.py` (Kinesis→DDB)
 and `ws_stream_probe.py` (real WAV over the WebSocket).
+For a whole scripted meeting (turns with named speakers, chat, agenda), import
+the synthetic meeting kit's `kit` and `delivery` modules from
+`scripts/synthetic_meetings/`, as `test_synthetic_meeting_kit.py` does, or run
+its `run_meeting.py`; see its README.

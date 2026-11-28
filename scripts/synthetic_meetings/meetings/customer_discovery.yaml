@@ -1,0 +1,119 @@
+# Fictional companies, competitors and people. See ../README.md for what to test with it.
+title: Customer discovery - Tidewater Freight Cooperative
+purpose: >-
+  A customer's pains and needs, two competitors named, budget and timing, and one
+  factual claim (about GDPR fines) that can be checked against a public source.
+agenda: |
+  1. Introductions
+  2. How dispatch works today
+  3. Pain points and what good looks like
+  4. Tools evaluated so far
+  5. Timeline, budget and next steps
+meeting_context: >-
+  Discovery call between Fieldnote Analytics (fictional vendor of dispatch software) and
+  Tidewater Freight Cooperative (fictional customer), a regional carrier with depots in
+  Ohio and Rotterdam. Lucas leads the call; Aisha is the vendor's solutions engineer.
+speakers:
+  - {name: Lucas Moreau, channel: LOCAL, voice: Joey}
+  - {name: Aisha Rahman, channel: REMOTE, voice: Kajal}
+  - {name: Margaret Lindqvist, channel: REMOTE, voice: Emma}
+  - {name: Kwame Asante, channel: REMOTE, voice: Gregory}
+script:
+  - speaker: Lucas Moreau
+    text: >-
+      Thanks for making the time, Margaret and Kwame. I am Lucas from Fieldnote Analytics,
+      and Aisha is our solutions engineer. Today we mostly want to listen and understand how
+      dispatch works for you.
+  - speaker: Margaret Lindqvist
+    text: >-
+      Happy to. I run operations for Tidewater, and Kwame runs our IT. We have about one
+      hundred and forty trucks across two depots, one in Ohio and one in Rotterdam.
+  - speaker: Lucas Moreau
+    text: >-
+      Great. Walk me through a normal morning. How does a load get assigned to a driver
+      today?
+  - speaker: Margaret Lindqvist
+    text: >-
+      Honestly, it is a shared spreadsheet and a lot of phone calls. The dispatchers start at
+      five, look at the orders that came in overnight, and match them to drivers by memory.
+      If someone calls in sick, the whole plan gets redone by hand.
+  - speaker: Kwame Asante
+    text: >-
+      And the orders come from our transport management system, but there is no
+      integration. Someone exports a file every evening and pastes it into the spreadsheet.
+  - speaker: Aisha Rahman
+    text: >-
+      What happens when the plan changes during the day, for example a delay at a customer
+      site?
+  - speaker: Margaret Lindqvist
+    text: >-
+      That is the biggest pain. We pay detention charges when trucks wait too long at a dock,
+      and last quarter that was around sixty thousand dollars. Nobody sees the delay coming
+      until the driver phones in.
+  - speaker: Lucas Moreau
+    text: >-
+      Sixty thousand in a quarter is significant. If you could see delays coming, what would
+      you do differently?
+  - speaker: Margaret Lindqvist
+    text: >-
+      Re-sequence the stops, or send a different truck. We need live visibility of where each
+      truck is and an estimate of when it will arrive, in one screen, not three.
+  - speaker: Kwame Asante
+    text: >-
+      From my side, the paperwork is the other problem. Drivers photograph delivery receipts
+      on their phones and send them over messaging apps. They end up everywhere, and we have
+      had customers dispute deliveries because we could not find the proof.
+  - chat: Kwame Asante
+    text: "Our TMS export is a nightly CSV, about 2,000 rows. Happy to share a sample."
+  - speaker: Aisha Rahman
+    text: >-
+      Thanks Kwame, a sample would help a lot. Have you looked at any other tools so far?
+  - speaker: Margaret Lindqvist
+    text: >-
+      We had demos from two. Tessellate TMS was impressive on route planning, but it wanted
+      to replace our whole transport management system, and we are not ready for that.
+  - speaker: Kwame Asante
+    text: >-
+      The other was Quarryline Dispatch. Cheaper, but the mobile app for drivers was clunky,
+      and it had no proper European data hosting, which is a problem for Rotterdam.
+  - speaker: Lucas Moreau
+    text: >-
+      Tell me more about the European side. What are the requirements there?
+  - speaker: Kwame Asante
+    text: >-
+      Driver location is personal data, so GDPR applies. Our legal team reminded us that
+      fines under GDPR can reach four percent of a company's worldwide annual turnover, or
+      twenty million euros if that is higher. So we need the data hosted in the EU and a clear
+      retention policy.
+  - speaker: Aisha Rahman
+    text: >-
+      That makes sense. We can host in an EU region, and location history retention is
+      configurable. I will confirm the exact options in writing.
+  - speaker: Lucas Moreau
+    text: >-
+      What does success look like a year from now, if this goes well?
+  - speaker: Margaret Lindqvist
+    text: >-
+      Detention charges cut in half, dispatchers starting at seven instead of five, and
+      every delivery receipt attached to the order automatically.
+  - speaker: Lucas Moreau
+    text: >-
+      That is very clear, thank you. On timing and budget, is there a decision date you are
+      working towards?
+  - speaker: Margaret Lindqvist
+    text: >-
+      We want something live before peak season, so a decision by the end of February. The
+      budget is approved for this year, roughly in the range of what Quarryline quoted, but
+      we would pay more for the driver app and the EU hosting.
+  - speaker: Kwame Asante
+    text: >-
+      I will need a security questionnaire answered and a technical session on the
+      integration with our transport management system before we sign anything.
+  - speaker: Lucas Moreau
+    text: >-
+      Understood. Next steps from us: Aisha sends the EU hosting and retention details this
+      week, and we schedule the integration session with Kwame. Margaret, could we also get
+      the detention report from last quarter?
+  - speaker: Margaret Lindqvist
+    text: >-
+      Yes, I will send it on Monday. Thanks both, this was a good conversation.

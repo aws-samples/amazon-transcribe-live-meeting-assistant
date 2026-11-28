@@ -290,6 +290,13 @@ do too, and run on a nightly GitLab schedule against a long-lived stack —
 [Scheduled Integration Tests](scheduled-integration-tests.md) covers the
 scheduled run and the one-time setup it needs.
 
+To try a change against a realistic conversation without a real meeting, the
+[synthetic meeting kit](../scripts/synthetic_meetings/README.md)
+(`scripts/synthetic_meetings/run_meeting.py`) replays one of six scripted,
+fictional meetings into a deployed stack, either through Kinesis (exact speaker
+names, seconds for a whole meeting) or as Amazon Polly audio streamed to the
+WebSocket transcriber (the real speech path), and deletes it afterwards.
+
 Line coverage is measured by `make test-coverage`, which is deliberately not part
 of this pipeline — it reports numbers rather than enforcing a threshold, and runs
 every suite. See [Test Coverage](test-coverage.md).

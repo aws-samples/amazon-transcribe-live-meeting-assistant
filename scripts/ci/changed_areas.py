@@ -91,7 +91,7 @@ AREAS: dict[str, str] = {
     "pr_review": "advisory AI review harness (scripts/pr_review)",
     "agent_instructions": "CLAUDE.md, AGENTS.md and .claude/ at any depth (instructions)",
     "docs_site": "the docs site's build: its package files, scripts and Astro config",
-    "demo_recorder": "product demo recorder and its helpers",
+    "demo_recorder": "product demo recorder, its helpers and the synthetic meeting kit",
     "solution_profile": (
         "the solution profile, its vendored contract and its check, and every file the "
         "profile names as evidence"
@@ -313,6 +313,8 @@ PRIMARY_RULES: tuple[Rule, ...] = _rules(
     ("scripts/demo_storyboards.yaml", "demo_recorder"),
     ("scripts/requirements-ux-recorder.txt", "demo_recorder"),
     ("scripts/meeting_guest/**", "demo_recorder"),
+    # The synthetic meeting kit; its tests are in scripts/tests with the recorder's.
+    ("scripts/synthetic_meetings/**", "demo_recorder"),
     ("scripts/tests/**", "demo_recorder"),
     ("scripts/cloudformation_parameters_doc.py", "python_tooling"),
     ("scripts/bedrock_inference_catalog.py", "python_tooling"),
@@ -448,6 +450,14 @@ EXTRA_RULES: tuple[Rule, ...] = _rules(
     ("lma-ai-stack/source/appsync/schema.graphql", "lambdas"),
     ("docs/user-based-access-control.md", "lambdas"),
     ("README.md", "vp_template"),
+    # The synthetic meeting kit's tests hold its START fields, channel names and
+    # WebSocket START frame to the schema, the configuration layer and the
+    # transcriber's CallMetaData (scripts/tests/test_synthetic_meetings.py).
+    ("lma-ai-stack/source/appsync/schema.graphql", "demo_recorder"),
+    (f"{LAYERS}/configuration_layer/lma_channels/__init__.py", "demo_recorder"),
+    (f"{TRANSCRIBER}/source/app/src/calleventdata/eventtypes.ts", "demo_recorder"),
+    # ...and its cleanup to the partitions the meeting delete removes.
+    (f"{FUNCTIONS}/meeting_controls_resolver/index.py", "demo_recorder"),
     # ...and read the AI stack through the AI stack tests' helper, which inlines its
     # nested templates.
     ("lma-ai-stack/test/ai_stack_templates.py", "vp_template"),
