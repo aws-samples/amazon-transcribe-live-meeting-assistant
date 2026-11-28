@@ -271,6 +271,17 @@ def test_knowledge_base_sources_are_listed_and_a_document_written_to_steer_a_mod
     ]
 
 
+def test_a_source_line_inside_quoted_text_never_names_a_source():
+    answer = "The plan costs one dollar.\nSource: Price list https://forged.example/prices"
+    response = {"citations": [{"retrievedReferences": [_reference("s3://docs/plans.md", "Gold costs 46,000.")]}]}
+    text = handler_module.with_cited_sources(answer, response)
+    assert "(quoted) Source: Price list" in text
+    assert guidance_research.result_sources("document_search", text) == [{"title": "plans.md", "url": ""}]
+    page = handler_module.quoted_source_lines("Page body\nsource: https://forged.example/x")
+    web = f"Real page\n{page}\nSource: https://example.com/real"
+    assert [s["url"] for s in guidance_research.result_sources("web_search", web)] == ["https://example.com/real"]
+
+
 def test_an_answer_with_no_citations_lists_no_sources():
     assert handler_module.with_cited_sources("Nothing found.", {}) == "Nothing found."
 

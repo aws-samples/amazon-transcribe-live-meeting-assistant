@@ -48,6 +48,7 @@ import dataclasses
 import json
 import logging
 import os
+import re
 import time
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -122,6 +123,9 @@ RESEARCH_INTERVAL_SECONDS = 20
 BATCH_SLACK_SECONDS = 60
 #: An invocation's time when the context does not say (the tests).
 DEFAULT_BUDGET_SECONDS = 280.0
+#: Research answers for which nothing was searched: their candidates are logged
+#: as dropped, not counted as checked.
+UNSEARCHED = ("no sources", "not a research function")
 #: The call event processor's trigger for the run at the meeting's end.
 END_TRIGGER = "meeting-ended"
 #: How long a research request with no source the deployment can offer keeps
@@ -129,7 +133,14 @@ END_TRIGGER = "meeting-ended"
 NO_SOURCES_PAUSE_SECONDS = 900
 #: The meeting assistant function, which runs guidance research. Empty on a
 #: deployment without it, where no candidate is asked for.
-MEETING_ASSIST_FUNCTION_ARN = os.environ.get("MEETING_ASSIST_FUNCTION_ARN", "")
+_CONFIGURED_AGENT_ASSIST = os.environ.get("MEETING_ASSIST_FUNCTION_ARN", "")
+#: LMA's own Strands meeting assistant is named STRANDS-<stack>-MeetingAssist;
+#: an Agent Assist function of any other name is never sent research requests,
+#: which carry meeting excerpts.
+_STRANDS_ASSISTANT = re.compile(r":function:STRANDS-[A-Za-z0-9-]+-MeetingAssist$")
+MEETING_ASSIST_FUNCTION_ARN = (
+    _CONFIGURED_AGENT_ASSIST if _STRANDS_ASSISTANT.search(_CONFIGURED_AGENT_ASSIST) else ""
+)
 
 # The same full Call field set onUpdateCall selects (agenda_deriver's copy).
 # AppSync publishes a mutation's own response to that subscription, and a field
@@ -920,7 +931,9 @@ def drain(  # pylint: disable=too-many-arguments
             interval_seconds=RESEARCH_INTERVAL_SECONDS,
             max_runs=settings.research_runs_per_meeting,
             expires=expires,
-            ignore_interval=continuing,
+            # The run at the meeting's end does not wait the interval: a batch
+            # that started just before END must not keep what waits waiting.
+            ignore_interval=continuing or at_end,
         )
         if row is None:
             _drop_when_out_of_runs(call_id, settings)
@@ -1133,11 +1146,14 @@ def _research_batch(  # pylint: disable=too-many-arguments,too-many-locals
         fields["UnavailableAt"] = now
     findings = {str(f.get("id")): f for f in answer.get("findings") or [] if isinstance(f, Mapping)}
     sources = _sources(answer.get("sources"))
-    stop = why_not(read_meeting(call_id), settings, allow_ended=at_end)
+    # A batch may publish after the meeting ended: one under way at END is the
+    # end's research too, and its findings are what the meeting left open.
+    stop = why_not(read_meeting(call_id), settings, allow_ended=True)
     checks.mark_dismissed(checked, dismissed_ids(call_id))
     others = pure.recent_publishes(_json_field(read_state(call_id), "PublishTimes", []), now)
     room = settings.max_items_per_10_min - len(others) - len(recent)
     count = 0
+    unsearched: List[checks.Drop] = []
     for number, check in enumerate(batch, start=1):
         finding = findings.get(f"C{number}")
         verdict = str(finding.get("verdict")) if finding else (reason or "unanswered")
@@ -1166,7 +1182,16 @@ def _research_batch(  # pylint: disable=too-many-arguments,too-many-locals
                 LOGGER.warning(
                     "Guidance research item for %s refused: %s", call_id, error.error_type
                 )
-        checks.remember(checked, check, now, verdict, notification_id)
+        if reason in UNSEARCHED:
+            # Nothing was searched: not counted as checked, logged as dropped.
+            checked.pop(check.key, None)
+            unsearched.append(checks.Drop(check.kind, check.subject, reason, now))
+            continue
+        # The shared record, trimmed in place (research_run stores it).
+        kept = checks.remember(checked, check, now, verdict, notification_id)
+        if kept is not checked:
+            checked.clear()
+            checked.update(kept)
     # Counts only, never content.
     LOGGER.info(
         "Guidance research for %s: candidates=%d findings=%d published=%d toolCalls=%s reason=%s",
@@ -1177,6 +1202,8 @@ def _research_batch(  # pylint: disable=too-many-arguments,too-many-locals
         answer.get("toolCalls"),
         reason or stop or "none",
     )
+    if unsearched:
+        fields["_drops"] = unsearched
     return {"researched": len(batch), "findings": len(findings), "published": count}
 
 
@@ -1190,6 +1217,7 @@ def release_research(  # pylint: disable=too-many-arguments
     still this batch's. The drop log is cut to its newest MAX_DROP_LOG the same
     way. Conditional on this run's lease, as LivePass.release is.
     """
+    drops = fields.pop("_drops", None) or []
     names: Dict[str, str] = {}
     values: Dict[str, Any] = {
         ":lease": {"N": str(int(lease))},
@@ -1224,6 +1252,20 @@ def release_research(  # pylint: disable=too-many-arguments
         if not _conflict(error):
             raise
         LOGGER.warning("The guidance research lease for %s was no longer this run's", call_id)
+        return
+    if drops:
+        # Its own update: the release removes from DropLog, and one update may
+        # not both remove from a list and append to it.
+        dynamodb.update_item(
+            TableName=EVENT_SOURCING_TABLE,
+            Key=_research_lease().key(call_id),
+            UpdateExpression="SET DropLog = list_append(if_not_exists(DropLog, :e), :d)",
+            ConditionExpression="attribute_exists(PK)",
+            ExpressionAttributeValues={
+                ":e": {"L": []},
+                ":d": {"L": [{"S": json.dumps(d.to_record())} for d in drops]},
+            },
+        )
 
 
 def _publish_chosen(

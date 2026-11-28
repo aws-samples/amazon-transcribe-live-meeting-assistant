@@ -10,6 +10,7 @@ Supports dynamic MCP server loading from Public Registry
 """
 
 import itertools
+import re
 import time
 import json
 import os
@@ -704,6 +705,19 @@ def kb_citation_sources(response: Dict[str, Any]) -> List[Dict[str, Any]]:
     return sources
 
 
+_SOURCE_LINE_START = re.compile(r"(?im)^(\s*)(source\s*:)")
+
+
+def quoted_source_lines(text: str) -> str:
+    """Text with any line of its own that begins ``Source:`` marked as quoted.
+
+    Guidance research reads a tool's sources from the ``Source:`` lines the tool
+    writes itself, so a document, a generated answer or a web page that holds
+    such a line is not read as naming a source.
+    """
+    return _SOURCE_LINE_START.sub(r"\1(quoted) \2", text or "")
+
+
 def with_cited_sources(result: str, response: Dict[str, Any]) -> str:
     """``result`` followed by one ``Source: <title> <url>`` line per cited document.
 
@@ -718,7 +732,7 @@ def with_cited_sources(result: str, response: Dict[str, Any]) -> str:
         )
         for source in kb_citation_sources(response)
     ]
-    return result + ('\n\n' + '\n'.join(lines) if lines else '')
+    return quoted_source_lines(result) + ('\n\n' + '\n'.join(lines) if lines else '')
 
 
 def create_document_search_tool(kb_id: str, kb_region: str, kb_account_id: str, kb_model_id: str,
@@ -900,8 +914,10 @@ def create_web_search_tool(call_id: str, message_id: Optional[str] = None):
             # Format results
             results = []
             for result in response.get('results', []):
-                title = result.get('title', '')
-                content = result.get('content', '')
+                # A line of the page's own that begins "Source:" is quoted, so
+                # only the line written here names the page's address.
+                title = quoted_source_lines(' '.join(str(result.get('title', '')).split()))
+                content = quoted_source_lines(str(result.get('content', '')))
                 url = result.get('url', '')
                 results.append(f"{title}\n{content}\nSource: {url}")
             

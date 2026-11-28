@@ -281,7 +281,8 @@ reason: its quote is not in its segment, its confidence is below the threshold,
 it is over a run's five, it repeats one already checked or waiting (by subject
 or by wording), the meeting's **claims and terms per meeting** are used, the
 queue is full, or the meeting's **research runs per meeting** are used (what
-still waits then is dropped). The analyzer's log records how many were queued,
+still waits then is dropped), or there was nothing to search (no source is
+available, the candidate is not counted as checked). The analyzer's log records how many were queued,
 deferred and dropped for each reason, never the claims themselves.
 
 A fact check usually appears a minute or two after the claim: up to one interval
@@ -290,8 +291,11 @@ then the research, which took about 5 to 10 seconds a batch on Claude Haiku
 5.5 when measured with document search.
 
 Nothing is checked or published once the meeting's transcript has been deleted
-or live guidance has been turned off for it. Once the meeting has ended, only
-its run at the end researches and publishes.
+or live guidance has been turned off for it. Once the meeting has ended, no
+guidance run starts; its run at the end, and a research run already under way
+at END, still research and publish. Research is sent only to LMA's own Strands
+meeting assistant (`STRANDS-<stack>-MeetingAssist`): a stack whose Agent Assist
+is another Lambda function asks for no candidates.
 
 ### What a check trusts
 
@@ -455,10 +459,8 @@ when the meeting is deleted.
   document knowledge base nor web search), mostly claims made in earlier
   meetings can be checked.
 - **It needs the Strands meeting assistant.** Research is done by the meeting
-  assistant function LMA deploys. A stack with no Agent Assist function asks for
-  no candidates; one whose Agent Assist is another Lambda function gets back an
-  answer research does not recognise, and then asks for none for 15 minutes,
-  as a deployment with no source does.
+  assistant function LMA deploys. A stack with no Agent Assist function, or one
+  whose Agent Assist is another Lambda function, asks for no candidates.
 - **A check is not instant.** It waits for the run that finds the claim and
   then for its research, usually a minute or two in all.
 

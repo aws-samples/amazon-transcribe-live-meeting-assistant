@@ -116,6 +116,11 @@ class TwoRowDynamo(FakeDynamo):
                 self.state["DropLog"] = list(self.state.get("DropLog") or []) + values[":drops"]
             self.state["CallId"] = values[":call"]
             return {}
+        if condition == "attribute_exists(PK)" and "DropLog = list_append" in expression:
+            if not self.state:
+                raise _conditional_failure()
+            self.state["DropLog"] = list(self.state.get("DropLog") or []) + values[":d"]
+            return {}
         if "Pending = :empty" in expression:
             assert condition.startswith("attribute_exists(PK) AND")
             lease = self.state.get("LeaseUntil")
@@ -402,6 +407,54 @@ def test_the_end_run_reads_the_last_minutes_no_run_read_and_researches_their_cla
     assert state["dynamo"].rows["analyzer"]["RunCount"] == 2
 
 
+def test_the_end_run_right_after_a_batch_still_researches_what_waits(world, monkeypatch):
+    every = [contradicted(f"C{n}") for n in range(1, 4)]
+    state = world(
+        answers=[with_checks(*five_claims())],
+        research=[{"ok": True, "findings": every, "sources": SOURCES}],
+    )
+    # Time for one batch only (each reading of the clock is a minute later),
+    # then END a few seconds later.
+    ticks = {"now": 0.0}
+
+    def monotonic():
+        ticks["now"] += 60.0
+        return ticks["now"]
+
+    real_monotonic = index.time.monotonic
+    monkeypatch.setattr(index.time, "monotonic", monotonic)
+    # The first check reads 60 (60 + 60 + 60 < 181), the second 120: one batch.
+    index.run(CALL_ID, until=181.0)
+    monkeypatch.setattr(index.time, "monotonic", real_monotonic)
+    assert len(state["requests"]) == 1 and len(waiting(state)) == 2
+    state["clock"].now += 5
+    state["dynamo"].meeting["Status"] = "ENDED"
+    result = index.handler({"CallId": CALL_ID, "Trigger": "meeting-ended"}, None)
+    assert result["research"]["runs"] == 1 and waiting(state) == []
+    assert len(facts(state)) == 5
+
+
+def test_candidates_nothing_was_searched_for_are_logged_not_counted(world):
+    state = world(
+        answers=[with_checks(PRICE)],
+        research=[{"ok": False, "reason": "no sources", "findings": []}],
+    )
+    automatic()
+    assert checked(state) == {}
+    assert [(d["subject"], d["reason"]) for d in drop_log(state)] == [
+        ("renewal price", "no sources")
+    ]
+
+
+def test_only_the_strands_meeting_assistant_is_sent_research():
+    pattern = index._STRANDS_ASSISTANT  # pylint: disable=protected-access
+    assert pattern.search(
+        "arn:aws:lambda:us-east-1:123456789012:function:STRANDS-LMA-Live-MeetingAssist"
+    )
+    assert not pattern.search("arn:aws:lambda:us-east-1:123456789012:function:my-agent-assist")
+    assert not pattern.search("")
+
+
 def test_the_end_run_does_nothing_without_a_queue_or_with_the_types_off(world):
     world(answers=[answer()])
     assert index.handler({"CallId": CALL_ID, "Trigger": "meeting-ended"}, None)["reason"] == (
@@ -543,7 +596,7 @@ def test_fact_checks_share_the_cap_on_guidance_per_ten_minutes(world):
 # ── stopping ─────────────────────────────────────────────────────────────────
 
 
-def test_nothing_is_published_once_the_meeting_has_ended(world, monkeypatch):
+def test_a_batch_under_way_when_the_meeting_ends_still_publishes(world, monkeypatch):
     state = world(answers=[with_checks(PRICE)])
     reads = []
     real = index.read_meeting
@@ -551,7 +604,23 @@ def test_nothing_is_published_once_the_meeting_has_ended(world, monkeypatch):
     def read_meeting(call_id):
         reads.append(call_id)
         meeting = real(call_id)
-        return {**meeting, "Status": "ENDED"} if len(reads) > 2 else meeting
+        return {**meeting, "Status": "ENDED"} if len(reads) > 3 else meeting
+
+    monkeypatch.setattr(index, "read_meeting", read_meeting)
+    automatic()
+    assert len(state["requests"]) == 1 and len(facts(state)) == 1
+
+
+def test_nothing_is_published_once_the_transcript_is_deleted(world, monkeypatch):
+    state = world(answers=[with_checks(PRICE)])
+    reads = []
+    real = index.read_meeting
+
+    def read_meeting(call_id):
+        reads.append(call_id)
+        meeting = real(call_id)
+        deleted = {"TranscriptDeletedAt": "2026-11-28T00:00:00Z"}
+        return {**meeting, **deleted} if len(reads) > 3 else meeting
 
     monkeypatch.setattr(index, "read_meeting", read_meeting)
     automatic()
