@@ -216,13 +216,9 @@ def meeting(stack, credentials):
                 ContentType="image/jpeg",
             )
             frame_keys.append(object_key)
-            # The bucket's regional host, as the frame writer names it (amazonaws.com.cn in China).
-            suffix = (
-                "amazonaws.com.cn"
-                if stack.region.startswith("cn-")
-                else "amazonaws.com"
-            )
-            url = f"https://{stack.recordings_bucket}.s3.{stack.region}.{suffix}/{object_key}"
+            # As the key frame writers name it; the resolver reads only the
+            # "<bucket>.s3." host prefix and the key, so the suffix does not matter.
+            url = f"https://{stack.recordings_bucket}.s3.{stack.region}.amazonaws.com/{object_key}"
             ddb.put_item(
                 TableName=stack.event_table,
                 Item={

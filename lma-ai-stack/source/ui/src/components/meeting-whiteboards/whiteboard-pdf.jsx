@@ -36,7 +36,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import WhiteboardMarkdown from './WhiteboardMarkdown';
 import { loadMermaid } from './MermaidDiagram';
 import { KIND_MERMAID, SOURCE_ASSISTANT, TEMPLATES, mermaidProblem } from './whiteboard-model';
-import { buildPdf } from '../common/pdf-export';
+import { buildPdf, isWideTable } from '../common/pdf-export';
 import { coverBlocks } from '../common/pdf-cover';
 
 const GREY = '5f6b7a';
@@ -334,9 +334,17 @@ export const whiteboardsPdfBlocks = async (
       // eslint-disable-next-line no-await-in-loop -- diagrams are drawn one at a time, as Mermaid requires
       contents.push(await panelBlocks(panels[p], { draw }));
     }
-    // A diagram too wide for a portrait page starts a landscape one, with its
-    // title; a whiteboard that opens with one starts on that landscape page.
-    const wide = contents.map((content) => content[0]?.kind === 'image' && isWideDiagram(content[0].image));
+    // A panel with a diagram or a table too wide for a portrait page starts a
+    // landscape one, with its title; a whiteboard that opens with one starts on
+    // that landscape page. What follows stays on landscape pages until the
+    // next whiteboard, rather than leave the rest of the page empty.
+    const wide = contents.map((content) =>
+      content.some(
+        (block) =>
+          (block.kind === 'image' && block.landscapeIfWide && isWideDiagram(block.image)) ||
+          (block.kind === 'table' && isWideTable(block)),
+      ),
+    );
     blocks.push(wide[0] ? { kind: 'pageBreak', orientation: 'landscape' } : { kind: 'pageBreak' });
     blocks.push({
       kind: 'heading',

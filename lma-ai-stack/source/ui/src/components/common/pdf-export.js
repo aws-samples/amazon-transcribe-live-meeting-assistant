@@ -89,6 +89,10 @@ export const needsRasterText = (text) => {
   return Array.from(value.normalize('NFC')).some((ch) => !isWritable(ch) && !ZERO_WIDTH.test(ch) && !/\s/.test(ch));
 };
 
+/** Whether a table block has too many columns for a portrait page: seven or more. */
+export const isWideTable = (block) =>
+  Math.max((block?.header || []).length, ...(block?.rows || []).map((row) => row.length), 0) >= 7;
+
 const runsNeedRaster = (runs) => (runs || []).some((run) => needsRasterText(run.text));
 
 const pause = () =>
@@ -405,8 +409,7 @@ export const buildPdf = async (
       ...rows.map((row) => ({ runs: cell(row, c), bold: false })),
     ]);
     // A table too wide for a portrait page gets a landscape one.
-    const portraitMins = byColumn.length * 40;
-    if (pageOrientation === 'portrait' && (columns >= 7 || portraitMins > contentWidth)) newPage('landscape');
+    if (pageOrientation === 'portrait' && isWideTable(block)) newPage('landscape');
     const widths = columnWidths(columns, byColumn, TABLE_SIZE);
     const lineHeight = TABLE_SIZE * LINE_HEIGHT;
     const layoutRow = (row, bold) =>

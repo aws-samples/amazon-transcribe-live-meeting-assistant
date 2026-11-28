@@ -167,6 +167,23 @@ describe('the document', () => {
     expect(second[at(second, 'Diagram') - 1]).toEqual({ kind: 'pageBreak', orientation: 'landscape' });
   });
 
+  it('puts a panel with a table of seven or more columns on a landscape page with its title', async () => {
+    const columns = Array.from({ length: 7 }, (_, i) => `C${i}`);
+    const table = `| ${columns.join(' | ')} |\n|${'---|'.repeat(7)}\n| ${columns.map(() => 'x').join(' | ')} |`;
+    const wideBoard = {
+      WhiteboardId: 'w3',
+      Title: 'RACI',
+      Panels: [
+        { PanelId: 'a', Title: 'Notes', Kind: 'markdown', Content: 'Short.' },
+        { PanelId: 'b', Title: 'Matrix', Kind: 'markdown', Content: `Who does what.\n\n${table}` },
+      ],
+    };
+    const blocks = await whiteboardsPdfBlocks({ ...meeting, whiteboards: [wideBoard] }, { draw: async () => PICTURE });
+    const at = (title) => blocks.findIndex((block) => block.kind === 'heading' && text(block) === title);
+    expect(blocks[at('RACI') - 1]).toEqual({ kind: 'pageBreak' });
+    expect(blocks[at('Matrix') - 1]).toEqual({ kind: 'pageBreak', orientation: 'landscape' });
+  });
+
   it('builds a PDF whose text can be selected, with the contents page numbers', async () => {
     const addImage = vi.spyOn(jsPDF.API, 'addImage').mockImplementation(function addImage() {
       return this;

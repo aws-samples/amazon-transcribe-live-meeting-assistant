@@ -1650,6 +1650,15 @@ def test_the_meeting_archive_test_is_an_opt_in_optional_feature() -> None:
     assert "skipif" in names, names
 
 
+def test_the_meeting_pack_test_is_an_opt_in_optional_feature() -> None:
+    """It needs LMA_TEST_MEETING_PACK=1, a browser and the test user, and writes a meeting of its own."""
+    import test_meeting_pack
+
+    names = [m.name for m in test_meeting_pack.pytestmark]
+    assert "optional_feature" in names, names
+    assert "skipif" in names, names
+
+
 class _FakeConfigurationStore:
     """The parts of lma_config.ConfigurationStore the consent override uses."""
 
