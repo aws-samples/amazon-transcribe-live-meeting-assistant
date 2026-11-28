@@ -167,6 +167,11 @@ def test_the_fixed_part_says_tool_content_is_quoted_data_and_never_instructions(
         assert content in fixed
 
 
+def test_the_fixed_part_covers_the_contents_of_files_shared_in_the_meeting_chat():
+    fixed = " ".join(handler_module.FIXED_INSTRUCTIONS.split())
+    assert "summaries and contents of images and files shared in its chat" in fixed
+
+
 def _skills_list() -> str:
     """The skills' list of the stand-in skill every built request is offered."""
     return handler_module.meeting_skills.catalog_prompt(handler_module.meeting_skills.load_catalog())

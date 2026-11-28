@@ -41,9 +41,15 @@ def assistant_function_name(stack_name: str) -> str:
 
 
 def invoke_assistant(
-    session: Any, stack_name: str, question: str, *, tool_scope: str = "", user_email: str = ""
+    session: Any,
+    stack_name: str,
+    question: str,
+    *,
+    tool_scope: str = "",
+    user_email: str = "",
+    call_id: str = "",
 ) -> Dict[str, Any]:
-    """Ask the assistant ``question`` about no meeting in particular.
+    """Ask the assistant ``question`` about no meeting in particular, or about ``call_id``.
 
     ``tool_scope`` makes it an in-meeting request ('meeting_chat',
     'voice_assistant' or 'wake_phrase'). Returns the answer text, the function
@@ -52,7 +58,7 @@ def invoke_assistant(
     lam = session.client("lambda", config=Config(read_timeout=310, retries={"max_attempts": 0}))
     payload: Dict[str, Any] = {
         "text": question,
-        "call_id": f"integ-assistant-profile-{int(time.time())}",
+        "call_id": call_id or f"integ-assistant-profile-{int(time.time())}",
         "conversation_history": [],
         "userEmail": user_email,
     }

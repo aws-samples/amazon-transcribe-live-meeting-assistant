@@ -182,14 +182,18 @@ class ChatProbe:
     def attachment_key(self) -> str:
         return f"{self.attachment_folder()}{self.attachment_id}/{ATTACHMENT_NAME}"
 
-    def send_attachment(self) -> None:
-        """Store a Markdown file as the VP does, and send the event it sends, field for field."""
+    def send_attachment(self, body: bytes = ATTACHMENT_BODY, summarize: bool = True) -> None:
+        """Store a Markdown file as the VP does, and send the event it sends, field for field.
+
+        ``body`` is the file's content; ``summarize`` False stores it without an
+        AI title and summary, as with AI titles and summaries turned off.
+        """
         if not self.bucket:
             raise RuntimeError("the AI stack names no S3BucketName")
         self.session.client("s3").put_object(
             Bucket=self.bucket,
             Key=self.attachment_key(),
-            Body=ATTACHMENT_BODY,
+            Body=body,
             ContentType="text/markdown",
             ContentDisposition="attachment",
         )
@@ -205,9 +209,9 @@ class ChatProbe:
                 "Kind": "DOCUMENT",
                 "Status": "STORED",
                 "ContentType": "text/markdown",
-                "Size": len(ATTACHMENT_BODY),
+                "Size": len(body),
                 "S3Key": self.attachment_key(),
-                "Summarize": True,
+                "Summarize": summarize,
                 "CreatedAt": datetime.now(timezone.utc).isoformat(),
                 "AccessToken": "",
                 "IdToken": "",

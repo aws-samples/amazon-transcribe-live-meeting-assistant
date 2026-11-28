@@ -53,6 +53,7 @@ ALL_TOOLS = {
     "get_meeting_agenda",
     "get_meeting_frames",
     "get_chat_attachments",
+    "read_chat_attachment",
     "control_vnc_preview",
     "control_vp_browser",
     "load_skill",
@@ -74,6 +75,7 @@ CURRENT_MEETING_TOOLS = {
     "get_meeting_agenda",
     "get_meeting_frames",
     "get_chat_attachments",
+    "read_chat_attachment",
 }
 
 CHAT = {"toolScope": "meeting_chat", "userEmail": "owner@example.com"}
@@ -181,6 +183,7 @@ def built(monkeypatch, configured):  # pylint: disable=unused-argument,redefined
         ("create_meeting_checklist_tool", "get_meeting_checklist"),
         ("create_meeting_frames_tool", "get_meeting_frames"),
         ("create_chat_attachments_tool", "get_chat_attachments"),
+        ("create_read_chat_attachment_tool", "read_chat_attachment"),
         ("create_vnc_preview_control_tool", "control_vnc_preview"),
         ("create_vp_browser_control_tool", "control_vp_browser"),
     ):
@@ -246,7 +249,10 @@ def test_a_current_meeting_request_is_told_what_the_current_meeting_holds(built,
     prompt = built(event)["system_prompt"]
     assert prompt.endswith(handler_module.CURRENT_MEETING_SCOPE_NOTE)
     note = handler_module.CURRENT_MEETING_SCOPE_NOTE
-    for available in ("transcript", "meeting chat", "[chat]", "agenda", "shared screen", "title", "text"):
+    for available in (
+        "transcript", "meeting chat", "[chat]", "agenda", "shared screen", "title", "text",
+        "get_chat_attachments", "read_chat_attachment",
+    ):
         assert available in note
     assert "do not search the web" in note
 

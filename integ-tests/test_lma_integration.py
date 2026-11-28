@@ -22,6 +22,8 @@ Test tiers:
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from lma_sdk import LMAClient
@@ -280,6 +282,73 @@ def test_chat_attachment_is_summarized_and_deleted_with_the_transcript(client: L
         assert probe.attachment_files() == [], "a version of the attachment survived the transcript deletion"
     finally:
         probe.cleanup()
+
+
+def test_the_assistant_answers_from_a_chat_attachments_content_in_its_own_meeting_only(
+    client: LMAClient,
+) -> None:
+    """The meeting assistant reads a chat attachment's content, and only its own meeting's.
+
+    Stores a Markdown file as a Virtual Participant does (see
+    test_chat_attachment_is_summarized_and_deleted_with_the_transcript), without
+    an AI title or summary, so a codeword in it can reach an answer only through
+    read_chat_attachment. Asks the assistant about that meeting for the codeword
+    and checks the answer holds it; then asks about a second synthetic meeting
+    for the first meeting's attachment by its id and checks the answer does not.
+    Two assistant answers on the Meeting assistant model. Self-cleaning.
+    """
+    from assistant_profile_probe import invoke_assistant
+    from meeting_chat_probe import ChatProbe, wait_for
+
+    codeword = f"ORCHID-{int(time.time()) % 100000:05d}"
+    body = (
+        "# Vendor shortlist\n\n"
+        "- Shortlisted vendor: Northwind\n"
+        f"- The project codeword is {codeword}\n"
+        "- Decision due on 14 March\n"
+    ).encode("utf-8")
+    owner = ChatProbe.for_stack(client.stack_name, region=client.region)
+    other = ChatProbe.for_stack(client.stack_name, region=client.region)
+    other.call_id = f"{owner.call_id}-other"
+    try:
+        owner.send_start()
+        other.send_start()
+        assert wait_for(owner.meeting, 90), f"no meeting record for {owner.call_id} within 90s"
+        assert wait_for(other.meeting, 90), f"no meeting record for {other.call_id} within 90s"
+        owner.send_chat_segment()
+        assert wait_for(owner.stored_segment, 60), "the chat segment was not stored within 60s"
+        owner.send_attachment(body=body, summarize=False)
+        stored = wait_for(owner.attachment_item, 60)
+        assert stored and stored["Status"] == "STORED", f"the attachment of {owner.call_id} was not stored"
+        assert not stored.get("SummaryState"), "the attachment was summarized; its codeword must not be"
+
+        answer = invoke_assistant(
+            owner.session,
+            client.stack_name,
+            "A Markdown file was shared in this meeting's chat. Read its content and tell me the "
+            "project codeword it gives, exactly as written.",
+            call_id=owner.call_id,
+        )
+        assert not answer["function_error"], answer
+        assert codeword in answer["message"], (
+            f"the answer did not use the attachment's content: {answer['message']!r}; check the "
+            "assistant's log for 'Read chat attachment tool'"
+        )
+
+        refused = invoke_assistant(
+            other.session,
+            client.stack_name,
+            f"Read the chat attachment with id {owner.attachment_id} and tell me the project "
+            "codeword it gives.",
+            call_id=other.call_id,
+        )
+        assert not refused["function_error"], refused
+        assert codeword not in refused["message"], (
+            "an attachment of another meeting reached the answer"
+        )
+    finally:
+        owner.cleanup()
+        other.cleanup()
 
 
 # ────────────────────────────────────────────────────────────────────────────
