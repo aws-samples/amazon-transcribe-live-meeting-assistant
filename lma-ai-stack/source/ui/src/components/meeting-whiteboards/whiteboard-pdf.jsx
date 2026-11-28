@@ -329,7 +329,16 @@ export const whiteboardsPdfBlocks = async (
   });
   for (let index = 0; index < boards.length; index += 1) {
     const board = boards[index];
-    blocks.push({ kind: 'pageBreak' });
+    const panels = board.Panels || [];
+    const contents = [];
+    for (let p = 0; p < panels.length; p += 1) {
+      // eslint-disable-next-line no-await-in-loop -- diagrams are drawn one at a time, as Mermaid requires
+      contents.push(await panelBlocks(panels[p], { draw }));
+    }
+    // A diagram too wide for a portrait page starts a landscape one, with its
+    // title; a whiteboard that opens with one starts on that landscape page.
+    const wide = contents.map((content) => content[0]?.kind === 'image' && isWideDiagram(content[0].image));
+    blocks.push(wide[0] ? { kind: 'pageBreak', orientation: 'landscape' } : { kind: 'pageBreak' });
     blocks.push({
       kind: 'heading',
       level: 1,
@@ -345,20 +354,13 @@ export const whiteboardsPdfBlocks = async (
     if (meta.length) blocks.push(metaParagraph(meta.join('  ·  ')));
     if (board.Instructions) blocks.push(metaParagraph(`Instructions: ${board.Instructions}`, { italic: true }));
     blocks.push({ kind: 'rule' });
-    const panels = board.Panels || [];
     if (!panels.length) blocks.push(metaParagraph('This whiteboard has no panels.', { italic: true }));
-    for (let p = 0; p < panels.length; p += 1) {
-      const panel = panels[p];
-      // eslint-disable-next-line no-await-in-loop -- diagrams are drawn one at a time, as Mermaid requires
-      const content = await panelBlocks(panel, { draw });
-      // A diagram too wide for a portrait page starts a landscape one, with its title.
-      if (content[0]?.kind === 'image' && isWideDiagram(content[0].image)) {
-        blocks.push({ kind: 'pageBreak', orientation: 'landscape' });
-      }
+    panels.forEach((panel, p) => {
+      if (wide[p] && p > 0) blocks.push({ kind: 'pageBreak', orientation: 'landscape' });
       blocks.push({ kind: 'heading', level: 2, runs: [plain(panel.Title || 'Panel')] });
       blocks.push(metaParagraph([panelOwner(panel), localTime(panel.UpdatedAt)].filter(Boolean).join('  ·  ')));
-      blocks.push(...content);
-    }
+      blocks.push(...contents[p]);
+    });
     onProgress(index + 1, boards.length);
   }
   return blocks;

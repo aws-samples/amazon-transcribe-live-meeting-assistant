@@ -151,13 +151,20 @@ describe('the document', () => {
     expect(onProgress).toHaveBeenLastCalledWith(2, 2);
   });
 
-  it('puts a wide diagram on a landscape page with its title', async () => {
+  it('puts a wide diagram on a landscape page with its title, the whiteboard too when it opens with one', async () => {
     const wide = { ...PICTURE, width: 1600, height: 500 };
     expect(isWideDiagram(wide)).toBe(true);
     expect(isWideDiagram(PICTURE)).toBe(false);
-    const blocks = await whiteboardsPdfBlocks(meeting, { draw: async () => wide });
-    const diagram = blocks.findIndex((block) => block.kind === 'heading' && text(block) === 'Diagram');
-    expect(blocks[diagram - 1]).toEqual({ kind: 'pageBreak', orientation: 'landscape' });
+    const draw = async () => wide;
+    const at = (blocks, title) => blocks.findIndex((block) => block.kind === 'heading' && text(block) === title);
+    const first = await whiteboardsPdfBlocks(meeting, { draw });
+    expect(first[at(first, 'Risks') - 1]).toEqual({ kind: 'pageBreak', orientation: 'landscape' });
+    expect(first[at(first, 'Diagram') - 1].kind).not.toBe('pageBreak');
+    const [board] = BOARDS;
+    const later = { ...meeting, whiteboards: [{ ...board, Panels: [...board.Panels].reverse() }] };
+    const second = await whiteboardsPdfBlocks(later, { draw });
+    expect(second[at(second, 'Risks') - 1]).toEqual({ kind: 'pageBreak' });
+    expect(second[at(second, 'Diagram') - 1]).toEqual({ kind: 'pageBreak', orientation: 'landscape' });
   });
 
   it('builds a PDF whose text can be selected, with the contents page numbers', async () => {
