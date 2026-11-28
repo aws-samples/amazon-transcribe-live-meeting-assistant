@@ -149,8 +149,8 @@ None of the requests made in the meeting can tell who asked: a chat sender is kn
 **The meeting's whiteboards** are not offered to any Participant use request
 under any of the three choices: they are shown in LMA only, to the people who
 can open the meeting, and an answer in the meeting reaches everyone there. A
-request that asks for one is told that whiteboards are kept on the meeting's
-page in LMA.
+request that asks for one is told that the meeting's whiteboards are kept in
+LMA for the people running the meeting and are not available there.
 
 **The meeting context and checklist** are not offered to any request made in
 the meeting under any of the three choices: the context can hold the owner's

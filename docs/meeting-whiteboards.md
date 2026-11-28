@@ -142,7 +142,8 @@ to the open questions". It uses four tools, for the current meeting only:
   page's chat asks it). A request made in the meeting (the meeting chat, the voice
   assistant or the wake phrase) and a Participant's question are never offered
   them, whatever **Participant use** says; such a request is told that
-  whiteboards are kept on the meeting's page in LMA.
+  the meeting's whiteboards are kept in LMA for the people running the meeting
+  and are not available there.
 - **Whose change.** Each change is the asking user's (`Source: user`,
   `UpdatedBy` their username), made through `createMeetingWhiteboard` and
   `updateMeetingWhiteboard` with the version it read, so it is held to every

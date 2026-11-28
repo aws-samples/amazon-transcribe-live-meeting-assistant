@@ -130,7 +130,8 @@ INSTRUCTIONS = (
 #: offered the whiteboard tools, so that it says where whiteboards are kept.
 NOT_OFFERED_NOTE = (
     "\n\nThe meeting's whiteboards are not available for this request. If it asks about or "
-    "for a whiteboard, say that whiteboards are kept on the meeting's page in LMA."
+    "for a whiteboard, say that the meeting's whiteboards are kept in LMA for the people "
+    "running the meeting and are not available here; do not offer to change one."
 )
 
 
