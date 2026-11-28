@@ -97,7 +97,16 @@ function withContext(question, context) {
     // The label and the text come from the meeting (a card's title, a panel's),
     // so both go inside the quoting, which they cannot close: the assistant's
     // fixed instructions treat a <quoted> block of the request as quoted data.
-    const unquoted = (value) => value.replace(/<\/?\s*quoted\s*>/gi, '');
+    // Repeated until nothing changes, so a tag split by another one does not survive.
+    const unquoted = (value) => {
+        let text = value;
+        let previous;
+        do {
+            previous = text;
+            text = text.replace(/<\/?\s*quoted\s*>/gi, '');
+        } while (text !== previous);
+        return text;
+    };
     return `${question}\n\nMy question is about this, from the meeting page:\n`
         + `<quoted>\n${unquoted(context.label)}\n\n${unquoted(context.text)}\n</quoted>`;
 }

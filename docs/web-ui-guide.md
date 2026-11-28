@@ -555,8 +555,8 @@ panel. Opening it puts the focus in the box where you type a question.
   answer that did, **Open "<whiteboard>"** shows it on the **Whiteboards** tab.
   Under every answer, **Pin to whiteboard** adds the answer to a whiteboard you
   choose (see [Adding to a whiteboard](meeting-whiteboards.md#adding-to-a-whiteboard)).
-  Neither is offered on a Participant's page, nor to someone who cannot change
-  the meeting.
+  Neither is offered on a Participant's page, and **Pin to whiteboard** only to
+  someone who can change the meeting.
 - **Asking about something on the page.** **Ask the assistant** on a guidance
   card in the Notifications drawer, and the **Ask the assistant about** button
   on a whiteboard panel, open the panel with that card or panel shown above the
