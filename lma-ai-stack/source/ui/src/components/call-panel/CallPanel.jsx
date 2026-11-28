@@ -2200,7 +2200,7 @@ export const CallPanel = ({
   const onAskAboutPanel = useCallback(
     (board, panel) =>
       requestMeetingAction(ownerCallId, ASK_ASSISTANT, {
-        label: `whiteboard panel "${panel.Title}" (whiteboard "${board.Title}")`,
+        label: `Whiteboard panel "${panel.Title}" (${board.Title})`,
         text: (panel.Content || '').trim() || '(This panel is empty.)',
         question:
           panel.Kind === 'mermaid'

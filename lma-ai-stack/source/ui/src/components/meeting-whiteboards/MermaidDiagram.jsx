@@ -64,14 +64,27 @@ const Source = ({ text, note }) => (
 );
 
 /**
- * The source as it is drawn: a Gantt chart gets the width it has on the page
- * (LMA's own directive, added after the source was checked, which may hold none).
+ * The source as it is drawn, with LMA's own directive added after the source was
+ * checked (which may hold none): Mermaid's dark theme on a dark page, and a Gantt
+ * chart drawn at the width it has on the page rather than scaled down from the
+ * page's width.
  */
-export const sourceToDraw = (source, width) => {
-  if (!/^\s*(%%[^\n]*\n\s*)*gantt\b/.test(source)) return source;
-  const useWidth = Math.max(480, Math.round(width || 0) || 960);
-  return `%%{init: {"gantt": {"useWidth": ${useWidth}, "useMaxWidth": false, "barHeight": 24, "fontSize": 13, "sectionFontSize": 13}}}%%\n${source}`;
+export const sourceToDraw = (source, width, dark = false) => {
+  const init = {};
+  if (dark) init.theme = 'dark';
+  if (/^\s*(%%[^\n]*\n\s*)*gantt\b/.test(source)) {
+    init.gantt = {
+      useWidth: Math.max(480, Math.round(width || 0) || 960),
+      useMaxWidth: false,
+      barHeight: 24,
+      fontSize: 13,
+      sectionFontSize: 13,
+    };
+  }
+  return Object.keys(init).length ? `%%{init: ${JSON.stringify(init)}}%%\n${source}` : source;
 };
+
+const isDarkPage = () => typeof document !== 'undefined' && document.body.classList.contains('awsui-dark-mode');
 
 /** A diagram panel's content, drawn; its source, when it cannot be drawn. */
 const MermaidDiagram = ({ text }) => {
@@ -89,7 +102,7 @@ const MermaidDiagram = ({ text }) => {
     if (!source || problem) return undefined;
     const width = boxRef.current?.parentElement?.clientWidth;
     loadMermaid()
-      .then((renderer) => renderer.render(id, sourceToDraw(source, width)))
+      .then((renderer) => renderer.render(id, sourceToDraw(source, width, isDarkPage())))
       .then((sanitized) => {
         if (!current) return;
         if (sanitized) setSvg(sanitized);
